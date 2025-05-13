@@ -10,8 +10,20 @@ An Example of getting the data from the [Dukascopy Historical Data Feed](https:/
 ![image](https://github.com/user-attachments/assets/6b96d1e6-a496-4933-9305-a38ab1589f9e)
 
 
-The folders should be structured as the following: 
+The files should be saved in the following manner: 
+
 ```
-FILENAME = {FromDate(DD.MM.YYYYTHH:mm)-ToIncludingDate(DD.MM.YYYYTHH:mm)} // where the first date is the gmt date of the first candle, and the second date is the gmt date and time of the last candlestick.
-FOLDER = {InstrumentType}/{Instrument}/{Granularity}/{BID/ASK}/FILENAME.csv
+forex/{Instrument}/{Granularity}/{BID/ASK}/{Start}-{End}.csv
+```
+
+Where:
+- `Instrument` is written like `EURUSD`, `AUDUSD`, `GBPUSD`, etc
+- `Granularity` is written like `1M`, `15M`, `1H`, etc.
+- Both `Start` and `End` are formatted like: `DD.MM.YYYYTHH.mm` 
+- `Start` is the time of the first candle in the dataset, and `End` is the time of the last candle.
+
+Example:
+
+```
+forex/EURUSD/15_M/BID/10.05.2022T00.00-09.05.2025T20.45.csv
 ```
