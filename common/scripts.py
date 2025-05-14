@@ -4,6 +4,22 @@ This file contains some simpel scripts that can be useful anywhere during the pr
 
 from datetime import datetime, timedelta
 import pandas as pd
+from stockstats import StockDataFrame
+from common.constants import *
+
+def combine_df(bid_df: pd.DataFrame, ask_df: pd.DataFrame):
+    """
+    Combines bid and ask DataFrames into a single DataFrame, renaming columns
+    and calculating the average volume.
+    """
+
+    bid_df.rename(columns={col : col+"_bid" for col in bid_df.columns if col != Col.TIME}, inplace=True)
+    ask_df.rename(columns={col : col+"_ask" for col in bid_df.columns if col != Col.TIME}, inplace=True)
+
+    df = pd.merge(bid_df, ask_df, on=Col.TIME, how="inner")
+    df[Col.VOL] = (df[Col.VOL+"_bid"] + df[Col.VOL+"_ask"] ) / 2
+
+    return df
 
 def round_datetime(date_time: datetime, interval: int) -> datetime:
     """

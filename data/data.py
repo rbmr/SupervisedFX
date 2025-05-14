@@ -2,8 +2,7 @@ import sys
 from pathlib import Path
 from enum import Enum
 import pandas as pd 
-from ta import add_all_ta_features
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
@@ -11,17 +10,7 @@ from typing import NamedTuple
 import os
 import numpy as np
 from common.scripts import *
-
-DATA_DIR = Path(__file__).resolve().parent
-FOREX_DIR = DATA_DIR / "forex"
-TIME_COL = "date_gmt"
-NUMERIC_COLUMNS = ["open", "high", "low", "close", "volume"]
-COLUMNS = [TIME_COL,] + NUMERIC_COLUMNS
-DT_TIMEZONE = timezone.utc # same as gmt
-PD_TIMEZONE = "GMT"
-
-DATE_FORMAT = "%d.%m.%YT%H.%M"
-CSV_TIME_FORMAT = "%d.%m.%Y %H:%M:%S.%f"
+from common.constants import *
 
 # Enum values are strings representing their component of the path
 
@@ -125,34 +114,37 @@ class ForexData:
         
         # Validate columns
         actual_columns = set(df.columns)
-        expected_columns = set(COLUMNS)
+        expected_columns = set(DATA_COLUMNS)
         if actual_columns != expected_columns:
+            actual_columns = ", ".join(actual_columns)
+            expected_columns = ", ".join(expected_columns)
             raise ValueError(f"Dataframe has columns {actual_columns}, expected: {expected_columns}")
 
         # Ensure correct order
-        df = df[COLUMNS]
+        df = df[DATA_COLUMNS]
 
         # Check if numeric columns are numeric
-        for col in NUMERIC_COLUMNS:
+        for col in NUMERIC_DATA_COLUMNS:
             if not is_numeric_dtype(df[col]):
                 raise ValueError(f"Columns {col} must be numeric.")
 
         # Check if time column is formatted correctly, and convert it to datetime
-        df[TIME_COL] = pd.to_datetime(df[TIME_COL], format=CSV_TIME_FORMAT)
-        df[TIME_COL] = df[TIME_COL].dt.tz_localize(PD_TIMEZONE)
+        df[Col.TIME] = pd.to_datetime(df[Col.TIME], format=CSV_TIME_FORMAT)
+        df[Col.TIME] = df[Col.TIME].dt.tz_localize(PD_TIMEZONE)
         
         # sort rows based on increasing time
-        df.sort_values(by=TIME_COL, inplace=True)
+        df.sort_values(by=Col.TIME, inplace=True)
 
         # Check if start and end is correct
-        assert df[TIME_COL].iloc[0] == ref.start
-        assert df[TIME_COL].iloc[-1] == ref.end
+        assert df[Col.TIME].iloc[0] == ref.start
+        assert df[Col.TIME].iloc[-1] == ref.end
 
         # Check if granularity is correct
         time_delta = pd.Timedelta(seconds = ref.gran.get_interval())
-        deltas = df[TIME_COL].diff().dropna()
-        mode_delta = deltas.mode().iloc[0]
-        assert (mode_delta == time_delta)
+        deltas = df[Col.TIME].diff().dropna()
+        expected_n_deltas = (deltas == time_delta).sum() 
+        n_deltas = len(deltas)
+        assert (expected_n_deltas / n_deltas) > 0.8
 
         # set attributes
         self.df = df
@@ -228,12 +220,14 @@ class ForexData:
             end = self.ref.end
         pd_start = pd.to_datetime(start) 
         pd_end = pd.to_datetime(end)
-        self.df = self.df[self.df[TIME_COL] >= pd_start]
-        self.df = self.df[self.df[TIME_COL] <= pd_end]
+        self.df = self.df[self.df[Col.TIME] >= pd_start]
+        self.df = self.df[self.df[Col.TIME] <= pd_end]
         self.ref = ForexRef(self.ref.c1, self.ref.c2, self.ref.gran, self.ref.off, start, end)
         return self
     
     def save(self):
+        if self.ref is None:
+            raise ValueError("Cannot save data without a ForexRef")
         path = self.ref.get_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         self.df.to_csv(path, index=False)
@@ -242,9 +236,9 @@ class ForexData:
 if __name__ == "__main__":
 
     # Example on how to retrieve data.
-    fd = ForexData("C:\\Users\\rober\\TUD-CSE-RP-RLinFinance\\data\\forex\\EURUSD\\1M\\BID\\01.05.2022T00.00-01.05.2025T23.59.csv")
-    fd.set_gran(Granularity.H1)
-    df = fd.df
+    forex_data = ForexData("C:\\Users\\rober\\TUD-CSE-RP-RLinFinance\\data\\forex\\EURUSD\\1M\\BID\\01.05.2022T00.00-01.05.2025T23.59.csv")
+    forex_data.set_gran(Granularity.H1)
+    df = forex_data.df
     print(df.head())
 
 
