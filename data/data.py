@@ -201,7 +201,7 @@ class ForexData:
             for batch in range(batches)
         ])
 
-        self.arr = arr
+        self.df = pd.DataFrame(arr, columns=DATA_COLUMNS)
         self.ref = ForexRef(
             c1 = self.ref.c1,
             c2 = self.ref.c2, 
@@ -210,7 +210,6 @@ class ForexData:
             start = self.ref.start,
             end = self.ref.end
         )
-
         return self
 
     def set_period(self, start: datetime = None, end: datetime = None):
