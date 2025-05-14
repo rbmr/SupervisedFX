@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 from enum import Enum
 import pandas as pd 
@@ -9,6 +10,7 @@ from pandas.api.types import is_numeric_dtype
 from typing import NamedTuple
 import os
 import numpy as np
+from common.scripts import *
 
 DATA_DIR = Path(__file__).resolve().parent
 FOREX_DIR = DATA_DIR / "forex"
@@ -101,7 +103,7 @@ class ForexRef(NamedTuple):
 
 class ForexData:
     """
-    Class used for loading, validating, processing, and saving forex data files.
+    Class used for loading, validating, converting, and saving forex data files.
     """
 
     def __init__(self, ref: ForexRef | Path | str, df: pd.DataFrame = None):
@@ -232,58 +234,13 @@ class ForexData:
         return self
     
     def save(self):
-        if self.ref is None:
-            raise ValueError("Forex data is processed, can not be saved.")
         path = self.ref.get_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         self.df.to_csv(path, index=False)
         return self
 
-    def preprocess(self):
-
-        self.df = add_all_ta_features(
-            self.df,
-            open="Open", high="High", low="Low", close="Close", volume="Volume",
-            fillna=True
-        )
-    
-        # Fill missing values if any remain
-        self.df = self.df.fillna(method='ffill').fillna(method='bfill')
-
-        # Mark this object as processed, and therefore not allowed to be saved
-        # You can still save it yourself by extracting the dataframe.
-        self.ref = None
-
-
-def round_datetime(date_time: datetime, interval: int) -> datetime:
-    """
-    Rounds a datetime object to the nearest multiple of `interval` in seconds.
-    """
-    start_of_day = date_time.replace(hour=0, minute=0, second=0, microsecond=0)
-    seconds_since_start = (date_time - start_of_day).total_seconds()
-    rounded_seconds = round(seconds_since_start / interval) * interval
-    return start_of_day + timedelta(seconds=rounded_seconds)
-
-def exact_divide(a: int, b: int) -> int:
-    """
-    Performs an exact division of `a` by `b`, returning an integer.
-    Raises a `ValueError`, if `a` is not divisible by `b`.
-    """
-    if a % b == 0:
-        return a // b
-    raise ValueError(f"{a} is not divisible by {b}")
-
-def split_df(df: pd.DataFrame, ratio: float):
-    """
-    Splits a dataframe into two parts based on a given ratio.
-    """
-    split_index = int(len(df) * ratio)
-    df1 = df.iloc[:split_index]
-    df2 = df.iloc[split_index:]
-    return df1, df2
-
 if __name__ == "__main__":
-    
+
     fd = ForexData("C:\\Users\\rober\\TUD-CSE-RP-RLinFinance\\data\\forex\\EURUSD\\1M\\BID\\01.05.2022T00.00-01.05.2025T23.59.csv")
     fd.set_gran(Granularity.H1)
 
