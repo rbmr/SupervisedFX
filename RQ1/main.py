@@ -32,23 +32,17 @@ class ForexEnv(gym.Env):
     Actions: 0: CASH, 1: LONG, 2: SHORT
     Uses stockstats for technical indicators.
     """
-    metadata = {'render_modes': ['human'], 'render_fps': 1}
 
     def __init__(self, df,
                  initial_capital=INITIAL_CAPITAL,
                  transaction_cost_pct=TRANSACTION_COST_PCT,
-                 lookback_window_size=LOOKBACK_WINDOW_SIZE,
-                 seed=None):
+                 lookback_window_size=LOOKBACK_WINDOW_SIZE):
         super(ForexEnv, self).__init__()
 
         self.df = df.copy()
         self.initial_capital = initial_capital
         self.transaction_cost_pct = transaction_cost_pct
         self.lookback_window_size = lookback_window_size
-        self.seed = seed
-        if self.seed is not None:
-            np.random.seed(self.seed)
-
 
         # Define action space: 0 (CASH), 1 (LONG), 2 (SHORT)
         self.action_space = spaces.Discrete(3)
@@ -327,9 +321,9 @@ class ForexEnv(gym.Env):
         pass
 
 # set seeds
-seed = 42
-random.seed(seed)
-np.random.seed(seed)
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Get ask and bid data, and combine
@@ -353,7 +347,7 @@ train_env = DummyVecEnv([lambda: ForexEnv(train_df,
                                             initial_capital=INITIAL_CAPITAL,
                                             transaction_cost_pct=TRANSACTION_COST_PCT,
                                             lookback_window_size=LOOKBACK_WINDOW_SIZE,
-                                            seed=42)])
+                                            seed=SEED)])
 print("Training environment created.")
 
 policy_kwargs = dict(net_arch=[128, 128])
@@ -375,7 +369,7 @@ model = DQN(
     exploration_final_eps=0.05,
     policy_kwargs=policy_kwargs,
     verbose=1,
-    seed=42,
+    seed=SEED,
     device=DEVICE
 )
 
@@ -384,15 +378,17 @@ TOTAL_TIMESTEPS = 50000 # Reduce for quicker testing if needed
 model.learn(total_timesteps=TOTAL_TIMESTEPS, log_interval=100) # Increased log_interval
 print("Training finished.")
 
-model.save("dqn_forex_eurusd_stockstats_model")
-print("Model saved as dqn_forex_eurusd_stockstats_model.zip")
+print("Saving the DQN model...")
+models_dir = Path(__file__).resolve().parent / "models"
+model_path = models_dir / "dqn_forex_eurusd_stockstats_model"
+model.save(model_path)
+print("Model saved to {model_path}.")
 
 print("\nEvaluating the agent on the trade_df...")
 eval_env = DummyVecEnv([lambda: ForexEnv(trade_df,
-                                            initial_capital=INITIAL_CAPITAL,
-                                            transaction_cost_pct=TRANSACTION_COST_PCT,
-                                            lookback_window_size=LOOKBACK_WINDOW_SIZE,
-                                            seed=123)])
+                                         initial_capital=INITIAL_CAPITAL,
+                                         transaction_cost_pct=TRANSACTION_COST_PCT,
+                                         lookback_window_size=LOOKBACK_WINDOW_SIZE)])
 
 obs = eval_env.reset()
 terminated = False
@@ -401,7 +397,7 @@ total_rewards_eval = 0
 num_eval_steps = 0
 
 episode_action_history_from_info = None # To store history if episode completes
-
+ 
 for i in range(len(trade_df) - LOOKBACK_WINDOW_SIZE - 2):
     action, _states = model.predict(obs, deterministic=True)
     obs, rewards, dones_arr, infos_arr = eval_env.step(action)
