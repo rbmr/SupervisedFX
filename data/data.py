@@ -135,12 +135,12 @@ class ForexData:
             if not is_numeric_dtype(df[col]):
                 raise ValueError(f"Columns {col} must be numeric.")
 
-        # Check if time column is set correctly and convert to datetime
+        # Check if time column is formatted correctly, and convert it to datetime
         df[TIME_COL] = pd.to_datetime(df[TIME_COL], format=CSV_TIME_FORMAT)
         df[TIME_COL] = df[TIME_COL].dt.tz_localize(PD_TIMEZONE)
 
         # Check if start and end is correct
-        assert df[TIME_COL].iloc[0] == ref.start 
+        assert df[TIME_COL].iloc[0] == ref.start
         assert df[TIME_COL].iloc[-1] == ref.end
 
         # Check if granularity is correct
