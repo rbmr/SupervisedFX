@@ -11,25 +11,20 @@ from stable_baselines3 import A2C, DDPG, DQN, PPO
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stockstats import StockDataFrame
-from common.data import Granularity
 
 from common.data import ForexData
+from common.constants import *
+from common.scripts import *
 
 if __name__ != '__main__':
     raise ImportError("Do not import this module.")
 
-seed = 42
-random.seed(seed)
-np.random.seed(seed)
-logging.basicConfig(level=logging.DEBUG)
-
 # --- Configuration Parameters ---
 INITIAL_CAPITAL = 10000.0
 TRANSACTION_COST_PCT = 0.0 # Example: 0.1% commission per trade
-LOOKBACK_WINDOW_SIZE = 30    # Number of past time steps to include in the state
+LOOKBACK_WINDOW_SIZE = 30 # Number of past time steps to include in the state
+RSI_PERIOD = 14 # Technical Indicators Periods (stockstats uses these by appending to indicator name e.g. rsi_14)
 
-# Technical Indicators Periods (stockstats uses these by appending to indicator name e.g. rsi_14)
-RSI_PERIOD = 14
 
 class ForexEnv(gym.Env):
     """
@@ -331,29 +326,27 @@ class ForexEnv(gym.Env):
     def close(self):
         pass
 
+# set seeds
+seed = 42
+random.seed(seed)
+np.random.seed(seed)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Get ask and bid data, and combine
 ask_path = "C:\\Users\\rober\\TUD-CSE-RP-RLinFinance\\data\\forex\\EURUSD\\15M\\ASK\\10.05.2022T00.00-10.05.2025T23.45.csv"
 bid_path = "C:\\Users\\rober\\TUD-CSE-RP-RLinFinance\\data\\forex\\EURUSD\\15M\\BID\\10.05.2022T00.00-10.05.2025T23.45.csv"
 ask_df = ForexData(ask_path).df
 bid_df = ForexData(ask_path).df
 forex_data = combine_df(bid_df, ask_df)
 
-forex_data.dropna(inplace=True)
+# remove NaNs, and Infinities.
 forex_data = forex_data[~forex_data.isin([np.nan, np.inf, -np.inf]).any(axis=1)]
 
-train_split_idx = int(len(forex_data) * 0.7)
-train_df = forex_data.iloc[:train_split_idx]
-trade_df = forex_data.iloc[train_split_idx:]
+# Split up data
+train_df, trade_df = split_df(forex_data, 0.7)
 
 if len(train_df) <= LOOKBACK_WINDOW_SIZE + 50 or len(trade_df) <= LOOKBACK_WINDOW_SIZE + 50 :
-    print(f"Warning: Not enough data for reliable training/testing after split and considering lookback.")
-    if len(forex_data) > LOOKBACK_WINDOW_SIZE + 100:
-        print("Proceeding by using all data for training.")
-        train_df = forex_data.copy() # Use all for train
-        trade_df = forex_data.copy() # And also for test (not ideal, but for demo with small data)
-    else:
-        print("Exiting due to insufficient data.")
-        exit()
-
+    logging.error(f"Not enough data for reliable training/testing.")
 
 print("Creating training environment...")
 train_env = DummyVecEnv([lambda: ForexEnv(train_df,
@@ -383,6 +376,7 @@ model = DQN(
     policy_kwargs=policy_kwargs,
     verbose=1,
     seed=42,
+    device=DEVICE
 )
 
 print("Training the DQN agent...")

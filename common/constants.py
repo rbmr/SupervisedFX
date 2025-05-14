@@ -1,6 +1,7 @@
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import pytz
+import torch 
 
 COMMON_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = COMMON_DIR.parent
@@ -31,3 +32,5 @@ PD_TIMEZONE = pytz.timezone("GMT") # pandas timezone
 
 DATE_FORMAT = "%d.%m.%YT%H.%M"
 CSV_TIME_FORMAT = "%d.%m.%Y %H:%M:%S.%f"
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"

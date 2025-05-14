@@ -7,17 +7,36 @@ import pandas as pd
 from stockstats import StockDataFrame
 from common.constants import *
 
-def combine_df(bid_df: pd.DataFrame, ask_df: pd.DataFrame):
+def combine_df(bid_df: pd.DataFrame, ask_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Combines bid and ask DataFrames into a single DataFrame, renaming columns
-    and calculating the average volume.
+    Combines bid and ask DataFrames into a single `DataFrame`, renaming columns
+    by adding a `_bid`, or `_ask` postfix, and calculating the average volume.
     """
+    bid_columns = set(bid_df.columns)
+    ask_columns = set(ask_df.columns)
+    expected_columns = set(DATA_COLUMNS)
+    if bid_columns != ask_columns != expected_columns:
+        raise ValueError(f"{bid_columns} and {ask_columns} must be equal to {expected_columns}")
 
-    bid_df.rename(columns={col : col+"_bid" for col in bid_df.columns if col != Col.TIME}, inplace=True)
-    ask_df.rename(columns={col : col+"_ask" for col in bid_df.columns if col != Col.TIME}, inplace=True)
+    bid_rename = {
+        Col.VOL : "volume_bid",
+        Col.HIGH : "high_bid",
+        Col.LOW : "low_bid",
+        Col.OPEN : "open_bid",
+        Col.CLOSE : "close_bid"
+    }
+    ask_rename = {
+        Col.VOL : "volume_ask",
+        Col.HIGH : "high_ask",
+        Col.LOW : "low_ask",
+        Col.OPEN : "open_ask",
+        Col.CLOSE : "close_ask"
+    }
+    bid_df.rename(columns=bid_rename, inplace=True)
+    ask_df.rename(columns=ask_rename, inplace=True)
 
     df = pd.merge(bid_df, ask_df, on=Col.TIME, how="inner")
-    df[Col.VOL] = (df[Col.VOL+"_bid"] + df[Col.VOL+"_ask"] ) / 2
+    df[Col.VOL] = (df["volume_bid"] + df["volume_ask"] ) / 2
 
     return df
 
