@@ -267,12 +267,20 @@ def round_datetime(date_time: datetime, interval: int) -> datetime:
 def exact_divide(a: int, b: int) -> int:
     """
     Performs an exact division of `a` by `b`, returning an integer.
-    Raises a ValueError, if `a` is not divisible by `b`.
+    Raises a `ValueError`, if `a` is not divisible by `b`.
     """
     if a % b == 0:
         return a // b
     raise ValueError(f"{a} is not divisible by {b}")
 
+def split_df(df: pd.DataFrame, ratio: float):
+    """
+    Splits a dataframe into two parts based on a given ratio.
+    """
+    split_index = int(len(df) * ratio)
+    df1 = df.iloc[:split_index]
+    df2 = df.iloc[split_index:]
+    return df1, df2
 
 if __name__ == "__main__":
     
