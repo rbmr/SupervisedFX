@@ -6,6 +6,8 @@ PROJECT_DIR = COMMON_DIR.parent
 DATA_DIR = PROJECT_DIR / "data"
 FOREX_DIR = DATA_DIR / "forex"
 
+SEED = 42
+
 class Col:
     """
     Class with static attributes to group column names in one place,
