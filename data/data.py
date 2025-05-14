@@ -8,6 +8,7 @@ import pandas as pd
 from pandas.api.types import is_numeric_dtype
 from typing import NamedTuple
 import os
+import numpy as np
 
 DATA_DIR = Path(__file__).resolve().parent
 FOREX_DIR = DATA_DIR / "forex"
@@ -98,16 +99,6 @@ class ForexRef(NamedTuple):
     def load(self):
         return ForexData(self)
 
-    def invert_pair(self):
-        return ForexRef(
-            c1 = self.c2,
-            c2 = self.c1, 
-            gran = self.gran,
-            off = self.off,
-            start = self.start,
-            end = self.end
-        )
-
 class ForexData:
     """
     Class used for loading, validating, processing, and saving forex data files.
@@ -171,28 +162,59 @@ class ForexData:
         self.df['High'] = 1 / self.df['Low']
         self.df['Low'] = 1 / self.df['High']
         self.df['Close'] = 1 / self.df['Close']
-        self.ref = self.ref.invert_pair()
+        self.ref = ForexRef(
+            c1 = self.c2,
+            c2 = self.c1, 
+            gran = self.gran,
+            off = self.off,
+            start = self.start,
+            end = self.end
+        )
         return self
-        
+
     def set_gran(self, target_gran: Granularity):
         """
         Sets the granularity of the ForexData to the target_gran.
         Leaves out remaining rows.
         """
-        raise NotImplementedError("Setting granularity is not implemented.")
 
-        # source_gran = self.ref.gran
-        # if target_gran.get_interval() < source_gran.get_interval():
-        #     raise ValueError("Granularity increasing is not supported.")
-        # n_rows = exact_divide(target_gran.get_interval(), source_gran.get_interval())
+        source_gran = self.ref.gran
+        if target_gran.get_interval() < source_gran.get_interval():
+            raise ValueError("Granularity increasing is not supported.")
+        n_rows = exact_divide(target_gran.get_interval(), source_gran.get_interval())
         
-        # arr = self.df.to_numpy()
-        # rows, cols = arr.shape
+        arr = self.df.to_numpy()
+        rows, cols = arr.shape
 
-        # print(arr[:5])
-        # print(rows, cols)
+        batches = rows // n_rows
+        arr = arr[:(batches*n_rows), :]
+        arr = arr.reshape( (batches, n_rows, cols) )
+        
+        funcs = [
+            lambda x: x[0], # gmt_time
+            lambda x: x[0], # open
+            np.max, # high
+            np.min, # low
+            lambda x: x[-1], # close
+            np.sum # volume
+        ]
 
-        # return self
+        arr = np.array([
+            [funcs[col](arr[batch, :, col]) for col in range(cols)]
+            for batch in range(batches)
+        ])
+
+        self.arr = arr
+        self.ref = ForexRef(
+            c1 = self.c1,
+            c2 = self.c2, 
+            gran = target_gran,
+            off = self.off,
+            start = self.start,
+            end = self.end
+        )
+
+        return self
 
     def set_period(self, start: datetime = None, end: datetime = None):
         if start is None:
@@ -251,8 +273,8 @@ def exact_divide(a: int, b: int) -> int:
 
 if __name__ == "__main__":
     
-    fd = ForexData("C:\\Users\\rober\\TUD-CSE-RP-RLinFinance\\data\\forex\\EURUSD\\15M\\BID\\10.05.2022T00.00-09.05.2025T20.45.csv")
-    fd.set_period(end = datetime(2023, 5, 10, tzinfo=DT_TIMEZONE)).save()
+    fd = ForexData("C:\\Users\\rober\\TUD-CSE-RP-RLinFinance\\data\\forex\\EURUSD\\1M\\BID\\01.05.2022T00.00-01.05.2025T23.59.csv")
+    fd.set_gran(Granularity.H1)
 
 
 
