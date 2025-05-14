@@ -11,8 +11,8 @@ import os
 
 DATA_DIR = Path(__file__).resolve().parent
 FOREX_DIR = DATA_DIR / "forex"
-TIME_COL = "Gmt time"
-NUMERIC_COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
+TIME_COL = "date_gmt"
+NUMERIC_COLUMNS = ["open", "high", "low", "close", "volume"]
 COLUMNS = [TIME_COL,] + NUMERIC_COLUMNS
 DT_TIMEZONE = timezone.utc # same as gmt
 PD_TIMEZONE = "GMT"
