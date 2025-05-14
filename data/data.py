@@ -138,6 +138,9 @@ class ForexData:
         # Check if time column is formatted correctly, and convert it to datetime
         df[TIME_COL] = pd.to_datetime(df[TIME_COL], format=CSV_TIME_FORMAT)
         df[TIME_COL] = df[TIME_COL].dt.tz_localize(PD_TIMEZONE)
+        
+        # sort rows based on increasing time
+        df.sort_values(by=TIME_COL, inplace=True)
 
         # Check if start and end is correct
         assert df[TIME_COL].iloc[0] == ref.start
@@ -163,12 +166,12 @@ class ForexData:
         self.df['Low'] = 1 / self.df['High']
         self.df['Close'] = 1 / self.df['Close']
         self.ref = ForexRef(
-            c1 = self.c2,
-            c2 = self.c1, 
-            gran = self.gran,
-            off = self.off,
-            start = self.start,
-            end = self.end
+            c1 = self.ref.c2,
+            c2 = self.ref.c1, 
+            gran = self.ref.gran,
+            off = self.ref.off,
+            start = self.ref.start,
+            end = self.ref.end
         )
         return self
 
@@ -206,12 +209,12 @@ class ForexData:
 
         self.arr = arr
         self.ref = ForexRef(
-            c1 = self.c1,
-            c2 = self.c2, 
+            c1 = self.ref.c1,
+            c2 = self.ref.c2, 
             gran = target_gran,
-            off = self.off,
-            start = self.start,
-            end = self.end
+            off = self.ref.off,
+            start = self.ref.start,
+            end = self.ref.end
         )
 
         return self
