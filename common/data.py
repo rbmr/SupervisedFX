@@ -128,9 +128,19 @@ class ForexData:
             if not is_numeric_dtype(df[col]):
                 raise ValueError(f"Columns {col} must be numeric.")
 
-        # Check if time column is formatted correctly, and convert it to datetime
-        df[Col.TIME] = pd.to_datetime(df[Col.TIME], format=CSV_TIME_FORMAT)
-        df[Col.TIME] = df[Col.TIME].dt.tz_localize(PD_TIMEZONE)
+        # Check if time column is formatted correctly, and convert it to datetime if necessary.
+        def convert_time(entry):
+            if isinstance(entry, str):
+                return pd.to_datetime(entry, format=CSV_TIME_FORMAT).tz_localize(PD_TIMEZONE)
+            if isinstance(entry, pd.Timestamp):
+                if entry.tz is None:
+                    return entry.tz_localize(PD_TIMEZONE)
+                if entry.tz != PD_TIMEZONE:
+                    raise ValueError(f"Entry must have timezone {PD_TIMEZONE}, was {entry.tz}")
+                return entry
+            raise TypeError(f"Entry is not a time, was {type(entry)}")
+        
+        df[Col.TIME] = df[Col.TIME].apply(convert_time)
         
         # sort rows based on increasing time
         df.sort_values(by=Col.TIME, inplace=True)
@@ -231,7 +241,11 @@ class ForexData:
             raise ValueError("Cannot save data without a ForexRef")
         path = self.ref.get_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.df.to_csv(path, index=False)
+        self.df.to_csv(
+            path, 
+            index=False,
+            date_format=CSV_TIME_FORMAT
+        )
         return self
 
 if __name__ == "__main__":

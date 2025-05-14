@@ -3,6 +3,7 @@ from common.data import *
 import pandas as pd
 from common.constants import *
 import logging 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_csv_files(p: Path):
     if not p.is_dir():
@@ -11,30 +12,46 @@ def get_csv_files(p: Path):
         yield f
 
 def parse(p: Path) -> ForexData:
+    
+    # load csv
     if p.suffix != ".csv":
         raise ValueError("p must be a csv file")
     df = pd.read_csv(p)
-    start = df["Gmt time"].iloc[0]
-    end = df["Gmt time"].iloc[-1]
+    
+    # parse timestamps from gmt time column
     date_format = "%d.%m.%Y %H:%M:%S.%f"
-    start = datetime.strptime(start, date_format)
+    df['Gmt time'] = pd.to_datetime(df['Gmt time'], format=date_format)
+    df['Gmt time'] = df['Gmt time'].dt.tz_localize(PD_TIMEZONE)
+    
+    # retrieve and convert start
+    start: pd.Timestamp = df["Gmt time"].iloc[0]
+    start: datetime = start.to_pydatetime()
     start = start.replace(tzinfo = DT_TIMEZONE)
-    end = datetime.strptime(end, date_format)
+
+    # retrieve and convert end
+    end: pd.Timestamp = df["Gmt time"].iloc[-1]
+    end: datetime = end.to_pydatetime()
     end = end.replace(tzinfo = DT_TIMEZONE)
+
+    # parse currencies, offer, and granularity
     pair, _, n, unit, off, _ = p.stem.split("_")
     assert len(pair) == 6
     c1 = Currency(pair[:3])
     c2 = Currency(pair[3:])
     off = OfferSide(off)
     gran = Granularity(n+unit)
+    
+    # create reference
     ref = ForexRef(c1,c2,gran,off,start,end)
+    
+    # rename columns to be as expected
     df.rename(columns={
-        "Volume" : "volume",
-        "Gmt time" : "date_gmt",
-        "Low" : "low",
-        "High" : "high",
-        "Open" : "open",
-        "Close" : "close"
+        "Volume" : Col.VOL,
+        "Gmt time" : Col.TIME,
+        "Low" : Col.LOW,
+        "High" : Col.HIGH,
+        "Open" : Col.OPEN,
+        "Close" : Col.CLOSE
     }, inplace=True)
 
     return ForexData(ref, df)

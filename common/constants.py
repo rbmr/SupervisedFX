@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+import pytz
 
 COMMON_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = COMMON_DIR.parent
@@ -26,7 +27,7 @@ NUMERIC_DATA_COLUMNS = [Col.OPEN, Col.HIGH, Col.LOW, Col.CLOSE, Col.VOL]
 DATA_COLUMNS = [Col.TIME, Col.OPEN, Col.HIGH, Col.LOW, Col.CLOSE, Col.VOL]
 
 DT_TIMEZONE = timezone.utc # datetime timezone
-PD_TIMEZONE = "GMT" # pandas timezone
+PD_TIMEZONE = pytz.timezone("GMT") # pandas timezone
 
 DATE_FORMAT = "%d.%m.%YT%H.%M"
 CSV_TIME_FORMAT = "%d.%m.%Y %H:%M:%S.%f"
