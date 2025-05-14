@@ -136,8 +136,10 @@ class ForexData:
         df.sort_values(by=Col.TIME, inplace=True)
 
         # Check if start and end is correct
-        assert df[Col.TIME].iloc[0] == ref.start
-        assert df[Col.TIME].iloc[-1] == ref.end
+        data_start, ref_start = df[Col.TIME].iloc[0], ref.start
+        assert data_start == ref_start, f"{data_start} must be equal to {ref_start}"
+        data_end, ref_end = df[Col.TIME].iloc[-1], ref.end
+        assert data_end == ref_end, f"{data_end} must be equal to {ref_end}"
 
         # Check if granularity is correct
         time_delta = pd.Timedelta(seconds = ref.gran.get_interval())
