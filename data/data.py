@@ -241,8 +241,11 @@ class ForexData:
 
 if __name__ == "__main__":
 
+    # Example on how to retrieve data.
     fd = ForexData("C:\\Users\\rober\\TUD-CSE-RP-RLinFinance\\data\\forex\\EURUSD\\1M\\BID\\01.05.2022T00.00-01.05.2025T23.59.csv")
     fd.set_gran(Granularity.H1)
+    df = fd.df
+    print(df.head())
 
 
 
