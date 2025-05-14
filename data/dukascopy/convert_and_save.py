@@ -1,5 +1,5 @@
 from pathlib import Path
-from data.data import *
+from common.data import *
 import pandas as pd
 from common.constants import *
 import logging 

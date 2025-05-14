@@ -1,4 +1,5 @@
 This folder should contain all data downloads.
+Python files should go in common/
 
 The data should be sourced from [Dukascopy Historical Data Feed](https://www.dukascopy.com/swiss/english/marketwatch/historical/).
 The data should have the following format:
@@ -11,11 +12,9 @@ An Example of getting the data from the [Dukascopy Historical Data Feed](https:/
 
 
 The files should be saved in the following manner: 
-
 ```
 forex/{Instrument}/{Granularity}/{BID/ASK}/{Start}-{End}.csv
 ```
-
 Where:
 - `Instrument` is written like `EURUSD`, `AUDUSD`, `GBPUSD`, etc
 - `Granularity` is written like `1M`, `15M`, `1H`, etc.
