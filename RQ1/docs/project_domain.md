@@ -53,7 +53,7 @@ Deep Reinforcement Learning
 
 Model categorization
 
-- **Policy vs Value-based** methods: Value-based methods try to learn a value function directly, and then derive the optimal policy using it. Policy-based methods try to learn the optimal policy directly.
+- **Policy vs Value-based** methods: Value-based methods try to learn a value function, and then derive the optimal policy using it. Policy-based methods try to learn the optimal policy directly.
 - **Policy-gradient methods**: subset of policy-based methods that use gradient descent on the expected return to approximate the optimal policy.
 - **Actor-critic methods**: combines value and policy based methods. It uses two seperate components: the actor, that is responsible for selecting actions (representing the policy), and the critic, evaluating the actions taken by the actor (using a value function).
 - **Model-free vs. model-based**: Model-free methods learn directly from interactions without understanding the environment's dynamics, while model-based methods build a model of the environment in order to plan ahead.
