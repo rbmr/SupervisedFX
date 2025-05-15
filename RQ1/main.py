@@ -346,8 +346,7 @@ print("Creating training environment...")
 train_env = DummyVecEnv([lambda: ForexEnv(train_df,
                                             initial_capital=INITIAL_CAPITAL,
                                             transaction_cost_pct=TRANSACTION_COST_PCT,
-                                            lookback_window_size=LOOKBACK_WINDOW_SIZE,
-                                            seed=SEED)])
+                                            lookback_window_size=LOOKBACK_WINDOW_SIZE)])
 print("Training environment created.")
 
 policy_kwargs = dict(net_arch=[128, 128])
@@ -374,7 +373,7 @@ model = DQN(
 )
 
 print("Training the DQN agent...")
-TOTAL_TIMESTEPS = 50000 # Reduce for quicker testing if needed
+TOTAL_TIMESTEPS = 500000 # Reduce for quicker testing if needed
 model.learn(total_timesteps=TOTAL_TIMESTEPS, log_interval=100) # Increased log_interval
 print("Training finished.")
 
