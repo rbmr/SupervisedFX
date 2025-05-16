@@ -2,13 +2,11 @@ import logging
 import random
 
 import gymnasium as gym
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from common.scripts import combine_df
 from gymnasium import spaces
-from stable_baselines3 import A2C, DDPG, DQN, PPO
-from stable_baselines3.common.logger import configure
+from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stockstats import StockDataFrame
 
@@ -18,6 +16,8 @@ from common.scripts import *
 
 if __name__ != '__main__':
     raise ImportError("Do not import this module.")
+
+logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Configuration Parameters ---
 INITIAL_CAPITAL = 10000.0
@@ -324,7 +324,6 @@ class ForexEnv(gym.Env):
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Get ask and bid data, and combine
 ask_path = "C:\\Users\\rober\\TUD-CSE-RP-RLinFinance\\data\\forex\\EURUSD\\15M\\ASK\\10.05.2022T00.00-10.05.2025T23.45.csv"
