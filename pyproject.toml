@@ -1,0 +1,45 @@
+[tool.poetry]
+name = "tud-cse-rp-rlinfinance"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+packages = [
+    { from = ".", include = "*" }
+]
+license = ""  # Optional, can be removed if undesired
+
+[tool.poetry.dependencies]
+python = ">=3.12"
+finrl = ">=0.3.5,<0.4.0"
+stable-baselines3 = { version = ">=2.0.0,<3.0.0", extras = ["extra"] }
+matplotlib = ">=3.6.0,<4.0.0"
+seaborn = ">=0.12.0,<0.13.0"
+plotly = ">=5.10.0,<6.0.0"
+jupyter = ">=1.0.0,<2.0.0"
+notebook = ">=6.5.0,<7.0.0"
+jupyterlab = ">=3.5.0,<4.0.0"
+ipykernel = ">=6.15.0,<7.0.0"
+ipywidgets = ">=8.0.0,<9.0.0"
+tqdm = ">=4.64.0,<5.0.0"
+stockstats = ">=0.4.0,<0.5.0"
+pandas = ">=2.2.3,<3.0.0"
+ta = ">=0.11.0,<0.12.0"
+tensorflow = ">=2.19.0,<3.0.0"
+scikit-learn = ">=1.6.1,<2.0.0"
+logging = ">=0.4.9.6,<0.5.0.0"
+torch = { version = ">=2.0.0,<3.0.0", source = "torch" }
+torchvision = { version = ">=0.15.0,<0.23.0", source = "torch" }
+torchaudio = { version = ">=2.0.0,<3.0.0", source = "torch" }
+
+[tool.poetry.group.dev.dependencies]
+isort = "^6.0.1"
+
+[[tool.poetry.source]]
+name = "torch"
+url = "https://download.pytorch.org/whl/cu121"
+priority = "explicit"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
