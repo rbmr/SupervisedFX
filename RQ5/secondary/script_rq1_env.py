@@ -3,7 +3,7 @@ import random
 import numpy as np
 from stable_baselines3 import A2C, DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
-from ForexEnv_RQ1 import ForexEnv
+from RQ5.secondary.ForexEnv_RQ1 import ForexEnv
 from common_rq5.data import ForexData
 from common_rq5.constants import *
 from common_rq5.scripts import *

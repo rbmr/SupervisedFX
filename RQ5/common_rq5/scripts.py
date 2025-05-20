@@ -189,7 +189,7 @@ def run_model_on_vec_env(
                         "done": bool(dones[i]),
                         "info": infos[i]
                     }
-                    f.write(json.dumps(log_entry) + "\n")
+                    print(log_entry)
                     timesteps[i] += 1
 
                     if dones[i]:
