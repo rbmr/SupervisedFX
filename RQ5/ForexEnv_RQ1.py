@@ -5,8 +5,8 @@ import numpy as np
 from gymnasium import spaces
 from typing import NamedTuple
 
-from common.constants import *
-from common.scripts import *
+from common_rq5.constants import *
+from common_rq5.scripts import *
 
 INITIAL_CAPITAL = 10000.0
 TRANSACTION_COST_PCT = 0.0 # Example: 0.1% commission per trade

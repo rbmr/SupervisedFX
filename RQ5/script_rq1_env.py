@@ -4,9 +4,9 @@ import numpy as np
 from stable_baselines3 import A2C, DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 from ForexEnv_RQ1 import ForexEnv
-from common.data import ForexData
-from common.constants import *
-from common.scripts import *
+from common_rq5.data import ForexData
+from common_rq5.constants import *
+from common_rq5.scripts import *
 
 # set seeds
 random.seed(SEED)
