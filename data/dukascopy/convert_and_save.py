@@ -26,12 +26,12 @@ def parse(p: Path) -> ForexData:
     # retrieve and convert start
     start: pd.Timestamp = df["Gmt time"].iloc[0]
     start: datetime = start.to_pydatetime()
-    start = start.replace(tzinfo = DT_TIMEZONE)
+    start: datetime = start.replace(tzinfo = DT_TIMEZONE)
 
     # retrieve and convert end
     end: pd.Timestamp = df["Gmt time"].iloc[-1]
     end: datetime = end.to_pydatetime()
-    end = end.replace(tzinfo = DT_TIMEZONE)
+    end: datetime = end.replace(tzinfo = DT_TIMEZONE)
 
     # parse currencies, offer, and granularity
     pair, _, n, unit, off, _ = p.stem.split("_")

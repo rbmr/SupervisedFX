@@ -15,7 +15,7 @@ def combine_df(bid_df: pd.DataFrame, ask_df: pd.DataFrame) -> pd.DataFrame:
     bid_columns = set(bid_df.columns)
     ask_columns = set(ask_df.columns)
     expected_columns = set(DATA_COLUMNS)
-    if bid_columns != ask_columns != expected_columns:
+    if bid_columns != expected_columns or ask_columns != expected_columns:
         raise ValueError(f"{bid_columns} and {ask_columns} must be equal to {expected_columns}")
 
     bid_rename = {
@@ -62,6 +62,8 @@ def split_df(df: pd.DataFrame, ratio: float):
     """
     Splits a dataframe into two parts based on a given ratio.
     """
+    if ratio < 0 or ratio > 1:
+        raise ValueError(f"{ratio} is not a valid ratio")
     split_index = int(len(df) * ratio)
     df1 = df.iloc[:split_index]
     df2 = df.iloc[split_index:]
