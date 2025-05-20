@@ -68,3 +68,22 @@ def split_df(df: pd.DataFrame, ratio: float):
     df1 = df.iloc[:split_index]
     df2 = df.iloc[split_index:]
     return df1, df2
+
+def find_first_row_without_nan(df: pd.DataFrame) -> int:
+    """
+    Removes leading rows with NaN values in any of the columns
+    """
+    found_nan = True
+    index = 0
+
+    while found_nan:
+        found_nan = False
+        for col in df.columns:
+            if pd.isna(df.iloc[index][col]):
+                found_nan = True
+                break
+        if found_nan:
+            index += 1
+
+    return index
+

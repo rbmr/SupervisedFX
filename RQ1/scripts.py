@@ -120,7 +120,7 @@ def run_model_on_vec_env(
                         "obs": obs[i].tolist() if hasattr(obs[i], "tolist") else obs[i],
                         "reward": float(rewards[i]),
                         "done": bool(dones[i]),
-                        "info": infos[i]
+                        #"info": infos[i]
                     }
                     f.write(json.dumps(log_entry) + "\n")
                     timesteps[i] += 1
