@@ -14,7 +14,7 @@ class StepwiseFeatureEngineer:
         Returns
         -------
         List[str]
-            The columns of the dataframe.
+            The columns returned by the pipeline.
         """
         return self._columns
     
@@ -25,7 +25,7 @@ class StepwiseFeatureEngineer:
         Parameters
         ----------
         columns : List[str]
-            The columns of the dataframe.
+            The columns returned by the pipeline.
         """
         self._columns = columns
         return self
@@ -38,6 +38,7 @@ class StepwiseFeatureEngineer:
         ----------
         func : Callable
             The function to be applied to the dataframe and index. Changes the dataframe in place.
+            THIS FUNCTION SHOULD NEVER RETURN NaN OR INFINITY.
         """
         self._pipeline_steps.append(func)
 
@@ -75,6 +76,18 @@ class StepwiseFeatureEngineer:
             if key not in self._columns:
                 # remove key from dictionary
                 del dictionary[key]
+
+        # check all columns in dictionary are in columns
+        for key in dictionary.keys():
+            if key not in self._columns:
+                raise ValueError(f"Key {key} not in columns of the stepwise feature engineer. Fix the function {func} to return a key in the columns.")
+            
+        # check none of the values in dictionary are NaN or infinity
+        for key in dictionary.keys():
+            if pd.isna(dictionary[key]):
+                raise ValueError(f"Value {dictionary[key]} for key {key} is NaN. Fix the function {func} to return a value that is not NaN.")
+            if np.isinf(dictionary[key]):
+                raise ValueError(f"Value {dictionary[key]} for key {key} is infinity. Fix the function {func} to return a value that is not infinity.")
 
 
         return dictionary
