@@ -49,8 +49,27 @@ if __name__ == '__main__':
         """
         df['price'] = df['close_bid']
         return df
+    
+    def rsi(df, window=14):
+        """
+        Calculate the Relative Strength Index (RSI) column.
+        """
+        delta = df['close_bid'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+        rs = gain / loss
+        
+        # replace rs with 1 if NaN, 100 if rs is np.inf, or 0 if rs is -np.inf
+        rs = rs.fillna(1)
+        rs = rs.replace(np.inf, 100)
+        rs = rs.replace(-np.inf, 0)
 
-    feature_engineer.add(create_price_columns)
+
+        rsi = 100 - (100 / (1 + rs))
+        df['rsi'] = rsi
+        return df
+
+    feature_engineer.add(rsi)
 
     # Add stepwise feature engineering
     stepwise_feature_engineer = StepwiseFeatureEngineer(columns=['cash_percentage'])
@@ -74,7 +93,7 @@ if __name__ == '__main__':
     )])
     logging.info("Training environment created.")
 
-    policy_kwargs = dict(net_arch=[128, 128])
+    policy_kwargs = dict(net_arch=[3])
 
     model = DQN(
         policy="MlpPolicy",
@@ -121,7 +140,7 @@ if __name__ == '__main__':
     n_eval_episodes = 1
     max_timesteps_per_episode = 1e9
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_name = f"{timestamp}_A2C_model"
+    model_name = f"{timestamp}_DQN_model"
     log_path = LOGS_DIR / model_name
     run_model_on_vec_env(model, eval_env, log_path)
 
