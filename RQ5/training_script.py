@@ -64,4 +64,4 @@ if __name__ == "__main__":
     # Train
     TOTAL_TIMESTEPS = 100000
     model.learn(total_timesteps=TOTAL_TIMESTEPS, log_interval=100000)
-    model.save("D:\\Facultate\\Y3\\Q4\\TUD-CSE-RP-RLinFinance\\RQ5\\dqn_forex_model.zip")
+    model.save("D:\\Facultate\\Y3\\Q4\\TUD-CSE-RP-RLinFinance\\RQ5\\models\\dqn_forex_model.zip")

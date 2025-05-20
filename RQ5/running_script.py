@@ -6,7 +6,7 @@ from ForexEnv_RQ5 import ForexEnv  # or your env filename
 from common.data import ForexData, combine_df
 
 # --- Load your saved model ---
-model_path = "D:\\Facultate\\Y3\\Q4\\TUD-CSE-RP-RLinFinance\\RQ5\\dqn_forex_model.zip"
+model_path = "D:\\Facultate\\Y3\\Q4\\TUD-CSE-RP-RLinFinance\\RQ5\\models\\dqn_forex_model.zip"
 model = DQN.load(model_path)
 
 # --- Load 1min EUR/USD data ---
