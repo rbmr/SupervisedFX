@@ -11,6 +11,12 @@ from typing import Any, Dict, List
 import json
 from tqdm.auto import tqdm
 
+import random
+import os
+import numpy as np
+import tensorflow as tf
+import torch
+
 def combine_df(bid_df: pd.DataFrame, ask_df: pd.DataFrame) -> pd.DataFrame:
     """
     Combines bid and ask DataFrames into a single `DataFrame`, renaming columns
@@ -174,3 +180,33 @@ def run_model_on_vec_env(
         df = pd.DataFrame(collected_log_entries)
         df.to_csv(f, index=False)
         print(f"Log entries written to {log_path}")
+
+def set_seed(seed_value: int):
+    """
+    Sets the random seed for Python, NumPy, TensorFlow, and PyTorch.
+
+    Args:
+        seed_value (int): The integer value to use as the seed.
+    """
+    # 1. Set Python's built-in random module seed
+    random.seed(seed_value)
+
+    # 2. Set NumPy's seed
+    np.random.seed(seed_value)
+
+    # 3. Set TensorFlow's seed
+    # For TensorFlow 2.x
+    tf.random.set_seed(seed_value)
+
+    # 4. Set PyTorch's seed
+    torch.manual_seed(seed_value)
+    # If you are using CUDA:
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed_value)
+        torch.cuda.manual_seed_all(seed_value)  # if you are using multi-GPU.
+        # The following two lines are often recommended for deterministic behavior on CUDA,
+        # but they can impact performance. Use them if reproducibility is critical.
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+    print(f"Seeds set to {seed_value} for Python, NumPy, TensorFlow, and PyTorch.")

@@ -2,7 +2,7 @@ import logging
 import random
 
 from RQ2.constants import LOGS_DIR, MODELS_DIR
-from common.scripts import run_model_on_vec_env
+from common.scripts import run_model_on_vec_env, set_seed
 import numpy as np
 from common.scripts import combine_df
 from stable_baselines3 import DQN
@@ -17,6 +17,8 @@ from common.constants import *
 from common.scripts import *
 
 if __name__ == '__main__':
+    
+    set_seed(42)
    
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -24,11 +26,6 @@ if __name__ == '__main__':
     # --- Configuration Parameters ---
     INITIAL_CAPITAL = 10000.0
     TRANSACTION_COST_PCT = 0.0 # Example: 0.1% commission per trade
-
-    # set seeds
-    random.seed(SEED)
-    np.random.seed(SEED)
-    torch.manual_seed(SEED)
 
     # Get ask and bid data, and combine
     ask_path = FOREX_DIR / "EURUSD" / "15M" / "ASK" / "10.05.2022T00.00-10.05.2025T23.45.csv"
