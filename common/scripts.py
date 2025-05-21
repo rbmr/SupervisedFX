@@ -6,6 +6,10 @@ from datetime import datetime, timedelta
 import pandas as pd
 from stockstats import StockDataFrame
 from common.constants import *
+from stable_baselines3.common.vec_env import VecEnv
+from typing import Any, Dict, List
+import json
+from tqdm.auto import tqdm
 
 def combine_df(bid_df: pd.DataFrame, ask_df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -87,3 +91,86 @@ def find_first_row_without_nan(df: pd.DataFrame) -> int:
 
     return index
 
+def run_model_on_vec_env(
+        model: Any,
+        env: 'VecEnv', # Use quotes for forward reference if VecEnv is not yet defined
+        log_path: str | Path,
+        n_episodes: int = 1,
+        progress_bar: bool = True, # New parameter for progress bar
+    ):
+    """
+    Run a trained RL model on a vectorized environment for a number of episodes,
+    log each step, and write all logs at the end. Optionally displays a progress bar.
+
+    Args:
+        model: The trained RL model with a .predict() method.
+        env: The vectorized environment (e.g., Stable Baselines3 VecEnv).
+        log_path: Path to save the JSON log file.
+        n_episodes: Number of episodes to run per environment.
+        progress_bar: If True, display a progress bar for episode completion (requires tqdm).
+    """
+    log_path = Path(log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    collected_log_entries: List[str] = []
+    episode_counts: List[int] = [0] * env.num_envs
+    timesteps: List[int] = [0] * env.num_envs
+    
+    # Ensure obs is initialized before the loop, especially if n_episodes might be 0
+    if n_episodes == 0:
+        with open(log_path, "w") as f: # Create an empty file if no episodes
+            pass
+        return
+
+    obs = env.reset()
+
+    pbar = None
+    if progress_bar:
+        if tqdm is None:
+            print("Warning: tqdm is not installed. Progress bar will not be shown. "
+                  "Install with: pip install tqdm")
+        else:
+            total_episodes_to_complete = env.num_envs * n_episodes
+            if total_episodes_to_complete > 0 : # Only initialize if there's work to do
+                pbar = tqdm(total=total_episodes_to_complete, desc="Running Episodes", unit="ep")
+
+    try:
+        while min(episode_counts) < n_episodes:
+            action, _ = model.predict(obs, deterministic=True)
+            next_obs, rewards, dones, infos = env.step(action)
+
+            for i in range(env.num_envs):
+                # Log data only if the current environment hasn't completed its n_episodes
+                if episode_counts[i] < n_episodes:
+                    log_entry: Dict[str, Any] = {
+                        "env_index": i,
+                        "episode": episode_counts[i],
+                        "timestep": timesteps[i],
+                        "action": action[i].tolist() if hasattr(action[i], 'tolist') else action[i],
+                        "obs": obs[i].tolist() if hasattr(obs[i], 'tolist') else obs[i],
+                        "reward": float(rewards[i]),
+                        "done": bool(dones[i]),
+                        "info": infos[i] # infos[i] can be an empty dict or contain data
+                    }
+                    collected_log_entries.append(log_entry)
+                    timesteps[i] += 1
+
+                    if dones[i]:
+                        episode_counts[i] += 1
+                        timesteps[i] = 0
+                        if pbar:
+                            pbar.update(1)
+            
+            obs = next_obs
+    finally:
+        if pbar:
+            pbar.close()
+
+    # add .csv to the log_path if it doesn't exist
+    if not log_path.suffix:
+        log_path = log_path.with_suffix(".csv")
+    with open(log_path, "w") as f:
+        print(f"Writing {len(collected_log_entries)} log entries to {log_path}")
+        df = pd.DataFrame(collected_log_entries)
+        df.to_csv(f, index=False)
+        print(f"Log entries written to {log_path}")

@@ -2,7 +2,7 @@ import logging
 import random
 
 from RQ2.constants import LOGS_DIR, MODELS_DIR
-from RQ1.scripts import run_model_on_vec_env
+from common.scripts import run_model_on_vec_env
 import numpy as np
 from common.scripts import combine_df
 from stable_baselines3 import DQN
@@ -116,7 +116,7 @@ if __name__ == '__main__':
     )
 
     logging.info("Training the DQN agent...")
-    model.learn(total_timesteps=50_000, progress_bar=True)
+    model.learn(total_timesteps=1_000, progress_bar=True)
     logging.info("Training finished.")
 
     logging.info("Saving the DQN model...")
@@ -137,10 +137,7 @@ if __name__ == '__main__':
         )
     ])
 
-    n_eval_episodes = 1
-    max_timesteps_per_episode = 1e9
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_name = f"{timestamp}_DQN_model"
-    log_path = LOGS_DIR / model_name
+    log_path = LOGS_DIR / f"{timestamp}_DQN_model"
     run_model_on_vec_env(model, eval_env, log_path)
 
