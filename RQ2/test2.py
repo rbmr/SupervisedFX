@@ -9,7 +9,7 @@ from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from common.env.forex_env import DiscreteActionForexEnv
-from common.feature.feature_engineer import FeatureEngineer
+from common.feature.feature_engineer import FeatureEngineer, rsi, history_lookback, remove_ohlcv
 from common.feature.stepwise_feature_engineer import StepwiseFeatureEngineer
 
 from common.data import ForexData
@@ -42,34 +42,9 @@ if __name__ == '__main__':
     # --- Feature Engineering ---
     # Create a feature engineer object
     feature_engineer = FeatureEngineer()
-    # Add feature engineering steps
-    def create_price_columns(df):
-        """
-        Create price columns for the DataFrame.
-        """
-        df['price'] = df['close_bid']
-        return df
-    
-    def rsi(df, window=14):
-        """
-        Calculate the Relative Strength Index (RSI) column.
-        """
-        delta = df['close_bid'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-        rs = gain / loss
-        
-        # replace rs with 1 if NaN, 100 if rs is np.inf, or 0 if rs is -np.inf
-        rs = rs.fillna(1)
-        rs = rs.replace(np.inf, 100)
-        rs = rs.replace(-np.inf, 0)
-
-
-        rsi = 100 - (100 / (1 + rs))
-        df['rsi'] = rsi
-        return df
-
     feature_engineer.add(rsi)
+    feature_engineer.add(remove_ohlcv)
+    feature_engineer.add(lambda df: history_lookback(df, 20))
 
     # Add stepwise feature engineering
     stepwise_feature_engineer = StepwiseFeatureEngineer(columns=['cash_percentage'])
@@ -93,19 +68,19 @@ if __name__ == '__main__':
     )])
     logging.info("Training environment created.")
 
-    policy_kwargs = dict(net_arch=[3])
+    policy_kwargs = dict(net_arch=[20,10])
 
     model = DQN(
         policy="MlpPolicy",
         env=train_env,
         learning_rate=0.001,
-        buffer_size=50000,
+        buffer_size=1000,
         learning_starts=1000,
         batch_size=64,
         tau=1.0,
         gamma=0.99,
-        train_freq=4,
-        gradient_steps=1,
+        train_freq=64,
+        gradient_steps=64,
         target_update_interval=500,
         exploration_fraction=0.2,
         exploration_initial_eps=1.0,
@@ -116,7 +91,7 @@ if __name__ == '__main__':
     )
 
     logging.info("Training the DQN agent...")
-    model.learn(total_timesteps=1_000, progress_bar=True)
+    model.learn(total_timesteps=100_000, progress_bar=True)
     logging.info("Training finished.")
 
     logging.info("Saving the DQN model...")
