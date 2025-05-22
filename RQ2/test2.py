@@ -8,7 +8,7 @@ from common.scripts import combine_df
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from common.env.forex_env import DiscreteActionForexEnv
+from common.envs.forex_env import GeneralForexEnv
 from common.feature.feature_engineer import FeatureEngineer, rsi, history_lookback, remove_ohlcv
 from common.feature.stepwise_feature_engineer import StepwiseFeatureEngineer
 
@@ -56,7 +56,7 @@ if __name__ == '__main__':
     stepwise_feature_engineer.add(calculate_cash_percentage)
 
     logging.info("Creating training environment...")
-    train_env = DummyVecEnv([lambda: DiscreteActionForexEnv(
+    train_env = DummyVecEnv([lambda: GeneralForexEnv(
         market_data_df=train_df,
         data_feature_engineer=feature_engineer,
         agent_feature_engineer=stepwise_feature_engineer,
@@ -88,7 +88,7 @@ if __name__ == '__main__':
     )
 
     logging.info("Training the DQN agent...")
-    model.learn(total_timesteps=100_000, progress_bar=True)
+    model.learn(total_timesteps=10_000, progress_bar=True)
     logging.info("Training finished.")
 
     logging.info("Saving the DQN model...")
@@ -100,7 +100,7 @@ if __name__ == '__main__':
 
     logging.info("\nEvaluating the agent on the eval_df...")
     eval_env = DummyVecEnv([
-        lambda: DiscreteActionForexEnv(
+        lambda: GeneralForexEnv(
             market_data_df=eval_df,
             data_feature_engineer=feature_engineer,
             agent_feature_engineer=stepwise_feature_engineer,
