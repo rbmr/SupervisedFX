@@ -43,7 +43,10 @@ class Snapshot(NamedTuple):
     market_data_date_gmt: str
     agent_cash: float
     agent_shares: float
-    agent_equity: SimpleOHLC
+    agent_equity_open: float
+    agent_equity_high: float
+    agent_equity_low: float
+    agent_equity_close: float
 
 class GeneralForexEnv(gym.Env):
 
@@ -164,9 +167,9 @@ class GeneralForexEnv(gym.Env):
 
         self.prev_action = None
 
-        self._create_snapshot()
+        info = self._create_snapshot()._asdict()
 
-        return self._get_observation(), {}
+        return self._get_observation(), info
 
     def step(self, action):
         # Perform step
@@ -203,8 +206,7 @@ class GeneralForexEnv(gym.Env):
             logging.info(f"Step {self.current_step}: End of data reached.") 
 
         # Determine info dict 
-        info = {}
-        info['snapshot'] = self._create_snapshot()
+        info = self._create_snapshot()._asdict()
         # if terminated or truncated:
         #     # Episode is ending, put relevant final info here
         #     # Make a copy of the list to avoid issues if it's modified elsewhere later
@@ -224,12 +226,10 @@ class GeneralForexEnv(gym.Env):
             market_data_date_gmt=self.market_data_df.iloc[self.current_step]['date_gmt'].strftime('%Y-%m-%d %H:%M:%S'),
             agent_cash=self.agent_data_df.iloc[self.current_step]['cash'],
             agent_shares=self.agent_data_df.iloc[self.current_step]['shares'],
-            agent_equity=SimpleOHLC(
-                open=self.agent_data_df.iloc[self.current_step]['equity_open'],
-                high=self.agent_data_df.iloc[self.current_step]['equity_high'],
-                low=self.agent_data_df.iloc[self.current_step]['equity_low'],
-                close=self.agent_data_df.iloc[self.current_step]['equity_close']
-            )
+            agent_equity_open=self.agent_data_df.iloc[self.current_step]['equity_open'],
+            agent_equity_high=self.agent_data_df.iloc[self.current_step]['equity_high'],
+            agent_equity_low=self.agent_data_df.iloc[self.current_step]['equity_low'],
+            agent_equity_close=self.agent_data_df.iloc[self.current_step]['equity_close']
         )
         self.snapshot_trace.append(snapshot)
 
