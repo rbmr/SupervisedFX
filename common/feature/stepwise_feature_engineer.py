@@ -94,7 +94,14 @@ class StepwiseFeatureEngineer:
         return dictionary
         
 
-
+def calculate_cash_percentage(data_accessor, index):
+        """
+        Calculate the cash to shares ratio.
+        """
+        current_cash = data_accessor[index, 'cash']
+        current_equity = data_accessor[index, 'equity_close']
+        percentage = current_cash / current_equity
+        return {'cash_percentage': percentage}
 
 
         

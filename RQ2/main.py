@@ -1,16 +1,14 @@
 import logging
 import random
 
-from common.scripts import run_model_on_vec_env, set_seed
-import numpy as np
+from common.scripts import set_seed
 from common.scripts import combine_df
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from common.envs.forex_env import GeneralForexEnv
 from common.feature.feature_engineer import FeatureEngineer, rsi, history_lookback, remove_ohlcv
-from common.feature.stepwise_feature_engineer import StepwiseFeatureEngineer
-
+from common.feature.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
 from RQ2.constants import RQ2_DIR
 
 from common.data import ForexData
@@ -47,14 +45,6 @@ if __name__ == '__main__':
 
     # Add stepwise feature engineering
     stepwise_feature_engineer = StepwiseFeatureEngineer(columns=['cash_percentage'])
-    def calculate_cash_percentage(data_accessor, index):
-        """
-        Calculate the cash to shares ratio.
-        """
-        current_cash = data_accessor[index, 'cash']
-        current_equity = data_accessor[index, 'equity_close']
-        percentage = current_cash / current_equity
-        return {'cash_percentage': percentage}
     stepwise_feature_engineer.add(calculate_cash_percentage)
 
     logging.info("Creating environments...")
