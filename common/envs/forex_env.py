@@ -38,16 +38,6 @@ class OHLCV(NamedTuple):
     volume_ask: float
     date_gmt: pd.Timestamp
 
-class Snapshot(NamedTuple):
-    step: int
-    market_data_date_gmt: str
-    agent_cash: float
-    agent_shares: float
-    agent_equity_open: float
-    agent_equity_high: float
-    agent_equity_low: float
-    agent_equity_close: float
-
 class GeneralForexEnv(gym.Env):
 
     def __init__(self, 
@@ -144,7 +134,6 @@ class GeneralForexEnv(gym.Env):
             # find index of first row with NaN values
             first_nan_index = self.market_feature_df.index[self.market_feature_df.isnull().any(axis=1)][0]
             raise ValueError(f"market_feature_df contains NaN values. First NaN index: {first_nan_index}. Row: {self.market_feature_df.iloc[first_nan_index]}.")
-        
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -167,7 +156,7 @@ class GeneralForexEnv(gym.Env):
 
         self.prev_action = None
 
-        info = self._create_snapshot()._asdict()
+        info = self._create_snapshot()
 
         return self._get_observation(), info
 
@@ -206,7 +195,7 @@ class GeneralForexEnv(gym.Env):
             logging.info(f"Step {self.current_step}: End of data reached.") 
 
         # Determine info dict 
-        info = self._create_snapshot()._asdict()
+        info = self._create_snapshot()
         # if terminated or truncated:
         #     # Episode is ending, put relevant final info here
         #     # Make a copy of the list to avoid issues if it's modified elsewhere later
@@ -217,20 +206,37 @@ class GeneralForexEnv(gym.Env):
         
         return self._get_observation(), reward, terminated, truncated, info
     
-    def _create_snapshot(self) -> Snapshot:
+    def _create_snapshot(self) -> Dict[str, Any]:
         """
         Creates a snapshot of the current state of the environment.
         """
-        snapshot = Snapshot(
-            step=self.current_step,
-            market_data_date_gmt=self.market_data_df.iloc[self.current_step]['date_gmt'].strftime('%Y-%m-%d %H:%M:%S'),
-            agent_cash=self.agent_data_df.iloc[self.current_step]['cash'],
-            agent_shares=self.agent_data_df.iloc[self.current_step]['shares'],
-            agent_equity_open=self.agent_data_df.iloc[self.current_step]['equity_open'],
-            agent_equity_high=self.agent_data_df.iloc[self.current_step]['equity_high'],
-            agent_equity_low=self.agent_data_df.iloc[self.current_step]['equity_low'],
-            agent_equity_close=self.agent_data_df.iloc[self.current_step]['equity_close']
-        )
+    
+        snapshot = {
+            'step': self.current_step,
+            'market_data': {
+                'date_gmt': self.market_data_df.iloc[self.current_step]['date_gmt'],
+                'open_bid': self.market_data_df.iloc[self.current_step]['open_bid'],
+                'open_ask': self.market_data_df.iloc[self.current_step]['open_ask'],
+                'high_bid': self.market_data_df.iloc[self.current_step]['high_bid'],
+                'high_ask': self.market_data_df.iloc[self.current_step]['high_ask'],
+                'low_bid': self.market_data_df.iloc[self.current_step]['low_bid'],
+                'low_ask': self.market_data_df.iloc[self.current_step]['low_ask'],
+                'close_bid': self.market_data_df.iloc[self.current_step]['close_bid'],
+                'close_ask': self.market_data_df.iloc[self.current_step]['close_ask'],
+                'volume_bid': self.market_data_df.iloc[self.current_step]['volume_bid'],
+                'volume_ask': self.market_data_df.iloc[self.current_step]['volume_ask']
+            },
+            'agent_data': {
+                'cash': self.agent_data_df.iloc[self.current_step]['cash'],
+                'shares': self.agent_data_df.iloc[self.current_step]['shares'],
+                'equity': {
+                    'open': self.agent_data_df.iloc[self.current_step]['equity_open'],
+                    'high': self.agent_data_df.iloc[self.current_step]['equity_high'],
+                    'low': self.agent_data_df.iloc[self.current_step]['equity_low'],
+                    'close': self.agent_data_df.iloc[self.current_step]['equity_close']
+                }
+            }
+        }
         self.snapshot_trace.append(snapshot)
 
         return snapshot
