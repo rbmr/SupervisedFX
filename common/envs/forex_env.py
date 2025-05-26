@@ -13,6 +13,7 @@ from common.feature.stepwise_feature_engineer import StepwiseFeatureEngineer
 from common.constants import *
 from common.scripts import *
 from common.scripts import find_first_row_without_nan
+from common.optimization import DataFrameToNumPyAccessor
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -134,6 +135,12 @@ class GeneralForexEnv(gym.Env):
             # find index of first row with NaN values
             first_nan_index = self.market_feature_df.index[self.market_feature_df.isnull().any(axis=1)][0]
             raise ValueError(f"market_feature_df contains NaN values. First NaN index: {first_nan_index}. Row: {self.market_feature_df.iloc[first_nan_index]}.")
+        
+        # Initialize the fast DataFrama Accessors
+        self.market_data_accessor = DataFrameToNumPyAccessor(self.market_data_df)
+        self.market_feature_accessor = DataFrameToNumPyAccessor(self.market_feature_df)
+        self.agent_data_accessor = DataFrameToNumPyAccessor(self.agent_data_df)
+
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -153,6 +160,7 @@ class GeneralForexEnv(gym.Env):
             'equity_low': self.initial_capital,
             'equity_close': self.initial_capital
         }
+        self.agent_data_accessor = DataFrameToNumPyAccessor(self.agent_data_df)
 
         self.prev_action = None
 
@@ -168,11 +176,11 @@ class GeneralForexEnv(gym.Env):
         current_data = self._get_current_prices()
 
         # perform action at open prices
-        current_cash = self.agent_data_df.iloc[self.current_step - 1]['cash']
-        current_shares = self.agent_data_df.iloc[self.current_step - 1]['shares']
+        current_cash = self.agent_data_accessor[self.current_step - 1, 'cash']
+        current_shares = self.agent_data_accessor[self.current_step - 1, 'shares']
         new_cash, new_shares = self._execute_action(action, self.prev_action, current_data, current_cash, current_shares)
         new_equity_ohlc = self._calculate_equity(current_data, new_cash, new_shares)
-        self.agent_data_df.iloc[self.current_step] = {
+        self.agent_data_accessor[self.current_step] = {
             'cash': new_cash,
             'shares': new_shares,
             'equity_open': new_equity_ohlc.open,
@@ -187,9 +195,9 @@ class GeneralForexEnv(gym.Env):
         # Determine done
         terminated = False
         truncated = False
-        if self.agent_data_df.iloc[self.current_step]['equity_close'] <= 0:
+        if self.agent_data_accessor[self.current_step, 'equity_close'] <= 0:
             terminated = True
-            logging.info(f"Step {self.current_step}: Agent ruined. Equity: {self.agent_data_df.iloc[self.current_step]['equity_close']}.")
+            logging.info(f"Step {self.current_step}: Agent ruined. Equity: {self.agent_data_accessor[self.current_step, 'equity_close']}.")
         if self.current_step >= self.total_steps - 1:
             truncated = True
             logging.info(f"Step {self.current_step}: End of data reached.") 
@@ -214,26 +222,26 @@ class GeneralForexEnv(gym.Env):
         snapshot = {
             'step': self.current_step,
             'market_data': {
-                'date_gmt': self.market_data_df.iloc[self.current_step]['date_gmt'],
-                'open_bid': self.market_data_df.iloc[self.current_step]['open_bid'],
-                'open_ask': self.market_data_df.iloc[self.current_step]['open_ask'],
-                'high_bid': self.market_data_df.iloc[self.current_step]['high_bid'],
-                'high_ask': self.market_data_df.iloc[self.current_step]['high_ask'],
-                'low_bid': self.market_data_df.iloc[self.current_step]['low_bid'],
-                'low_ask': self.market_data_df.iloc[self.current_step]['low_ask'],
-                'close_bid': self.market_data_df.iloc[self.current_step]['close_bid'],
-                'close_ask': self.market_data_df.iloc[self.current_step]['close_ask'],
-                'volume_bid': self.market_data_df.iloc[self.current_step]['volume_bid'],
-                'volume_ask': self.market_data_df.iloc[self.current_step]['volume_ask']
+                'date_gmt': self.market_data_accessor[self.current_step,'date_gmt'],
+                'open_bid': self.market_data_accessor[self.current_step,'open_bid'],
+                'open_ask': self.market_data_accessor[self.current_step,'open_ask'],
+                'high_bid': self.market_data_accessor[self.current_step,'high_bid'],
+                'high_ask': self.market_data_accessor[self.current_step,'high_ask'],
+                'low_bid': self.market_data_accessor[self.current_step,'low_bid'],
+                'low_ask': self.market_data_accessor[self.current_step,'low_ask'],
+                'close_bid': self.market_data_accessor[self.current_step,'close_bid'],
+                'close_ask': self.market_data_accessor[self.current_step,'close_ask'],
+                'volume_bid': self.market_data_accessor[self.current_step,'volume_bid'],
+                'volume_ask': self.market_data_accessor[self.current_step,'volume_ask']
             },
             'agent_data': {
-                'cash': self.agent_data_df.iloc[self.current_step]['cash'],
-                'shares': self.agent_data_df.iloc[self.current_step]['shares'],
+                'cash': self.agent_data_accessor[self.current_step,'cash'],
+                'shares': self.agent_data_accessor[self.current_step,'shares'],
                 'equity': {
-                    'open': self.agent_data_df.iloc[self.current_step]['equity_open'],
-                    'high': self.agent_data_df.iloc[self.current_step]['equity_high'],
-                    'low': self.agent_data_df.iloc[self.current_step]['equity_low'],
-                    'close': self.agent_data_df.iloc[self.current_step]['equity_close']
+                    'open': self.agent_data_accessor[self.current_step,'equity_open'],
+                    'high': self.agent_data_accessor[self.current_step,'equity_high'],
+                    'low': self.agent_data_accessor[self.current_step,'equity_low'],
+                    'close': self.agent_data_accessor[self.current_step,'equity_close']
                 }
             }
         }
@@ -245,25 +253,24 @@ class GeneralForexEnv(gym.Env):
         """
         Calculates the reward based on the current equity.
         """
-        return self.agent_data_df.iloc[self.current_step]['equity_close'] - self.agent_data_df.iloc[self.current_step - 1]['equity_close']
+        return self.agent_data_accessor[self.current_step, 'equity_close'] - self.agent_data_accessor[self.current_step - 1, 'equity_close']
 
     def _get_current_prices(self) -> OHLCV:
         """
         Retrieves the current bid and ask prices from the dataframe.
         """
-        current_data = self.market_data_df.iloc[self.current_step]
         data = OHLCV(
-            open_bid=current_data['open_bid'],
-            open_ask=current_data['open_ask'],
-            high_bid=current_data['high_bid'],
-            high_ask=current_data['high_ask'],
-            low_bid=current_data['low_bid'],
-            low_ask=current_data['low_ask'],
-            close_bid=current_data['close_bid'],
-            close_ask=current_data['close_ask'],
-            volume_bid=current_data['volume_bid'],
-            volume_ask=current_data['volume_ask'],
-            date_gmt=current_data['date_gmt']
+            open_bid=self.market_data_accessor[self.current_step, 'open_bid'],
+            open_ask=self.market_data_accessor[self.current_step, 'open_ask'],
+            high_bid=self.market_data_accessor[self.current_step, 'high_bid'],
+            high_ask=self.market_data_accessor[self.current_step, 'high_ask'],
+            low_bid=self.market_data_accessor[self.current_step, 'low_bid'],
+            low_ask=self.market_data_accessor[self.current_step, 'low_ask'],
+            close_bid=self.market_data_accessor[self.current_step, 'close_bid'],
+            close_ask=self.market_data_accessor[self.current_step, 'close_ask'],
+            volume_bid=self.market_data_accessor[self.current_step, 'volume_bid'],
+            volume_ask=self.market_data_accessor[self.current_step, 'volume_ask'],
+            date_gmt=self.market_data_accessor[self.current_step, 'date_gmt']
         )
         return data
 
@@ -291,10 +298,10 @@ class GeneralForexEnv(gym.Env):
         """
 
         # Get market features
-        market_features = self.market_feature_df.iloc[self.current_step].to_numpy()
+        market_features = self.market_feature_accessor[self.current_step]
 
         # Get state features
-        state_features_dict = self.agent_feature_engineer.run(self.agent_data_df, self.current_step)
+        state_features_dict = self.agent_feature_engineer.run(self.agent_data_accessor, self.current_step)
         state_features = np.array([
             state_features_dict[col] for col in self.agent_feature_engineer.get_columns()
         ])

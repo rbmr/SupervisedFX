@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from typing import Callable, List, Dict, Any
+from common.optimization import DataFrameToNumPyAccessor
 
 class StepwiseFeatureEngineer:
     def __init__(self, columns: List[str]):
@@ -30,7 +31,7 @@ class StepwiseFeatureEngineer:
         self._columns = columns
         return self
         
-    def add(self, func: Callable[[pd.DataFrame, int], dict]) -> 'StepwiseFeatureEngineer':
+    def add(self, func: Callable[[DataFrameToNumPyAccessor, int], dict]) -> 'StepwiseFeatureEngineer':
         """
         Add a step to the pipeline.
         
@@ -46,7 +47,7 @@ class StepwiseFeatureEngineer:
     
     #return array of float
 
-    def run(self, df: pd.DataFrame, index: int) -> dict:
+    def run(self, df: DataFrameToNumPyAccessor, index: int) -> dict:
         """
         Run the pipeline on the given DataFrame.
         

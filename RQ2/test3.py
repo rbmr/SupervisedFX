@@ -47,12 +47,12 @@ if __name__ == '__main__':
 
     # Add stepwise feature engineering
     stepwise_feature_engineer = StepwiseFeatureEngineer(columns=['cash_percentage'])
-    def calculate_cash_percentage(df, index):
+    def calculate_cash_percentage(data_accessor, index):
         """
         Calculate the cash to shares ratio.
         """
-        current_cash = df['cash'].iloc[index]
-        current_equity = df['equity_close'].iloc[index]
+        current_cash = data_accessor[index, 'cash']
+        current_equity = data_accessor[index, 'equity_close']
         percentage = current_cash / current_equity
         return {'cash_percentage': percentage}
     stepwise_feature_engineer.add(calculate_cash_percentage)
