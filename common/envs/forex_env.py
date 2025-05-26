@@ -74,6 +74,7 @@ class GeneralForexEnv(gym.Env):
         self.initial_capital = initial_capital
         self.transaction_cost_pct = transaction_cost_pct
         self.agent_feature_engineer = agent_feature_engineer
+        self.custom_reward_function = custom_reward_function
 
         # Market Data
         self.market_data_df = market_data_df
