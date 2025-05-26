@@ -5,7 +5,7 @@ import copy
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from typing import NamedTuple
+from typing import NamedTuple, Optional, Callable, Dict, Any
 
 from common.data import ForexData
 from common.feature.feature_engineer import FeatureEngineer
@@ -47,7 +47,9 @@ class GeneralForexEnv(gym.Env):
                  agent_feature_engineer: StepwiseFeatureEngineer,
                  initial_capital=10000.0,
                  transaction_cost_pct=0.0,
-                 amount_actions=1):
+                 amount_actions=1,
+                 custom_reward_function: Optional[Callable[['GeneralForexEnv'], float]] = None
+                 ):
         super(GeneralForexEnv, self).__init__()
 
         # Validate input
@@ -252,8 +254,17 @@ class GeneralForexEnv(gym.Env):
     def _get_reward(self) -> float:
         """
         Calculates the reward based on the current equity.
+        Uses a custom reward function if provided, otherwise defaults to equity change.
         """
-        return self.agent_data_accessor[self.current_step, 'equity_close'] - self.agent_data_accessor[self.current_step - 1, 'equity_close']
+        if self.custom_reward_function is not None:
+            # Pass the entire environment instance to the custom reward function.
+            # This gives the custom function flexible access to any environment state it might need.
+            return self.custom_reward_function(self)
+        else:
+            # Default reward: change in equity from the previous step to the current step
+            # This is calculated after the current step's data has been populated.
+            return self.agent_data_accessor[self.current_step, 'equity_close'] - \
+                   self.agent_data_accessor[self.current_step - 1, 'equity_close']
 
     def _get_current_prices(self) -> OHLCV:
         """
