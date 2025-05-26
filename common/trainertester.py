@@ -15,6 +15,7 @@ from typing import Any, Dict, List
 import gymnasium as gym
 from pathlib import Path
 import logging
+from matplotlib import pyplot as plt
 
 
 def train_test_analyze(train_env: GeneralForexEnv, eval_env: GeneralForexEnv, model: BaseAlgorithm, base_folder_path: Path, experiment_group_name: str, experiment_name: str,
@@ -79,25 +80,62 @@ def train_test_analyze(train_env: GeneralForexEnv, eval_env: GeneralForexEnv, mo
         return
     logging.info(f"Found {len(model_files)} model files in '{models_path}'.")
 
+    # sort model files by modification time (oldest first)
+    model_files.sort(key=lambda x: x.stat().st_mtime)
+
     # 2. Run Each Model on the train_env and eval_env
     for model_file in model_files:
         logging.info(f"Loading model from {model_file}...")
         model = model_class.load(model_file, env=train_dummy_env)
         logging.info(f"Model loaded from {model_file}.")
 
-        train_data_path = results_path / f"{model_file.stem}_train_data"
-        eval_data_path = results_path / f"{model_file.stem}_eval_data"
-        train_data_path.parent.mkdir(parents=True, exist_ok=True)
+        this_model_path = results_path / model_file.stem
+        train_data_path = this_model_path / "train"
+        eval_data_path = this_model_path / "eval"
+        train_results_full_file = train_data_path / "data"
+        eval_results_full_file = eval_data_path / "data"
+        train_data_path.mkdir(parents=True, exist_ok=True)
 
         train_episode_length = len(train_env.market_data_df)
         eval_episode_length = len(eval_env.market_data_df)
 
-        run_model_on_vec_env(model, train_env, train_data_path, total_steps=eval_episodes * train_episode_length, deterministic=deterministic, progress_bar=True)
+        run_model_on_vec_env(model, train_env, train_results_full_file, total_steps=eval_episodes * train_episode_length, deterministic=deterministic, progress_bar=True)
 
-        run_model_on_vec_env(model, eval_env, eval_data_path, total_steps=eval_episodes * eval_episode_length, deterministic=deterministic, progress_bar=True)
+        run_model_on_vec_env(model, eval_env, eval_results_full_file, total_steps=eval_episodes * eval_episode_length, deterministic=deterministic, progress_bar=True)
+
 
 
     # ANALYSIS
+    logging.info("Analyzing results...")
+    model_train_metrics = []
+    model_eval_metrics = []
+    for model_file in model_files:
+        model_name = model_file.stem
+        this_model_path = results_path / model_name
+        train_data_path = this_model_path / "train"
+        eval_data_path = this_model_path / "eval"
+        train_results_full_file = train_data_path / "data.csv"
+        eval_results_full_file = eval_data_path / "data.csv"
+        if not train_results_full_file.exists() or not eval_results_full_file.exists():
+            logging.warning(f"Skipping analysis for {model_name} as one or both result files do not exist.")
+            continue
+        
+        logging.info(f"Analyzing results for model: {model_name}")
+        
+        # Load train and eval results
+        results_df = pd.read_csv(train_results_full_file)
+        metrics = analyse_individual_run(results_df, train_data_path, name=model_name)
+        model_train_metrics.append(metrics)
+
+        results_df = pd.read_csv(eval_results_full_file)
+        metrics = analyse_individual_run(results_df, eval_data_path, name=model_name)
+        model_eval_metrics.append(metrics)
+
+    analyse_finals(model_train_metrics, results_path, name="train_results")
+    analyse_finals(model_eval_metrics, results_path, name="eval_results")
+    
+    logging.info("Analysis complete.")
+
 
     logging.info("Done!")
 
@@ -187,3 +225,82 @@ def flatten_dict(d: Dict[str, Any]) -> Dict[str, Any]:
         else:
             flat_dict[key] = value
     return flat_dict
+
+def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> Dict[str, Any]:
+    """
+    Analyze the results DataFrame and save the analysis to the results_path.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The DataFrame containing the results.
+    results_path : Path
+        The path to save the analysis results.
+    """
+    # Ensure results_path exists
+    results_path.mkdir(parents=True, exist_ok=True)
+
+    # plot close prices of market data
+    close_bid_prices = df['info.market_data.close_bid'].values
+    close_ask_prices = df['info.market_data.close_ask'].values
+    plt.figure(figsize=(12, 6))
+    plt.plot(close_bid_prices, label='Close Bid Prices')
+    plt.plot(close_ask_prices, label='Close Ask Prices')
+    plt.title(f"Close Prices for {name}")
+    plt.xlabel('Time Step')
+    plt.ylabel('Price')
+    plt.legend()
+    plt.savefig(results_path / f"market_data.png")
+    plt.close()
+
+    # plote open high low close of equity
+    equity_open = df['info.agent_data.equity.open'].values
+    equity_high = df['info.agent_data.equity.high'].values
+    equity_low = df['info.agent_data.equity.low'].values
+    equity_close = df['info.agent_data.equity.close'].values
+    plt.figure(figsize=(12, 6))
+    plt.plot(equity_open, label='Equity Open', color='blue')
+    plt.plot(equity_high, label='Equity High', color='green')
+    plt.plot(equity_low, label='Equity Low', color='red')
+    plt.plot(equity_close, label='Equity Close', color='orange')
+    plt.title(f"Equity OHLC for {name}")
+    plt.xlabel('Time Step')
+    plt.ylabel('Price')
+    plt.legend()
+    plt.savefig(results_path / f"equity_ohlc.png")
+    plt.close()
+
+    # calculate sharpe ratio on the close prices of equity
+    returns = df['info.agent_data.equity.close'].pct_change().dropna()
+    sharpe_ratio = returns.mean() / returns.std() * (252 ** 0.5)  # Annualized Sharpe Ratio
+
+    return {
+        "sharpe_ratio": sharpe_ratio,
+    }
+
+
+def analyse_finals(final_metrics: List[Dict[str, Any]], results_path: Path, name: str) -> None:
+    """
+    Analyze the final results DataFrame and save the analysis to the results_path.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The DataFrame containing the final results.
+    results_path : Path
+        The path to save the analysis results.
+    """
+    # Ensure results_path exists
+    results_path.mkdir(parents=True, exist_ok=True)
+
+    # make a plot of the sharpe ratios
+    sharpe_ratios = [metrics['sharpe_ratio'] for metrics in final_metrics]
+    plt.figure(figsize=(12, 6))
+    plt.bar(range(len(sharpe_ratios)), sharpe_ratios, tick_label=[f"Model {i+1}" for i in range(len(sharpe_ratios))])
+    plt.title(f"Sharpe Ratios for {name}")
+    plt.xlabel('Model')
+    plt.ylabel('Sharpe Ratio')
+    plt.savefig(results_path / f"sharpe_ratios.png")
+    plt.close()
+    
+    
