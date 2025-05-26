@@ -93,10 +93,10 @@ if __name__ == '__main__':
         model=model,
         base_folder_path=RQ2_DIR,
         experiment_group_name="testing123",
-        experiment_name="test1",
-        train_episodes=2,
+        experiment_name="test2",
+        train_episodes=1,
         eval_episodes=1,
-        checkpoints=True,
+        checkpoints=False,
         deterministic=True
     )
     

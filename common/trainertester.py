@@ -175,7 +175,7 @@ def run_model_on_vec_env(model: BaseAlgorithm, env: GeneralForexEnv, data_path: 
             print("Warning: tqdm is not installed. Progress bar will not be shown. "
                   "Install with: pip install tqdm")
 
-    step_count = 0
+    step_count = 1
     while step_count < total_steps:
         action, _ = model.predict(obs, deterministic=deterministic)
         next_obs, rewards, dones, infos = env.step(action)
@@ -191,8 +191,15 @@ def run_model_on_vec_env(model: BaseAlgorithm, env: GeneralForexEnv, data_path: 
             }
             collected_log_entries.append(log_entry)
 
+        if pbar:
+            pbar.update(1)
+
+        # If done, break out of the while loop
+        if any(dones):
             if pbar:
-                pbar.update(1)
+                pbar.set_description("Episode completed")
+            # Reset the environment
+            obs = env.reset()
 
         obs = next_obs
         step_count += 1
@@ -272,7 +279,7 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
 
     # calculate sharpe ratio on the close prices of equity
     returns = df['info.agent_data.equity.close'].pct_change().dropna()
-    sharpe_ratio = returns.mean() / returns.std() * (252 ** 0.5)  # Annualized Sharpe Ratio
+    sharpe_ratio = returns.mean() / returns.std()
 
     return {
         "sharpe_ratio": sharpe_ratio,
