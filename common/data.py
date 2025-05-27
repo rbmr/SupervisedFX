@@ -71,7 +71,7 @@ class ForexRef(NamedTuple):
         path = path.resolve()
         assert path.is_file(), "Path must point to a file."
         assert path.is_relative_to(FOREX_DIR), f"File must be inside {FOREX_DIR}."
-        path = path.relative_to(FOREX_DIR)
+        path = path.relative_to(FOREX_DIR, walk_up=False)
         pair, gran, off, fname = path.parts
         assert len(pair) == 6, "Currency pairs must be 6 characters, ex: EURUSD, GBPUSD, etc"
         c1 = Currency(pair[:3])
