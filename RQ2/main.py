@@ -28,12 +28,16 @@ if __name__ == '__main__':
     TRANSACTION_COST_PCT = 0.0 # Example: 0.1% commission per trade
 
     # Get ask and bid data, and combine
-    ask_path = FOREX_DIR / "EURUSD" / "15M" / "ASK" / "10.05.2022T00.00-10.05.2025T23.45.csv"
-    bid_path = FOREX_DIR / "EURUSD" / "15M" / "BID" / "10.05.2022T00.00-10.05.2025T23.45.csv"
-    ask_df = ForexData(ask_path).df
-    bid_df = ForexData(ask_path).df
-    forex_data = combine_df(bid_df, ask_df)
+    # ask_path = FOREX_DIR / "EURUSD" / "15M" / "ASK" / "10.05.2022T00.00-10.05.2025T23.45.csv"
+    # bid_path = FOREX_DIR / "EURUSD" / "15M" / "BID" / "10.05.2022T00.00-10.05.2025T23.45.csv"
+    # ask_df = ForexData(ask_path).df
+    # bid_df = ForexData(ask_path).df
+    # forex_data = combine_df(bid_df, ask_df)
     # forex_data = filter_df(forex_data)
+
+    forex_data_path = DATA_DIR / "capitalcom" / "EURUSD_MINUTE_15.csv"
+    forex_data = pd.read_csv(forex_data_path, parse_dates=[Col.TIME])
+    forex_data = forex_data.drop(columns=['date'], errors='ignore')
     train_df, eval_df = split_df(forex_data, 0.7)
 
     # --- Feature Engineering ---
@@ -93,7 +97,7 @@ if __name__ == '__main__':
         model=model,
         base_folder_path=RQ2_DIR,
         experiment_group_name="testing123",
-        experiment_name="test2",
+        experiment_name="capitalcom",
         train_episodes=1,
         eval_episodes=1,
         checkpoints=False,

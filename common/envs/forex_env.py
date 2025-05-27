@@ -35,8 +35,7 @@ class OHLCV(NamedTuple):
     low_ask: float
     close_bid: float
     close_ask: float
-    volume_bid: float
-    volume_ask: float
+    volume: float
     date_gmt: pd.Timestamp
 
 class GeneralForexEnv(gym.Env):
@@ -61,7 +60,7 @@ class GeneralForexEnv(gym.Env):
         # Check if market_data_df is a DataFrame and contains the required columns
         if not isinstance(market_data_df, pd.DataFrame):
             raise ValueError(f"market_data_df must be a pandas DataFrame, was {type(market_data_df)}.")
-        required_columns = {"open_bid", "open_ask", "high_bid", "high_ask", "low_bid", "low_ask", "close_bid", "close_ask", "volume_bid", "volume_ask", "date_gmt"}
+        required_columns = {"open_bid", "open_ask", "high_bid", "high_ask", "low_bid", "low_ask", "close_bid", "close_ask", "volume", "date_gmt"}
         if not required_columns.issubset(market_data_df.columns):
             raise ValueError(f"market_data_df must contain the following columns: {required_columns}, was {market_data_df.columns}.")
         
@@ -234,8 +233,7 @@ class GeneralForexEnv(gym.Env):
                 'low_ask': self.market_data_accessor[self.current_step,'low_ask'],
                 'close_bid': self.market_data_accessor[self.current_step,'close_bid'],
                 'close_ask': self.market_data_accessor[self.current_step,'close_ask'],
-                'volume_bid': self.market_data_accessor[self.current_step,'volume_bid'],
-                'volume_ask': self.market_data_accessor[self.current_step,'volume_ask']
+                'volume': self.market_data_accessor[self.current_step,'volume'],
             },
             'agent_data': {
                 'cash': self.agent_data_accessor[self.current_step,'cash'],
@@ -280,8 +278,7 @@ class GeneralForexEnv(gym.Env):
             low_ask=self.market_data_accessor[self.current_step, 'low_ask'],
             close_bid=self.market_data_accessor[self.current_step, 'close_bid'],
             close_ask=self.market_data_accessor[self.current_step, 'close_ask'],
-            volume_bid=self.market_data_accessor[self.current_step, 'volume_bid'],
-            volume_ask=self.market_data_accessor[self.current_step, 'volume_ask'],
+            volume=self.market_data_accessor[self.current_step, 'volume'],
             date_gmt=self.market_data_accessor[self.current_step, 'date_gmt']
         )
         return data
