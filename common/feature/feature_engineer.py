@@ -31,7 +31,7 @@ class FeatureEngineer:
         
         return df
     
-def remove_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
+def remove_ohlcv(df: pd.DataFrame):
     """
     Remove OHLCV columns from the DataFrame.
     """
@@ -40,7 +40,7 @@ def remove_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
                      'open_ask', 'high_ask', 'low_ask', 'close_ask', 'volume_ask']
     df.drop(columns=ohlcv_columns, inplace=True, errors='ignore')
 
-def history_lookback(df: pd.DataFrame, lookback_window_size: int, columns: List[str] = None) -> pd.DataFrame:
+def history_lookback(df: pd.DataFrame, lookback_window_size: int, columns: List[str] = None):
     """
     Create a history lookback window for the DataFrame.
     """
