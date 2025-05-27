@@ -8,8 +8,8 @@ from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.evaluation import evaluate_policy
 
-from common_rq5.constants import DEVICE, SEED
-from common_rq5.data import ForexData, combine_df
+from common.constants import DEVICE, SEED
+from common.data import ForexData, combine_df
 
 def make_env(df, seed=None):
     def _init():

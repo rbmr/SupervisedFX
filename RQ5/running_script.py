@@ -3,7 +3,7 @@ import pandas as pd
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 from ForexEnv_RQ5 import ForexEnv  # or your env filename
-from common_rq5.data import ForexData, combine_df
+from common.data import ForexData, combine_df
 
 # --- Load your saved model ---
 model_path = "D:\\Facultate\\Y3\\Q4\\TUD-CSE-RP-RLinFinance\\RQ5\\models\\dqn_forex_model.zip"
