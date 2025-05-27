@@ -27,7 +27,7 @@ print("Train samples:", len(train_df))
 print("Test samples:", len(test_df))
 
 # --- Create test environment ---
-env = DummyVecEnv([lambda: ForexEnv(test_df.copy(), log_level=0, debug_mode=True)])
+env = DummyVecEnv([lambda: ForexEnv(test_df.copy(), log_level=0, debug_mode=False)])
 
 obs = env.reset()
 terminated = False

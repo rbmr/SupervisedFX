@@ -6,7 +6,8 @@ from stockstats import StockDataFrame
 import time
 
 INITIAL_CAPITAL = 10000.0
-TRANSACTION_COST_PCT = 0.001
+TRANSACTION_COST_PCT = 0
+# TRANSACTION_COST_PCT = 0.001
 LOOKBACK_WINDOW_SIZE = 30
 
 RSI_PERIOD = 14
@@ -125,8 +126,8 @@ class ForexEnv(gym.Env):
         return self.cash
 
     def step(self, action):
-        if self.debug_mode:
-            time.sleep(2)
+        # if self.debug_mode:
+        #     time.sleep(2)
         self.current_step += 1
         bid, ask = self._get_current_prices()
 
