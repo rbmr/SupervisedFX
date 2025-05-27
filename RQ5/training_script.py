@@ -1,8 +1,3 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from collections import Counter
-
 from ForexEnv_RQ5 import ForexEnv
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import SubprocVecEnv

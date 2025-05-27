@@ -1,20 +1,17 @@
 import sys
 import os
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Add project root (2 levels up from RQ5/secondary/general/) to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from collections import Counter
+from common.data import ForexData, combine_df
+from RQ5.ForexEnv_RQ5 import ForexEnv
 
-from ForexEnv_RQ5 import ForexEnv
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.evaluation import evaluate_policy
 
 from common.constants import DEVICE, SEED
-from common.data import ForexData, combine_df
 
 def make_env(df, seed=None):
     def _init():
@@ -67,6 +64,6 @@ if __name__ == "__main__":
     )
 
     # Train
-    TOTAL_TIMESTEPS = 100_000
+    TOTAL_TIMESTEPS = 10_000
     model.learn(total_timesteps=TOTAL_TIMESTEPS, log_interval=100_000, progress_bar=True)
     model.save("D:\\Facultate\\Y3\\Q4\\TUD-CSE-RP-RLinFinance\\RQ5\\models\\dqn_forex_model.zip")

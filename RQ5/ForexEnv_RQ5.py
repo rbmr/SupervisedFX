@@ -3,7 +3,6 @@ import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
 from stockstats import StockDataFrame
-import time
 
 INITIAL_CAPITAL = 10000.0
 TRANSACTION_COST_PCT = 0

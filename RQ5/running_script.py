@@ -1,5 +1,3 @@
-import numpy as np
-import pandas as pd
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 from ForexEnv_RQ5 import ForexEnv  # or your env filename
