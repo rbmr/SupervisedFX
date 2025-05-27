@@ -81,21 +81,19 @@ def split_df(df: pd.DataFrame, ratio: float):
 
 def find_first_row_without_nan(df: pd.DataFrame) -> int:
     """
-    Removes leading rows with NaN values in any of the columns
+    Returns the index of the first row that contains no NaN values.
+    Returns -1 if no such row exists.
     """
-    found_nan = True
-    index = 0
+    valid_rows = df[~df.isna().any(axis=1)]
+    return valid_rows.index.min() if not valid_rows.empty else -1
 
-    while found_nan:
-        found_nan = False
-        for col in df.columns:
-            if pd.isna(df.iloc[index][col]):
-                found_nan = True
-                break
-        if found_nan:
-            index += 1
-
-    return index
+def find_first_row_with_nan(df: pd.DataFrame) -> int:
+    """
+    Returns the index of the first row that contains a NaN value.
+    Returns -1 if no such row exists.
+    """
+    nan_mask = df.isna().any(axis=1)
+    return nan_mask.idxmax() if nan_mask.any() else -1
 
 def run_model_on_vec_env(
         model: Any,
