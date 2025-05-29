@@ -7,7 +7,7 @@ import numpy as np
 from gymnasium import spaces
 from typing import NamedTuple, Optional, Callable, Dict, Any
 
-from common.data import ForexData
+from common.data import ForexCandleData
 from common.feature.feature_engineer import FeatureEngineer
 from common.feature.stepwise_feature_engineer import StepwiseFeatureEngineer
 from common.constants import *

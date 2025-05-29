@@ -11,7 +11,7 @@ from common.feature.feature_engineer import FeatureEngineer, rsi, history_lookba
 from common.feature.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
 from RQ2.constants import RQ2_DIR
 
-from common.data import ForexData
+from common.data import ForexCandleData, Timeframe
 from common.trainertester import train_test_analyze
 from common.constants import *
 from common.scripts import *
@@ -25,20 +25,16 @@ if __name__ == '__main__':
 
     # --- Configuration Parameters ---
     INITIAL_CAPITAL = 10000.0
-    TRANSACTION_COST_PCT = 0.0 # Example: 0.1% commission per trade
+    TRANSACTION_COST_PCT = 0.0
 
-    # Get ask and bid data, and combine
-    # ask_path = FOREX_DIR / "EURUSD" / "15M" / "ASK" / "10.05.2022T00.00-10.05.2025T23.45.csv"
-    # bid_path = FOREX_DIR / "EURUSD" / "15M" / "BID" / "10.05.2022T00.00-10.05.2025T23.45.csv"
-    # ask_df = ForexData(ask_path).df
-    # bid_df = ForexData(ask_path).df
-    # forex_data = combine_df(bid_df, ask_df)
-    # forex_data = filter_df(forex_data)
-
-    forex_data_path = DATA_DIR / "capitalcom" / "EURUSD_MINUTE_15.csv"
-    forex_data = pd.read_csv(forex_data_path, parse_dates=[Col.TIME])
-    forex_data = forex_data.drop(columns=['date'], errors='ignore')
-    train_df, eval_df = split_df(forex_data, 0.7)
+    forex_data = ForexCandleData.load(source="dukascopy",
+                                      instrument="EURUSD",
+                                      granularity=Timeframe.M15,
+                                      start_time=datetime(2022, 1, 2, 22, 0, 0, 0),
+                                      end_time=datetime(2025, 5, 16, 20, 45, 0, 0),
+                                    )
+    forex_data_df = forex_data.df
+    train_df, eval_df = split_df(forex_data_df, 0.7)
 
     # --- Feature Engineering ---
     # Create a feature engineer object

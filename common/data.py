@@ -5,10 +5,263 @@ from typing import Union, List, Dict, Any, Optional
 from pathlib import Path
 from enum import Enum
 import matplotlib.pyplot as plt # Duplicate import, but keeping as in original
+from common.constants import DATA_DIR
+import lzma
+import struct
+import pandas as pd
+import numpy as np
+import os
+import sys
+import io
+import requests
+import calendar
+from datetime import datetime
 
 # Mock DATA_DIR for standalone execution
-DATA_DIR = Path("./forex_data_output") # You can change this to your preferred output directory
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+class DukascopyDataDownloader:
+    def __init__(self):
+        pass
+
+    
+    def _bi5_to_df_from_bytes(self, data_bytes, fmt):
+        """
+        Converts bi5 formatted byte data (after LZMA decompression) into a Pandas DataFrame.
+
+        Args:
+            data_bytes (bytes): The byte content of the bi5 data (must be LZMA compressed).
+            fmt (str): The struct format string for unpacking the binary data.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing the tick data, or None if an error occurs.
+        """
+        chunk_size = struct.calcsize(fmt)
+        data = []
+        try:
+            # Wrap the byte data in an io.BytesIO object to make it file-like
+            # Then open it with lzma to decompress
+            with lzma.open(io.BytesIO(data_bytes)) as f:
+                while True:
+                    chunk = f.read(chunk_size)
+                    if chunk:
+                        if len(chunk) == chunk_size: # Ensure the chunk is complete
+                            data.append(struct.unpack(fmt, chunk))
+                        else:
+                            # Handle potential incomplete chunk at the end of the stream if necessary
+                            # For tick data, usually, an incomplete chunk means corrupted data or end of a non-aligned stream
+                            print(f"Warning: Incomplete chunk of size {len(chunk)} read, expected {chunk_size}. Skipping.")
+                            break
+                    else:
+                        break
+            df = pd.DataFrame(data)
+            return df
+        except lzma.LZMAError as e:
+            print(f"Error decompressing data: {e}")
+            return None
+        except Exception as e:
+            print(f"Error processing bi5 data: {e}")
+            return None
+
+    def _request_tick_data(self, symbol, year, month, day, hour, tick_format='>IIIff'): # Added tick_format
+        """
+        Downloads tick data for a given symbol and time, then converts it to a DataFrame.
+
+        Args:
+            symbol (str): The trading symbol (e.g., "EURUSD").
+            year (int): The year.
+            month (int): The month (1-12).
+            day (int): The day.
+            hour (int): The hour (0-23).
+            tick_format (str): The struct format for unpacking tick data.
+                            Default is '>iIIii' for Dukascopy (time, ask, bid, ask_vol, bid_vol).
+
+        Returns:
+            pd.DataFrame: A DataFrame containing the tick data, or None if an error occurs.
+        """
+        # Dukascopy month is 0-indexed for the URL, but we accept 1-12 for convenience
+        req_month = month - 1
+
+        symbol_upper = symbol.upper()
+
+        # year as string of 4 digits, month and day as string of 2 digits for URL
+        year_str = str(year).zfill(4)
+        month_str = str(req_month).zfill(2) # Use req_month for URL
+        day_str = str(day).zfill(2)
+        hour_str = str(hour).zfill(2)
+
+        # Construct the URL (example was hardcoded to EURUSD and 2025, making it dynamic)
+        # url = f"https://datafeed.dukascopy.com/datafeed/EURUSD/2025/{month_str}/{day_str}/{hour_str}h_ticks.bi5" # Original
+        url = f"https://datafeed.dukascopy.com/datafeed/{symbol_upper}/{year_str}/{month_str}/{day_str}/{hour_str}h_ticks.bi5"
+        print(f"Requesting data from {url}")
+
+        try:
+            response = requests.get(url, timeout=10) # Added timeout
+            response.raise_for_status() # Raises an HTTPError for bad responses (4XX or 5XX)
+            file_content = response.content
+
+            # --- Optional: Save the file if you still need it ---
+            # filename = f"{symbol_upper}_{year_str}{str(month).zfill(2)}{day_str}_{hour_str}h_ticks.bi5" # Use original month for filename
+            # folder = "data"
+            # filepath = f"{folder}/{filename}"
+            # import os
+            # if not os.path.exists(folder):
+            #     os.makedirs(folder)
+            # with open(filepath, 'wb') as f:
+            #     f.write(file_content)
+            # print(f"File saved to {filepath}")
+            # --- End Optional Save ---
+
+            # Directly process the downloaded content
+            df = self._bi5_to_df_from_bytes(file_content, tick_format)
+
+            if df is not None and not df.empty:
+                # Assuming the standard Dukascopy format: timestamp, ask, bid, ask_volume, bid_volume
+                df.columns = ['ms_offset', 'ask', 'bid', 'ask_vol', 'bid_vol']
+
+                # Convert timestamp (milliseconds offset from the hour) to a proper datetime
+                base_datetime = pd.Timestamp(f'{year}-{month}-{day} {hour}:00:00')
+                df['time'] = base_datetime + pd.to_timedelta(df['ms_offset'], unit='ms')
+
+                # Convert prices (Dukascopy stores prices as integers, e.g., EURUSD 1.23456 is 123456)
+                # The divisor depends on the symbol's pip definition.
+                # For EURUSD, it's usually 10^5. For JPY pairs, it might be 10^3.
+                # This needs to be adjusted based on the symbol.
+                divisor = 100000.0 if 'JPY' not in symbol_upper else 1000.0 # Simplified logic
+                df['ask'] = df['ask'] / divisor
+                df['bid'] = df['bid'] / divisor
+                # Volumes are typically floats representing millions
+                df['ask_vol'] = df['ask_vol'] / 1000000.0
+                df['bid_vol'] = df['bid_vol'] / 1000000.0
+
+                df = df[['time', 'ask', 'bid', 'ask_vol', 'bid_vol']] # Reorder and select columns
+
+            return df
+
+        except requests.exceptions.HTTPError as e:
+            print(f"HTTP error downloading file: {e}")
+            return None
+        except requests.exceptions.RequestException as e:
+            print(f"Error downloading file: {e}")
+            return None
+        except Exception as e:
+            print(f"An unexpected error occurred in request_tick_data: {e}")
+            return None
+        
+    def _request_ticks_for_day(self, symbol, year, month, day, tick_format='>IIIff'):
+        """
+        Requests tick data for a specific day and symbol for each hour of that day.
+
+        Args:
+            symbol (str): The trading symbol (e.g., "EURUSD").
+            year (int): The year.
+            month (int): The month (1-12).
+            day (int): The day.
+            tick_format (str): The struct format for unpacking tick data.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing the tick data for the entire day,
+                        or None if no data is successfully retrieved.
+        """
+        # Create a list to hold DataFrames for each hour
+        hourly_data = []
+
+        # Get the number of hours in the day (24 for most days, 23 for DST changes)
+        num_hours = 24
+
+        # Loop through each hour of the day
+        for hour in range(num_hours):
+            print(f"Requesting data for {symbol} on {year}-{month:02d}-{day:02d} at hour {hour:02d}")
+            df = self._request_tick_data(symbol, year, month, day, hour, tick_format)
+            if df is not None and not df.empty:
+                hourly_data.append(df)
+
+        # Concatenate all hourly DataFrames into one
+        if hourly_data:
+            full_day_df = pd.concat(hourly_data, ignore_index=True)
+            return full_day_df
+        else:
+            print(f"No data retrieved for {symbol} on {year}-{month:02d}-{day:02d}")
+            return None
+        
+    def _request_ticks_for_month(self, symbol, year, month, tick_format='>IIIff'):
+        """
+        Requests tick data for a specific month and symbol.
+
+        Args:
+            symbol (str): The trading symbol (e.g., "EURUSD").
+            year (int): The year.
+            month (int): The month (1-12).
+            tick_format (str): The struct format for unpacking tick data.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing the tick data for the entire month.
+        """
+        # Get the number of days in the month
+        num_days = calendar.monthrange(year, month)[1]
+
+        # Initialize an empty list to store DataFrames
+        dfs = []
+
+        # Loop through each day of the month
+        for day in range(1, num_days + 1):
+            df = self._request_ticks_for_day(symbol, year, month, day, tick_format)
+            if df is not None and not df.empty:
+                dfs.append(df)
+
+        # Concatenate all DataFrames into one
+        if dfs:
+            return pd.concat(dfs, ignore_index=True)
+        else:
+            print("No data available for the specified month.")
+        return None
+    
+    def request_ticks_for_year(self, symbol, year, tick_format='>IIIff') -> 'ForexTickData':
+        """
+        Downloads tick data for a given symbol and year, then converts it to a DataFrame.
+
+        Args:
+            symbol (str): The trading symbol (e.g., "EURUSD").
+            year (int): The year.
+            tick_format (str): The struct format for unpacking tick data.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing the tick data for the entire year, or None if an error occurs.
+        """
+
+        symbol = symbol.upper()
+
+        all_data = []
+        for month in range(1, 13):
+            for day in range(1, 32):
+                for hour in range(0, 24):
+                    df = self._request_tick_data(symbol, year, month, day, hour, tick_format)
+                    if df is not None and not df.empty:
+                        all_data.append(df)
+
+        final_df = pd.concat(all_data, ignore_index=True) if all_data else None
+
+        if final_df is None or final_df.empty:
+            print(f"No data retrieved for {symbol} in {year}.")
+            return None
+        
+        file_path = DATA_DIR / "TICK" / "DUKASCOPY" / "EURUSD" / f"{year}.csv"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        final_df.to_csv(file_path, index=False)
+        
+        forex_tick_data = ForexTickData(
+            source='DUKASCOPY',
+            instrument=symbol,
+            ask_column='ask',
+            bid_column='bid',
+            time_column='time',
+            volume_column=None,
+            df=final_df)
+        
+        return forex_tick_data
+
+
+        
 
 class Timeframe(Enum):
     M1 = "1Min"
@@ -137,52 +390,7 @@ class ForexTickData:
         if self.volume_column and not pd.api.types.is_numeric_dtype(self.df[self.volume_column]):
             raise ValueError(f"Column {self.volume_column} must be numeric.")
 
-    def convert_analyze_save(self, granularity: Timeframe) -> pd.DataFrame:
-        """
-        Converts the tick data to OHLCV format and saves it to a CSV file.
-
-        Parameters
-        ----------
-        granularity : Timeframe
-            The desired time granularity for the data.
-
-        Returns
-        -------
-        pd.DataFrame
-            A DataFrame with the converted OHLCV data.
-        """
-        if self.df.empty:
-            print("DataFrame is empty. Skipping conversion and analysis.")
-            return pd.DataFrame()
-
-        # Ensure the index is datetime
-        if not isinstance(self.df.index, pd.DatetimeIndex):
-             if self.time_column in self.df.columns:
-                self.df[self.time_column] = pd.to_datetime(self.df[self.time_column])
-                self.df = self.df.set_index(self.time_column)
-             elif self.df.index.name == self.time_column and not pd.api.types.is_datetime64_any_dtype(self.df.index):
-                 self.df.index = pd.to_datetime(self.df.index)
-             else:
-                raise ValueError("DataFrame index is not a DatetimeIndex and time column cannot be set as index.")
-
-
-        start_time = self.df.index.min()
-        end_time = self.df.index.max()
-
-        # Create the file path based on source, instrument, and granularity, and start and end time
-        folder_path = DATA_DIR / self.source / self.instrument / granularity.to_pandas_freq() / f"{start_time.strftime('%Y%m%d%H%M%S')}_{end_time.strftime('%Y%m%d%H%M%S')}"
-
-        ohlcv_df = self._convert(granularity.to_pandas_freq())
-
-        if ohlcv_df.empty:
-            print(f"No data to process for {self.instrument} at {granularity.to_pandas_freq()} granularity.")
-            return ohlcv_df
-
-        self._clean_analyze_save(ohlcv_df, folder_path, granularity_in_minutes=granularity.as_minutes())
-        return ohlcv_df
-
-
-    def _convert(self, pandas_freq: str) -> pd.DataFrame:
+    def to_candles(self, granularity: Timeframe) -> 'ForexCandleData':
         """
         Converts the tick data to OHLCV format for both bid and ask prices.
 
@@ -198,7 +406,20 @@ class ForexTickData:
             and volume. Volume is calculated as the sum of the specified volume_column
             if present, otherwise as the count of ticks.
         """
+
+        pandas_freq = granularity.to_pandas_freq()
+
         print(f"Converting tick data to {pandas_freq} OHLCV candles...")
+
+        # Ensure the index is datetime
+        if not isinstance(self.df.index, pd.DatetimeIndex):
+             if self.time_column in self.df.columns:
+                self.df[self.time_column] = pd.to_datetime(self.df[self.time_column])
+                self.df = self.df.set_index(self.time_column)
+             elif self.df.index.name == self.time_column and not pd.api.types.is_datetime64_any_dtype(self.df.index):
+                 self.df.index = pd.to_datetime(self.df.index)
+             else:
+                raise ValueError("DataFrame index is not a DatetimeIndex and time column cannot be set as index.")
 
         # Ensure the index is datetime for resampling
         if not isinstance(self.df.index, pd.DatetimeIndex):
@@ -206,11 +427,11 @@ class ForexTickData:
 
         # Resample for Bid OHLC
         bid_ohlc = self.df[self.bid_column].resample(pandas_freq).ohlc()
-        bid_ohlc.columns = [f'bid_{col}' for col in bid_ohlc.columns]
+        bid_ohlc.columns = [f'{col}_bid' for col in bid_ohlc.columns]
 
         # Resample for Ask OHLC
         ask_ohlc = self.df[self.ask_column].resample(pandas_freq).ohlc()
-        ask_ohlc.columns = [f'ask_{col}' for col in ask_ohlc.columns]
+        ask_ohlc.columns = [f'{col}_ask' for col in ask_ohlc.columns]
 
         # Calculate Volume based on available columns
         if self.volume_column:
@@ -241,131 +462,164 @@ class ForexTickData:
                 print("Warning: Could not automatically identify and rename the time column to 'date_gmt'.")
 
 
-        return ohlcv_df
+        return ForexCandleData(
+            source=self.source,
+            instrument=self.instrument,
+            granularity= granularity,
+            df=ohlcv_df
+        )
 
-    def _clean_analyze_save(self, df: pd.DataFrame, folder_path: Path, granularity_in_minutes: int):
+
+class ForexCandleData:
+    def __init__(self, source: str, instrument: str, granularity: Timeframe, df: pd.DataFrame):
+        self.source = source.upper()
+        self.instrument = instrument.upper()
+        self.granularity = granularity
+        self.df = df.copy()
+        self.validate_dataframe()
+
+        self.df = self.df.sort_values(by='date_gmt')
+        self.df = self.df[self.df['volume'] > 0]
+
+        # dropna
+        self.df.dropna(inplace=True)
+        # reset index
+        self.df.reset_index(drop=True, inplace=True)
+
+        if self.df.empty:
+            print("DataFrame is empty after cleaning (volume > 0 and dropna). No data to save or analyze.")
+
+    @staticmethod
+    def load(source: str, instrument: str, granularity: Timeframe, start_time: datetime, end_time: datetime) -> 'ForexCandleData':
+        file_path = DATA_DIR / source.upper() / instrument.upper() / granularity.to_pandas_freq() / f"{start_time.strftime('%Y%m%d%H%M%S')}_{end_time.strftime('%Y%m%d%H%M%S')}" / "data.csv" if start_time and end_time else None
+
+        print(f"Loading Forex data from {file_path}...")
+
+        if file_path and file_path.is_file():
+            df = pd.read_csv(file_path)
+            df['date_gmt'] = pd.to_datetime(df['date_gmt'])
+            return ForexCandleData(source=source, instrument=instrument, granularity=granularity, df=df)
+        else:
+            raise FileNotFoundError(f"No data file found for {source}, {instrument}, {granularity} in the specified date range.")
+
+    
+    def validate_dataframe(self):
         """
-        Cleans, analyzes, and saves the OHLCV DataFrame to a CSV file.
+        Validates that the DataFrame contains all required columns.
+        Raises
+        -------
+        ValueError
+            If the DataFrame does not contain the required columns.
+        """
+        required_columns = ['date_gmt', 'open_bid', 'high_bid', 'low_bid', 'close_bid',
+                            'open_ask', 'high_ask', 'low_ask', 'close_ask', 'volume']
+        if not all(col in self.df.columns for col in required_columns):
+            expected_columns = set(required_columns)
+            actual_columns = set(self.df.columns)
+            missing_columns = expected_columns - actual_columns
+            raise ValueError(f"DataFrame is missing required columns: {missing_columns}")
+
+        # Ensure date_gmt is datetime
+        if not pd.api.types.is_datetime64_any_dtype(self.df['date_gmt']):
+            try:
+                self.df['date_gmt'] = pd.to_datetime(self.df['date_gmt'])
+            except Exception as e:
+                raise ValueError(f"Could not convert 'date_gmt' to datetime: {e}")
+    
+    def combine(self, other: 'ForexCandleData') -> 'ForexCandleData':
+        """
+        Combines two ForexData objects into one.
 
         Parameters
         ----------
-        df : pd.DataFrame
-            The DataFrame containing OHLCV data.
+        other : ForexData
+            Another ForexData object to combine with this one.
+
+        Returns
+        -------
+        ForexData
+            A new ForexData object containing the combined data.
+        """
+        if self.source != other.source or self.instrument != other.instrument or self.granularity != other.granularity:
+            raise ValueError("Cannot combine ForexData from different sources, instruments, or granularities.")
+
+        # if date ranges overlap, fail
+        if not (self.df['date_gmt'].max() < other.df['date_gmt'].min() or
+                other.df['date_gmt'].max() < self.df['date_gmt'].min()):
+            raise ValueError("Cannot combine ForexData with overlapping date ranges.")
+
+        combined_df = pd.concat([self.df, other.df]).drop_duplicates(subset='date_gmt').reset_index(drop=True)
+        return ForexCandleData(source=self.source, instrument=self.instrument, granularity=self.granularity, df=combined_df)
+    
+    def set_period(self, start: Optional[pd.Timestamp] = None, end: Optional[pd.Timestamp] = None) -> 'ForexCandleData':
+        """
+        Sets the period for the ForexCandleData object.
+
+        Parameters
+        ----------
+        start : pd.Timestamp, optional
+            The start date for the period. If None, uses the earliest date in the DataFrame.
+        end : pd.Timestamp, optional
+            The end date for the period. If None, uses the latest date in the DataFrame.
+
+        Returns
+        -------
+        ForexCandleData
+            A new ForexCandleData object with the specified period.
+        """
+        if start is None:
+            start = self.df['date_gmt'].min()
+        if end is None:
+            end = self.df['date_gmt'].max()
+
+        filtered_df = self.df[(self.df['date_gmt'] >= start) & (self.df['date_gmt'] <= end)].copy()
+        return ForexCandleData(source=self.source, instrument=self.instrument, granularity=self.granularity, df=filtered_df)
+    
+    def analyse_save(self):
+        """
+        Analyzes the Forex data and saves it to a CSV file.
+
+        Parameters
+        ----------
         folder_path : Path
             The path where the CSV file will be saved.
-        granularity_in_minutes : int
-            The granularity of the data in minutes.
         """
-        if 'date_gmt' not in df.columns:
-            print("Error: 'date_gmt' column missing in OHLCV data. Skipping clean, analyze, save.")
+
+        if self.df.empty:
+            print("DataFrame is empty. Skipping analysis and save.")
             return
+        
+        start_time = self.df['date_gmt'].min()
+        end_time = self.df['date_gmt'].max()
 
-        print(f"Cleaning and analyzing OHLCV data for {self.instrument} at {granularity_in_minutes} minutes...")
+        folder_path = DATA_DIR / self.source / self.instrument / self.granularity.to_pandas_freq() / f"{start_time.strftime('%Y%m%d%H%M%S')}_{end_time.strftime('%Y%m%d%H%M%S')}"
+        folder_path.mkdir(parents=True, exist_ok=True)
+        file_name = "data.csv"
+        file_path = folder_path / file_name
 
-        df['date_gmt'] = pd.to_datetime(df['date_gmt'])
-        df = df.sort_values(by='date_gmt')
+        print(f"Saving Forex data to {file_path}...")
+        self.df.to_csv(file_path, index=False)
+        print(f"Saved Forex data to {file_path}")
 
-        # filter where volume is greater than 0
-        df = df[df['volume'] > 0]
+        # ANALYSIS
+        print(f"Analyzing Forex data for {self.instrument} at {self.granularity.to_pandas_freq()} granularity...")
 
-        # dropna
-        df.dropna(inplace=True)
-        # reset index
-        df.reset_index(drop=True, inplace=True)
+        granularity_in_minutes = self.granularity.as_minutes()
 
-        if df.empty:
-            print("DataFrame is empty after cleaning (volume > 0 and dropna). No data to save or analyze.")
-            folder_path.mkdir(parents=True, exist_ok=True) # Create folder even if no data
-            no_data_file = folder_path / "no_data_after_cleaning.txt"
-            with open(no_data_file, 'w') as f:
-                f.write(f"No data remained for {self.instrument} at {granularity_in_minutes} min granularity after filtering for volume > 0 and dropping NA values.\n")
-            return
+        self.df['time_diff'] = self.df['date_gmt'].diff().dt.total_seconds() / 60
+        self.df['time_diff'].fillna(0, inplace=True)
 
-
-        df['time_diff'] = df['date_gmt'].diff().dt.total_seconds() / 60
-        df['time_diff'].fillna(0, inplace=True) # Fill NaN for the first row
-
-        # Define expected difference, allowing for weekend gaps.
-        # Forex market closes on Friday evening and reopens Sunday evening.
-        # A typical weekend gap might be around 48 hours (2 days) + time until next candle.
-        # For simplicity, let's define a generous weekend gap threshold.
-        # Consider a gap from Friday 21:00 GMT to Sunday 21:00 GMT = 48 hours.
-        # If granularity is H1, the next candle after Friday 21:00 is Sunday 22:00.
-        # The diff would be 48 hours + 1 hour = 49 hours for H1.
-        # For M15, diff would be 48h + 15min.
-        # A more robust way is to check if the time diff is significantly larger than granularity
-        # and also corresponds to a weekend.
-        # Max normal gap = granularity_in_minutes
-        # Min weekend gap (approx) = 2 * 24 * 60 (can be less, e.g. Fri 22:00 to Sun 22:00)
-        # Max weekend gap (approx) = 2 * 24 * 60 + some hours + granularity_in_minutes
-
-        # Simplified logic for identifying non-standard gaps (not exactly weekend or exact granularity)
-        # A gap is "missing" if it's NOT the expected granularity AND NOT a typical weekend gap.
-        # Typical weekend gap: Fri PM to Sun PM. For daily, it's just 2 days.
-        # Let's flag anything that isn't `granularity_in_minutes` or a multiple of it due to market close.
-        # A simple check: if time_diff > granularity_in_minutes and time_diff is not a known large gap (like weekend)
-        # The original logic: missing_rows = df[(df['time_diff'] != granularity_in_minutes) | (df['time_diff'] != weekend_in_minutes)]
-        # This OR condition means it flags rows if EITHER it's not granularity_in_minutes OR it's not weekend_in_minutes.
-        # This will flag almost everything if weekend_in_minutes is a single value.
-        # It should be: rows where time_diff is not granularity_in_minutes AND time_diff is not a weekend gap.
-
-        # Corrected logic for missing rows:
-        # A row indicates a gap *before* it. The 'time_diff' is the duration since the *previous* candle.
-        # We are looking for gaps where the time difference to the *previous* candle is not the standard granularity,
-        # and also not a standard weekend gap.
-        standard_gap = granularity_in_minutes
-        # Approximate weekend gap (e.g. Friday 21:00 to Sunday 21:00 = 48 hours = 2880 minutes)
-        # This needs to be more flexible. Forex closes roughly Friday 21:00/22:00 GMT to Sunday 21:00/22:00 GMT.
-        # Let's allow a range for weekend gaps. min_weekend_gap ~40 hours, max_weekend_gap ~55 hours.
-        # This depends on the exact closing/opening times which vary by broker/source.
-        # For simplicity, the original code used a fixed `weekend_in_minutes`.
-        # Let's use a threshold: if a gap is > granularity_in_minutes * factor_for_small_gaps AND not clearly a weekend.
-        # For now, stick to a simplified version of the original intent: highlight unexpected gaps.
-        # We consider a row as "following a gap" if 'time_diff' is unusual.
-        # The time_diff of the first valid row after a gap will be large.
-
-        # Filter for rows where the preceding gap was NOT the expected granularity
-        # and also NOT a typical weekend gap.
-        # Weekend gaps can be tricky because their exact duration varies slightly.
-        # Let's define a weekend gap as roughly 2 days.
-        # A common pattern: Friday close (e.g., 21:00 UTC) to Sunday open (e.g., 21:00 UTC).
-        # This is a ~48-hour gap. The `time_diff` for the first candle after the weekend
-        # would be `granularity_in_minutes + ~48 hours`.
-
-        # Example: H1 data (60 min). First candle after weekend. Previous was Friday 20:00-21:00. Next is Sunday 21:00-22:00.
-        # Time diff could be (Sunday 21:00 - Friday 21:00) = 48 hours = 2880 minutes.
-        # This is the time from the *start* of the previous candle interval to the *start* of the current.
-        # So time_diff should be around 2 days if it's a weekend.
-
-        # Let's consider a gap "missing" if it's greater than the granularity but not a plausible weekend gap.
-        # A plausible weekend gap is roughly 2 days (2880 minutes) up to 2 days + a few hours.
-        # For M1 data, weekend_in_minutes = 2880 + 1 = 2881
-        # For H1 data, weekend_in_minutes = 2880 + 60 = 2940
-
-        # The original logic:
-        # weekend_in_minutes = 60 * 24 * 2 + granularity_in_minutes
-        # This seems like a reasonable approximation for the time difference for the first candle after a weekend.
-        # missing_rows = df[(df['time_diff'] != granularity_in_minutes) | (df['time_diff'] != weekend_in_minutes)]
-        # This should be AND, or rather, a check for unexpected gaps.
-        # A gap is unexpected if: (time_diff > granularity_in_minutes) AND (time_diff is NOT a weekend_gap)
-        # Let's refine:
-        # A time_diff is "regular" if time_diff is approximately granularity_in_minutes.
-        # A time_diff is a "weekend" if time_diff is approximately weekend_duration_base + granularity_in_minutes.
-        # weekend_duration_base is approx 2 days.
-        # We use a small tolerance for floating point comparisons.
         tolerance = 0.1 * granularity_in_minutes # Allow 10% deviation for the base granularity
         weekend_base_duration_minutes = 2 * 24 * 60 # Approx 48 hours
 
-        is_standard_gap = np.isclose(df['time_diff'], granularity_in_minutes, atol=tolerance)
-        is_weekend_gap = np.isclose(df['time_diff'], weekend_base_duration_minutes + granularity_in_minutes, atol=granularity_in_minutes * 2) # Wider tolerance for weekends
+        is_standard_gap = np.isclose(self.df['time_diff'], granularity_in_minutes, atol=tolerance)
+        is_weekend_gap = np.isclose(self.df['time_diff'], weekend_base_duration_minutes + granularity_in_minutes, atol=granularity_in_minutes * 2) # Wider tolerance for weekends
 
         # Rows that are NOT preceded by a standard gap AND NOT preceded by a weekend gap
         # (and ignoring the first row which has time_diff = 0)
-        missing_rows_mask = (df['time_diff'] > 0) & ~is_standard_gap & ~is_weekend_gap
-        missing_rows = df[missing_rows_mask]
+        missing_rows_mask = (self.df['time_diff'] > 0) & ~is_standard_gap & ~is_weekend_gap
+        missing_rows = self.df[missing_rows_mask]
 
-
-        folder_path.mkdir(parents=True, exist_ok=True) # Ensure folder exists before writing files
 
         missing_rows_file_path = folder_path / f"missing_rows_analysis.txt"
         with open(missing_rows_file_path, 'w') as f:
@@ -391,12 +645,12 @@ class ForexTickData:
 
         # plot close prices with missing rows highlighted
         plt.figure(figsize=(15, 7))
-        plt.plot(df['date_gmt'], df['bid_close'], label='Bid Close', color='blue', linewidth=0.8)
-        plt.plot(df['date_gmt'], df['ask_close'], label='Ask Close', color='orange', linewidth=0.8, alpha=0.7)
+        plt.plot(self.df['date_gmt'], self.df['close_bid'], label='Bid Close', color='blue', linewidth=0.8)
+        plt.plot(self.df['date_gmt'], self.df['close_ask'], label='Ask Close', color='orange', linewidth=0.8, alpha=0.7)
 
         # Highlight the points *after* an unusual gap
         if not missing_rows.empty:
-            plt.scatter(missing_rows['date_gmt'], missing_rows['bid_close'], color='red', label='After Unusual Gap', marker='x', s=50, zorder=5)
+            plt.scatter(missing_rows['date_gmt'], missing_rows['close_bid'], color='red', label='After Unusual Gap', marker='x', s=50, zorder=5)
 
         plt.title(f"{self.instrument} Close Prices ({granularity_in_minutes} Min) with Unusual Gaps Highlighted")
         plt.xlabel('Date GMT')
@@ -410,9 +664,9 @@ class ForexTickData:
         plt.close()
 
         # save a histogram of the volume amounts (90th percentile)
-        if 'volume' in df.columns and not df['volume'].empty:
-            volume_99th_percentile = df['volume'].quantile(0.99) # Use 99th to see more of the tail
-            temp_df_volume = df[df['volume'] <= volume_99th_percentile]
+        if 'volume' in self.df.columns and not self.df['volume'].empty:
+            volume_99th_percentile = self.df['volume'].quantile(0.99) # Use 99th to see more of the tail
+            temp_df_volume = self.df[self.df['volume'] <= volume_99th_percentile]
             if not temp_df_volume.empty:
                 plt.figure(figsize=(12, 6))
                 plt.hist(temp_df_volume['volume'], bins=100, color='teal', alpha=0.7)
@@ -429,17 +683,13 @@ class ForexTickData:
         else:
             print("Volume column not available or empty for histogram.")
 
-        print(f"Data cleaned and analyzed. Saving to {folder_path}...")
-
-        # SAVING
-        # Folder creation is now at the start of the function
-        file_name = f"data_ohlcv.csv"
-        file_path = folder_path / file_name
-        df.to_csv(file_path, index=False)
-        print(f"Saved OHLCV data to {file_path}")
 
 
-def main():
+
+
+
+
+def load_tick_data():
     """
     Main function to get user inputs, load data, and process Forex tick data.
     """
@@ -577,7 +827,7 @@ def main():
     # Instantiate ForexTickData and process
     try:
         print("\nInitializing ForexTickData object...")
-        forex_data = ForexTickData(
+        forex_tick_data = ForexTickData(
             source=source_name,
             instrument=instrument_name,
             df=raw_df,
@@ -589,11 +839,12 @@ def main():
         print("ForexTickData object initialized successfully.")
 
         print(f"\nConverting data to {selected_granularity.name} granularity...")
-        ohlcv_df = forex_data.convert_analyze_save(granularity=selected_granularity)
+        forex_data = forex_tick_data.to_candles(granularity=selected_granularity)
+        forex_data.analyse_save()
 
-        if not ohlcv_df.empty:
+        if not forex_data.df.empty:
             print(f"\nProcessing complete. Output files are in subdirectories of: {DATA_DIR}")
-            print(f"Processed OHLCV data has {len(ohlcv_df)} rows.")
+            print(f"Processed OHLCV data has {len(forex_data.df)} rows.")
         else:
             print("\nProcessing complete, but no OHLCV data was generated (e.g., due to empty input or filtering).")
 
@@ -604,31 +855,136 @@ def main():
         import traceback
         traceback.print_exc()
 
+def combine_and_analyze_multiple_files():
+    # ask user for all source, instrument, and granularity
+    print("Forex Data Combination and Analysis")
+    print("=" * 30)
+
+    source_name = input("Enter the data source name (e.g., Dukascopy, FXCM): ").strip()
+    instrument_name = input("Enter the instrument name (e.g., EURUSD, GBPJPY): ").strip()
+
+    # Get granularity
+    print("\nAvailable granularities:")
+    for tf in Timeframe:
+        print(f"- {tf.name} ({tf.value})")
+
+    while True:
+        try:
+            granularity_input = input("Choose a granularity (e.g., M15, H1, D1): ").strip().upper()
+            selected_granularity = Timeframe[granularity_input]
+            break
+        except KeyError:
+            print("Invalid granularity. Please choose from the list (e.g., M1, M5, H1).")
+    
+    # Get file paths
+    file_paths = []
+    print("\nEnter the full paths to your OHLCV CSV files (one per line). Type 'done' when finished:")
+    while True:
+        file_path_str = input("File path: ").strip()
+        if file_path_str.lower() == 'done':
+            break
+        file_path = Path(file_path_str)
+        if file_path.is_file() and file_path.suffix.lower() == '.csv':
+            file_paths.append(file_path)
+        else:
+            print("Invalid file path or not a CSV file. Please try again.")
+    if not file_paths:
+        print("No valid file paths provided. Exiting.")
+        return
+    print(f"Found {len(file_paths)} files to process.")
+    combined_data = None
+
+    for file_path in file_paths:
+        try:
+            print(f"\nLoading data from {file_path}...")
+            df = pd.read_csv(file_path, parse_dates=['date_gmt'])
+            if combined_data is None:
+                combined_data = ForexCandleData(
+                    source=source_name,
+                    instrument=instrument_name,
+                    granularity=selected_granularity,
+                    df=df
+                )
+            else:
+                new_data = ForexCandleData(
+                    source=source_name,
+                    instrument=instrument_name,
+                    granularity=selected_granularity,
+                    df=df
+                )
+                combined_data = combined_data.combine(new_data)
+        except Exception as e:
+            print(f"Error processing file {file_path}: {e}")
+    if combined_data is not None:
+        print("\nCombining and analyzing data...")
+        combined_data.analyse_save()
+        print(f"\nCombined data has {len(combined_data.df)} rows.")
+        print(f"Output files are in subdirectories of: {DATA_DIR}")
+    else:
+        print("No valid data was combined. Please check your input files and try again.")
+
+def download_convert_save_dukascopy_data():
+    print("Dukascopy Data Downloader and Converter")
+    print("=" * 30)
+    downloader = DukascopyDataDownloader()
+    # Get user inputs for download
+    pair = input("Enter the currency pair (e.g., EURUSD): ").strip().upper()
+    year = input("Enter the year to download (e.g., 2023): ").strip()
+
+    # get user input for granularity
+    print("\nAvailable granularities:")
+    for tf in Timeframe:
+        print(f"- {tf.name} ({tf.value})")
+    while True:
+        try:
+            granularity_input = input("Choose a granularity (e.g., M15, H1, D1): ").strip().upper()
+            selected_granularity = Timeframe[granularity_input]
+            break
+        except KeyError:
+            print("Invalid granularity. Please choose from the list (e.g., M1, M5, H1).")
+
+    # Download data
+    try:
+        print(f"\nDownloading {pair} data for {year} at {selected_granularity.name} granularity...")
+        forex_tick_data = downloader.request_ticks_for_year(pair, year)
+        print("Download complete.")
+        if forex_tick_data is not None:
+            print(f"\nConverting tick data to {selected_granularity.name} granularity...")
+            forex_candle_data = forex_tick_data.to_candles(granularity=selected_granularity)
+            print("Conversion complete.")
+            if not forex_candle_data.df.empty:
+                print("\nAnalyzing and saving data...")
+                forex_candle_data.analyse_save()
+                print(f"Processed OHLCV data has {len(forex_candle_data.df)} rows.")
+                print(f"Output files are in subdirectories of: {DATA_DIR}")
+            else:
+                print("No OHLCV data was generated (e.g., due to empty input or filtering).")
+        else:
+            print("No data was downloaded. Please check the pair and year.")
+    except Exception as e:
+        print(f"An error occurred during download or conversion: {e}")
+        import traceback
+        traceback.print_exc()
+    
 
 if __name__ == '__main__':
-    # Create a dummy CSV for testing if one doesn't exist
-    dummy_csv_path = Path("dummy_tick_data.csv")
-    if not dummy_csv_path.exists():
-        print(f"Creating a dummy CSV file for testing: {dummy_csv_path}")
-        num_rows = 10000
-        start_time = pd.Timestamp('2023-01-01 00:00:00')
-        time_deltas = np.random.randint(1, 60, num_rows).cumsum() # irregular tick arrivals
-        timestamps = [start_time + pd.Timedelta(seconds=int(s)) for s in time_deltas]
-        bids = 1.10000 + np.random.randn(num_rows) * 0.0001
-        asks = bids + np.random.uniform(0.00005, 0.00020, num_rows)
-        volumes = np.random.randint(1, 100, num_rows)
-        dummy_data = pd.DataFrame({
-            'Timestamp': timestamps,
-            'BidPrice': bids,
-            'AskPrice': asks,
-            'Volume': volumes
-        })
-        dummy_data.to_csv(dummy_csv_path, index=False)
-        print(f"Dummy CSV created. When prompted, you can use:\n"
-              f"File path: {dummy_csv_path.resolve()}\n"
-              f"Time column: Timestamp\n"
-              f"Bid column: BidPrice\n"
-              f"Ask column: AskPrice\n"
-              f"Volume column: Volume\n")
-
-    main()
+    while True:
+        print("\n" + "=" * 30)
+        print("Welcome to the Forex Data Processor!")
+        print("Please choose an option:")
+        print("0. Donwload Dukascopy Tick Data, convert, analyze, and save")
+        print("1. Load Tick Data and convert it to OHLCV")
+        print("2. Load multiple OHLCV files and combine them, then analyze and save")
+        print("3. Exit")
+        choice = input("Enter your choice (0-3): ").strip()
+        if choice == '0':
+            download_convert_save_dukascopy_data()
+        elif choice == '1':
+            load_tick_data()
+        elif choice == '2':
+            combine_and_analyze_multiple_files()
+        elif choice == '3':
+            print("Exiting the Forex Data Processor. Goodbye!")
+            break
+        else:
+            print("Invalid choice. Please run the program again and choose a valid option.")

@@ -11,7 +11,7 @@ from stable_baselines3 import A2C, DQN
 from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv
 from typing import NamedTuple
 
-from common.data import ForexData
+from common.data import ForexCandleData
 from common.constants import *
 from common.scripts import *
 
@@ -278,8 +278,8 @@ torch.manual_seed(SEED)
 # Get ask and bid data, and combine
 ask_path = FOREX_DIR / "EURUSD" / "15M" / "ASK" / "10.05.2022T00.00-10.05.2025T23.45.csv"
 bid_path = FOREX_DIR / "EURUSD" / "15M" / "BID" / "10.05.2022T00.00-10.05.2025T23.45.csv"
-ask_df = ForexData(ask_path).df
-bid_df = ForexData(ask_path).df
+ask_df = ForexCandleData(ask_path).df
+bid_df = ForexCandleData(ask_path).df
 forex_data = combine_df(bid_df, ask_df)
 forex_data = filter_df(forex_data)
 train_df, eval_df = split_df(forex_data, 0.7)
