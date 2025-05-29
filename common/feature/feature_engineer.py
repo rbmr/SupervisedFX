@@ -19,7 +19,7 @@ class FeatureEngineer:
         Run the pipeline on the given DataFrame.
         """
 
-        df = df.copy()  # Avoid modifying the original DataFrame
+        df = df.copy(deep=True)  # Avoid modifying the original DataFrame
 
         original_columns = df.columns.tolist()
 
