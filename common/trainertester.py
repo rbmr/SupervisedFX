@@ -298,6 +298,7 @@ def analyse_finals(final_metrics: List[Dict[str, Any]], results_path: Path, name
         The path to save the analysis results.
     """
     # Ensure results_path exists
+    results_path = results_path / name
     results_path.mkdir(parents=True, exist_ok=True)
 
     # make a plot of the sharpe ratios
