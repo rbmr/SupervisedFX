@@ -100,7 +100,7 @@ results_dir.mkdir(parents=True, exist_ok=True)
 
 # TRAINING
 
-train_episodes = 1
+train_episodes = 20
 train_dummy_env = DummyVecEnv([lambda: train_env])
 model.set_env(train_dummy_env)
 total_timesteps = train_env.total_steps * train_episodes
