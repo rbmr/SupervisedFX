@@ -25,10 +25,10 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
     plt.close()
 
     # plote open high low close of equity
-    equity_open = df['info.agent_data.equity.open'].values
-    equity_high = df['info.agent_data.equity.high'].values
-    equity_low = df['info.agent_data.equity.low'].values
-    equity_close = df['info.agent_data.equity.close'].values
+    equity_open = df['info.agent_data.equity_open'].values
+    equity_high = df['info.agent_data.equity_high'].values
+    equity_low = df['info.agent_data.equity_low'].values
+    equity_close = df['info.agent_data.equity_close'].values
     plt.figure(figsize=(12, 6))
     plt.plot(equity_open, label='Equity Open', color='blue')
     plt.plot(equity_high, label='Equity High', color='green')
@@ -42,14 +42,14 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
     plt.close()
 
     # calculate sharpe ratio on the close prices of equity
-    returns = df['info.agent_data.equity.close'].pct_change().dropna()
+    returns = df['info.agent_data.equity_close'].pct_change().dropna()
     sharpe_ratio = returns.mean() / returns.std()
 
     # calculate sharpe ratio on the close prices of equity. 
     # Then scale it to be annulaized.
     # Base this annulaization factor based on the number of steps in a year.
     # The timefram can be anything, and no assumption is made about the time between steps.
-    equity_returns = df['info.agent_data.equity.close'].pct_change().dropna()
+    equity_returns = df['info.agent_data.equity_close'].pct_change().dropna()
     mean_return = equity_returns.mean()
     std_return = equity_returns.std()
     if std_return == 0:
