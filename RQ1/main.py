@@ -102,7 +102,7 @@ train_dummy_env = DummyVecEnv([lambda: train_env])
 model.set_env(train_dummy_env)
 total_timesteps = train_env.total_steps * train_episodes
 
-logging.info(f"Training model for {train_episodes} epochs...")
+logging.info(f"Training model for {train_episodes} episodes...")
 
 callback = [SaveOnEpisodeEndCallback(save_path=MODELS_DIR)]
 model.learn(total_timesteps=total_timesteps, callback=callback, log_interval=1, progress_bar=True)

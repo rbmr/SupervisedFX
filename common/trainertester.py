@@ -58,8 +58,8 @@ def train_test_analyze(train_env: ForexEnv,
     # total timesteps
     total_timesteps = train_env.total_steps * train_episodes
 
-    # train the model (saving it every epoch)
-    logging.info(f"Training model for {train_episodes} epochs...")
+    # train the model (saving it every episode)
+    logging.info(f"Training model for {train_episodes} episodes...")
     callbacks = []
     if checkpoints:
         checkpoint_callback = SaveOnEpisodeEndCallback(save_path=str(models_path))
@@ -93,12 +93,12 @@ def train_test_analyze(train_env: ForexEnv,
         this_model_path = results_path / model_file.stem
         train_data_path = this_model_path / "train"
         eval_data_path = this_model_path / "eval"
-        train_results_full_file = train_data_path / "data"
-        eval_results_full_file = eval_data_path / "data"
+        train_results_full_file = train_data_path / "data.csv"
+        eval_results_full_file = eval_data_path / "data.csv"
         train_data_path.mkdir(parents=True, exist_ok=True)
 
-        train_episode_length = len(train_env.market_data_df)
-        eval_episode_length = len(eval_env.market_data_df)
+        train_episode_length = train_env.total_steps
+        eval_episode_length = eval_env.total_steps
 
         run_model(model, train_env, train_results_full_file, total_steps=eval_episodes * train_episode_length, deterministic=deterministic, progress_bar=True)
 
@@ -156,8 +156,6 @@ def run_model(model: BaseAlgorithm,
 
     env = DummyVecEnv([lambda: env])  # Ensure env is wrapped in DummyVecEnv
     
-    obs = env.reset()
-    
     pbar = None
     if progress_bar:
         try:
@@ -170,6 +168,13 @@ def run_model(model: BaseAlgorithm,
     step_count = 1
     logs_df = None
     episode_logs: List[Dict[str, Any]] = []
+    obs = env.reset()
+    episode_logs.append({
+        "step": 0,
+        "action": None,
+        "reward": None,
+        "done": None,
+    })
     while step_count < total_steps:
         action, _ = model.predict(obs, deterministic=deterministic)
         next_obs, rewards, dones, infos = env.step(action)
@@ -202,6 +207,10 @@ def run_model(model: BaseAlgorithm,
             market_features_df.columns = [f"info.market_features.{col}" for col in market_features_df.columns]
             agent_data_df.columns = [f"info.agent_data.{col}" for col in agent_data_df.columns]
 
+            # check lengths of dataframes and episode_logs match 
+            if len(episode_logs) != len(market_data_df) or len(episode_logs) != len(market_features_df) or len(episode_logs) != len(agent_data_df):
+                raise ValueError("Length of episode logs does not match length of market data, market features, or agent data.")
+
             temp_df = pd.DataFrame(episode_logs)
             temp_df = pd.concat([temp_df, agent_data_df, market_data_df, market_features_df], axis=1)
 
@@ -211,8 +220,16 @@ def run_model(model: BaseAlgorithm,
                 logs_df = pd.concat([logs_df, temp_df], ignore_index=True)
 
             episode_logs = []
+            episode_logs.append({
+                "step": 0,
+                "action": None,
+                "reward": None,
+                "done": None,
+            })
+        else:
+            obs = next_obs
 
-        obs = next_obs
+            
         step_count += 1
     
     if pbar:

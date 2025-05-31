@@ -251,7 +251,7 @@ class ForexEnv(gym.Env):
         Calculates the equity based on current cash, shares and prices.
         """
         current_price = bid_price if shares >= 0 else ask_price
-        return cash + (shares * bid_price)
+        return cash + (shares * current_price)
 
     def _get_observation(self): 
         """

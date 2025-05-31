@@ -2,7 +2,6 @@ import logging
 import random
 
 from common.scripts import set_seed
-from common.scripts import combine_df
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 
@@ -11,7 +10,7 @@ from common.data.feature_engineer import FeatureEngineer, rsi, history_lookback,
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
 from RQ2.constants import RQ2_DIR
 
-from common.data import ForexCandleData, Timeframe
+from common.data.data import ForexCandleData, Timeframe
 from common.trainertester import train_test_analyze
 from common.constants import *
 from common.scripts import *
@@ -33,6 +32,10 @@ if __name__ == '__main__':
                                       start_time=datetime(2022, 1, 2, 22, 0, 0, 0),
                                       end_time=datetime(2025, 5, 16, 20, 45, 0, 0),
                                     )
+    forex_data = forex_data.set_period(
+        start=datetime(2022, 1, 2, 22, 0, 0, 0),
+        end=datetime(2023, 1, 2, 22, 0, 0, 0)
+    )
     
     # --- Feature Engineering ---
     # Create a feature engineer object
@@ -42,8 +45,8 @@ if __name__ == '__main__':
     feature_engineer.add(lambda df: history_lookback(df, 20))
 
     # Add stepwise feature engineering
-    stepwise_feature_engineer = StepwiseFeatureEngineer(columns=['cash_percentage'])
-    stepwise_feature_engineer.add(calculate_cash_percentage)
+    stepwise_feature_engineer = StepwiseFeatureEngineer()
+    stepwise_feature_engineer.add(['cash_percentage'], calculate_cash_percentage)
 
     logging.info("Creating environments...")
     train_env, eval_env = ForexEnv.create_train_eval_envs(
