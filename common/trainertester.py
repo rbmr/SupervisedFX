@@ -56,7 +56,7 @@ def train_test_analyze(train_env: ForexEnv,
     model.set_env(train_dummy_env)
 
     # total timesteps
-    total_timesteps = train_env.max_episode_timesteps() * train_episodes
+    total_timesteps = train_env.total_steps * train_episodes
 
     # train the model (saving it every epoch)
     logging.info(f"Training model for {train_episodes} epochs...")

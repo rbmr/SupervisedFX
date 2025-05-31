@@ -160,10 +160,6 @@ class ForexEnv(gym.Env):
         )
 
         return train_env, eval_env
-        
-
-    def max_episode_timesteps(self):
-        return self.total_steps
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)

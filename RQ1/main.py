@@ -60,7 +60,7 @@ train_env, eval_env = ForexEnv.create_train_eval_envs(
 )
 logging.info("Environments created.")
 
-# Creating model
+# MODEL
 
 logging.info("Creating model...")
 policy_kwargs = dict(net_arch=[128, 128])
@@ -82,7 +82,7 @@ model = A2C(
 )
 logging.info("Model created.")
 
-# Set up folders
+# FOLDERS
 
 EXPERIMENT_DIR = RQ1_DIR / "experiments" / "testing123" / "test2"
 LOGS_DIR = EXPERIMENT_DIR / "logs"
@@ -98,7 +98,7 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 train_episodes = 1
 train_dummy_env = DummyVecEnv([lambda: train_env])
 model.set_env(train_dummy_env)
-total_timesteps = train_env.max_episode_timesteps() * train_episodes
+total_timesteps = train_env.total_steps * train_episodes
 
 logging.info(f"Training model for {train_episodes} epochs...")
 
@@ -139,8 +139,8 @@ for model_file in model_files:
     train_results_file = train_results_dir / "data"
     eval_results_file = eval_results_dir / "data"
 
-    train_episode_length = train_env.max_episode_timesteps()
-    eval_episode_length = eval_env.max_episode_timesteps()
+    train_episode_length = train_env.total_steps
+    eval_episode_length = eval_env.total_steps
 
     run_model(model,
               train_env,
