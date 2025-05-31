@@ -10,40 +10,6 @@ import pandas as pd
 
 from common.constants import *
 
-
-def combine_df(bid_df: pd.DataFrame, ask_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Combines bid and ask DataFrames into a single `DataFrame`, renaming columns
-    by adding a `_bid`, or `_ask` postfix, and calculating the average volume.
-    """
-    bid_columns = set(bid_df.columns)
-    ask_columns = set(ask_df.columns)
-    expected_columns = set(DATA_COLUMNS)
-    if bid_columns != expected_columns or ask_columns != expected_columns:
-        raise ValueError(f"{bid_columns} and {ask_columns} must be equal to {expected_columns}")
-
-    bid_rename = {
-        RawDataCol.VOL : "volume_bid",
-        RawDataCol.HIGH : "high_bid",
-        RawDataCol.LOW : "low_bid",
-        RawDataCol.OPEN : "open_bid",
-        RawDataCol.CLOSE : "close_bid"
-    }
-    ask_rename = {
-        RawDataCol.VOL : "volume_ask",
-        RawDataCol.HIGH : "high_ask",
-        RawDataCol.LOW : "low_ask",
-        RawDataCol.OPEN : "open_ask",
-        RawDataCol.CLOSE : "close_ask"
-    }
-    bid_df.rename(columns=bid_rename, inplace=True)
-    ask_df.rename(columns=ask_rename, inplace=True)
-
-    df = pd.merge(bid_df, ask_df, on=RawDataCol.TIME, how="inner")
-    df[RawDataCol.VOL] = (df["volume_bid"] + df["volume_ask"]) / 2
-
-    return df
-
 def round_datetime(date_time: datetime, interval: int) -> datetime:
     """
     Rounds a datetime object to the nearest multiple of `interval` in seconds.
