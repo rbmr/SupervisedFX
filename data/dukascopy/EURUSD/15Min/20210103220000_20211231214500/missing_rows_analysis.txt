@@ -1,0 +1,12 @@
+Analysis of time differences for EURUSD at 15 min granularity.
+Expected regular time diff: 15 minutes.
+Approximate weekend gap expectation (time diff for first candle after weekend): 2895 minutes.
+Rows listed below are those where the time difference from the previous candle was neither the standard granularity nor a typical weekend gap.
+This suggests potential missing data or unusual market closure.
+
+Unusual gap before 2021-03-14 21:00:00 (local time in data): 2835.00 minutes. Estimated ~188.00 missing 15-min candles.
+Unusual gap before 2021-04-20 21:30:00 (local time in data): 30.00 minutes. Estimated ~1.00 missing 15-min candles.
+Unusual gap before 2021-09-19 21:00:00 (local time in data): 16695.00 minutes. Estimated ~1112.00 missing 15-min candles.
+Unusual gap before 2021-11-07 22:00:00 (local time in data): 2955.00 minutes. Estimated ~196.00 missing 15-min candles.
+
+Total estimated number of missing candles from these unusual gaps: 1497.00
