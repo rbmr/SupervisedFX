@@ -93,7 +93,6 @@ class ForexEnv(gym.Env):
         assert self.agent_data.shape == (self.total_steps, len(AgentDataCol))
 
         # Action space
-        self.prev_action = None
         self.n_actions = n_actions
         if self.n_actions == 0:
             logging.info(f"n_actions is zero, using continuous action space")
@@ -170,14 +169,13 @@ class ForexEnv(gym.Env):
 
         # Reset environment state
         self.current_step = 0
-        self.prev_action = None
 
         return self._get_observation(), {}
 
     def step(self, action):
 
         # Standardize action
-        action = self._get_continuous_action(action)
+        target_exposure = self._get_target_exposure(action)
 
         # Perform step
         self.current_step += 1
@@ -186,9 +184,9 @@ class ForexEnv(gym.Env):
         current_data = self.market_data[self.current_step, :]
         current_cash = self.agent_data[self.current_step - 1, AgentDataCol.cash]
         current_shares = self.agent_data[self.current_step - 1, AgentDataCol.shares]
-        new_cash, new_shares = self._execute_action(action, self.prev_action, current_data, current_cash, current_shares)
+        new_cash, new_shares = self._execute_action(target_exposure, current_data, current_cash, current_shares)
         equity_open, equity_high, equity_low, equity_close = calculate_ohlc_equity(current_data, new_cash, new_shares)
-        self.agent_data[self.current_step, :] = (new_cash, new_shares, equity_open, equity_high, equity_low, equity_close, action)
+        self.agent_data[self.current_step, :] = (new_cash, new_shares, equity_open, equity_high, equity_low, equity_close, target_exposure)
 
         # calculate reward
         reward = self._get_reward()
@@ -219,8 +217,6 @@ class ForexEnv(gym.Env):
             info['market_features'] = market_features_df
             info['agent_data'] = agent_data_df
 
-        self.prev_action = action
-        
         return self._get_observation(), reward, terminated, truncated, info
 
     def _get_reward(self):
@@ -245,36 +241,37 @@ class ForexEnv(gym.Env):
         
         return observation
 
-    def _get_continuous_action(self, action) -> float:
+    def _get_target_exposure(self, action: np.ndarray | np.generic) -> float:
         """
-        Converts discrete actions to continuous actions.
-        Action remains the same if it is already continuous.
+        Standardizes actions by converting them to the target exposure.
         """
+        action = action.item()
         if self.n_actions > 0:
             action = (action - self.n_actions) / self.n_actions
         return action
 
-    def _execute_action(self, action, prev_action, current_data, current_cash, current_shares) -> tuple[float, float]:
+    def _execute_action(self, target_exposure, current_data, current_cash, current_shares) -> tuple[float, float]:
         """
-        Determines the target position based on the agent's action (= percentage of equity)
+        Determines the target position based on the agent's action (= target exposure)
         and executes trades by calling buy or sell instrument methods.
         """
-        # Jitter Mitigation: action hasn't changed significantly, do nothing.
-        if prev_action is not None and abs(action - prev_action) < 1e-5:
-            logging.debug(f"Step {self.current_step}: Raw action {action} close to previous {prev_action}. No trade due to jitter mitigation.")
-            return current_cash, current_shares
-
         # Calculate current equity (mark-to-market)
         open_bid = current_data[MarketDataCol.open_bid]
         open_ask = current_data[MarketDataCol.open_ask]
         current_equity = calculate_equity(open_bid, open_ask, current_cash, current_shares)
         assert current_equity > 0, f"current_equity should be greater than zero, was {current_equity:.2f}"
 
+        # Jitter Mitigation, skip action if it has no significant effect.
+        current_exposure = (current_equity - current_cash) / current_equity
+        if abs(target_exposure - current_exposure) < 1e-5:
+            logging.info(f"Step {self.current_step}: target exposure {target_exposure} close to current_exposure {current_exposure}. No trade due to jitter mitigation.")
+            return current_cash, current_shares
+
         # Determine target position value in currency
-        target_position_value = action * current_equity
+        target_position_value = target_exposure * current_equity
         
         # Determine target number of shares based on target value
-        if action > 0: # Target is LONG
+        if target_exposure > 0: # Target is LONG
             target_num_shares = target_position_value / open_ask
         else: # Target is SHORT
             target_num_shares = target_position_value / open_bid
