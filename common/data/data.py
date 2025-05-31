@@ -1,21 +1,18 @@
-import pandas as pd
-import matplotlib.pyplot as plt
-import numpy as np
-from typing import Union, List, Dict, Any, Optional
-from pathlib import Path
-from enum import Enum
-import matplotlib.pyplot as plt # Duplicate import, but keeping as in original
-from common.constants import DATA_DIR
+import calendar
+import io
 import lzma
 import struct
-import pandas as pd
-import numpy as np
-import os
-import sys
-import io
-import requests
-import calendar
 from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import Optional
+
+import matplotlib.pyplot as plt  # Duplicate import, but keeping as in original
+import numpy as np
+import pandas as pd
+import requests
+
+from common.constants import DATA_DIR
 
 # Mock DATA_DIR for standalone execution
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -972,7 +969,7 @@ if __name__ == '__main__':
         print("\n" + "=" * 30)
         print("Welcome to the Forex Data Processor!")
         print("Please choose an option:")
-        print("0. Donwload Dukascopy Tick Data, convert, analyze, and save")
+        print("0. Download Dukascopy Tick Data, convert, analyze, and save")
         print("1. Load Tick Data and convert it to OHLCV")
         print("2. Load multiple OHLCV files and combine them, then analyze and save")
         print("3. Exit")
