@@ -8,7 +8,6 @@ from torch.cuda import is_available
 COMMON_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = COMMON_DIR.parent
 DATA_DIR = PROJECT_DIR / "data"
-FOREX_DIR = DATA_DIR / "forex"
 
 SEED = 42
 
@@ -58,14 +57,5 @@ class RawDataCol:
     HIGH = "high"
     LOW = "low"
     CLOSE = "close"
-
-NUMERIC_DATA_COLUMNS = [RawDataCol.OPEN, RawDataCol.HIGH, RawDataCol.LOW, RawDataCol.CLOSE, RawDataCol.VOL]
-DATA_COLUMNS = [RawDataCol.TIME, RawDataCol.OPEN, RawDataCol.HIGH, RawDataCol.LOW, RawDataCol.CLOSE, RawDataCol.VOL]
-
-DT_TIMEZONE = timezone.utc # datetime timezone
-PD_TIMEZONE = pytz.timezone("GMT") # pandas timezone
-
-DATE_FORMAT = "%d.%m.%YT%H.%M"
-CSV_TIME_FORMAT = "%d.%m.%Y %H:%M:%S.%f"
 
 DEVICE = "cuda" if is_available() else "cpu"
