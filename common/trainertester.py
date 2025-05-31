@@ -109,7 +109,7 @@ def train_test_analyze(train_env: ForexEnv,
     model_train_metrics = []
     model_eval_metrics = []
     for model_file in model_files:
-        model_name = model_file.stem
+        model_name = model_file.stem + f"({experiment_group_name}/{experiment_name})"
         this_model_path = results_path / model_name
         train_data_path = this_model_path / "train"
         eval_data_path = this_model_path / "eval"
