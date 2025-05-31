@@ -77,7 +77,7 @@ class ForexEnv(gym.Env):
         # Use numpy arrays for speed
         self.market_data = market_data_df.to_numpy(dtype=np.float32)
         self.market_features = market_feature_df.to_numpy(dtype=np.float32)
-        self.market_feature_col_names = market_feature_df.columns.tolist()
+        self.market_feature_names = market_feature_df.columns.tolist()
         self.agent_data = np.zeros(shape = (self.market_data.shape[0], len(AgentDataCol.all_names())), dtype=np.float32)
         self.agent_data[0, :] = (
             self.initial_capital, # cash
@@ -209,7 +209,7 @@ class ForexEnv(gym.Env):
             agent_data = self.agent_data[:number_of_steps, :]
 
             market_data_df = pd.DataFrame(market_data, columns=MarketDataCol.all_names())
-            market_features_df = pd.DataFrame(market_features, columns=self.market_feature_col_names)
+            market_features_df = pd.DataFrame(market_features, columns=self.market_feature_names)
             agent_data_df = pd.DataFrame(agent_data, columns=AgentDataCol.all_names())
 
             info['market_data'] = market_data_df
