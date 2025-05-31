@@ -1,77 +1,85 @@
 import logging
+from datetime import datetime
 
+import pandas as pd
 from stable_baselines3 import A2C
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from RQ1.constants import RQ1_DIR
-from common.constants import DEVICE, FOREX_DIR, SEED
-from common.data.data import ForexData
+from common.analysis import analyse_individual_run, analyse_finals
+from common.constants import DEVICE, SEED
+from common.data.data import Timeframe, ForexCandleData
 from common.envs.callbacks import SaveOnEpisodeEndCallback
 from common.envs.forex_env import ForexEnv
 from common.data.feature_engineer import (FeatureEngineer, history_lookback,
                                           remove_ohlcv, rsi)
 from common.data.stepwise_feature_engineer import (
     StepwiseFeatureEngineer, calculate_cash_percentage)
-from common.scripts import combine_df, split_df
-from common.trainertester import train_test_analyze
+from common.scripts import split_df
+from common.trainertester import run_model
 
 if __name__ != '__main__':
     raise ImportError("Do not import this module.")
-# --- Configuration Parameters ---
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 logging.info("Finished imports")
 
-INITIAL_CAPITAL = 10_000.0
-TRANSACTION_COST_PCT = 0.0  # Example: 0.1% commission per trade
+# Load, preprocess and split market data
 
-# Get ask and bid data, and combine
+logging.info("Loading market data...")
+market_data = ForexCandleData.load(
+    source="dukascopy",
+    instrument="EURUSD",
+    granularity=Timeframe.M15,
+    start_time=datetime(2022, 1, 2, 22, 0, 0, 0),
+    end_time=datetime(2025, 5, 16, 20, 45, 0, 0),
+).df
 
-ask_path = FOREX_DIR / "EURUSD" / "15M" / "ASK" / "10.05.2022T00.00-10.05.2025T23.45.csv"
-bid_path = FOREX_DIR / "EURUSD" / "15M" / "BID" / "10.05.2022T00.00-10.05.2025T23.45.csv"
-ask_df = ForexData(ask_path).df
-bid_df = ForexData(ask_path).df
-
-combined_data = combine_df(bid_df, ask_df)
-
-# Compute features
+logging.info("Generating market features...")
 fe = FeatureEngineer()
 fe.add(rsi)
 fe.add(remove_ohlcv)
 fe.add(lambda df: history_lookback(df, 20))
 
-combined_features = fe.run(combined_data)
+market_features = fe.run(market_data)
 
-# Split data and features
+logging.info("Splitting data...")
+train_data_df, eval_data_df = split_df(market_data, 0.7)
+train_feature_df, eval_feature_df = split_df(market_features, 0.7)
 
-train_data_df, eval_data_df = split_df(combined_data, 0.7)
-train_feature_df, eval_feature_df = split_df(combined_features, 0.7)
+# Setup stepwise feature engineering
 
-# Add stepwise feature engineering
+logging.info("Setting up stepwise feature engineer...")
 stepwise_feature_engineer = StepwiseFeatureEngineer()
 stepwise_feature_engineer.add(["cash_percentage"], calculate_cash_percentage)
+
+# Creating environments
+
+initial_capital = 10_000.0
+transaction_cost_pct = 0.0  # Example: 0.1% commission per trade
 
 logging.info("Creating training environment...")
 train_env = ForexEnv(
     market_data_df=train_data_df,
     market_feature_df=train_feature_df,
     agent_feature_engineer=stepwise_feature_engineer,
-    initial_capital=INITIAL_CAPITAL,
-    transaction_cost_pct=TRANSACTION_COST_PCT,
+    initial_capital=initial_capital,
+    transaction_cost_pct=transaction_cost_pct,
     n_actions=0
 )
+
 logging.info("Creating evaluation environment...")
 eval_env = ForexEnv(
     market_data_df=eval_data_df,
     market_feature_df=eval_feature_df,
     agent_feature_engineer=stepwise_feature_engineer,
-    initial_capital=INITIAL_CAPITAL,
-    transaction_cost_pct=TRANSACTION_COST_PCT,
+    initial_capital=initial_capital,
+    transaction_cost_pct=transaction_cost_pct,
     n_actions=0
 )
 logging.info("Environments created.")
 
+# Creating model
 
 logging.info("Creating model...")
 policy_kwargs = dict(net_arch=[128, 128])
@@ -93,113 +101,114 @@ model = A2C(
 )
 logging.info("Model created.")
 
-logging.info("Running train test analyze...")
-
-# Set up parameters
-base_folder_path = RQ1_DIR
-experiment_group = "testing123"
-experiment_name = "test2"
-train_episodes = 1
-eval_episodes = 1
-
 # Set up folders
-experiment_path = base_folder_path / "experiments" / experiment_group / experiment_name
-results_path = experiment_path / "results"
-logs_path = experiment_path / "logs"
-models_path = experiment_path / "models"
 
-models_path.mkdir(parents=True, exist_ok=True)
-results_path.mkdir(parents=True, exist_ok=True)
-logs_path.mkdir(parents=True, exist_ok=True)
+EXPERIMENT_DIR = RQ1_DIR / "experiments" / "testing123" / "test2"
+LOGS_DIR = EXPERIMENT_DIR / "logs"
+MODELS_DIR = EXPERIMENT_DIR / "models"
+RESULTS_DIR = EXPERIMENT_DIR / "results"
 
-# model class
-model_class = type(model)
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-# set env
+# TRAINING
+
+train_episodes = 1
 train_dummy_env = DummyVecEnv([lambda: train_env])
 model.set_env(train_dummy_env)
-
-# total timesteps
 total_timesteps = train_env.max_episode_timesteps() * train_episodes
 
-# train the model (saving it every epoch)
 logging.info(f"Training model for {train_episodes} epochs...")
-callbacks = [
-    SaveOnEpisodeEndCallback(save_path=str(models_path)),
-]
-model.learn(total_timesteps=total_timesteps, callback=callbacks, log_interval=1, progress_bar=True)
+
+callback = [SaveOnEpisodeEndCallback(save_path=MODELS_DIR)]
+model.learn(total_timesteps=total_timesteps, callback=callback, log_interval=1, progress_bar=True)
+
 logging.info("Training complete.")
 
-# save the final model
-save_path = models_path / f"model_{total_timesteps}_steps.zip"
-model.save(save_path)
-logging.info(f"Model(s) saved to '{models_path}'.")
+# Saving the final model
 
-# TESTING THE MODELS
-# 1. find all model zips in the models_path
-model_files = list(models_path.glob("*.zip"))
-logging.info(f"Found {len(model_files)} model files in '{models_path}'.")
+model.save(MODELS_DIR / f"model_{total_timesteps}_steps.zip")
+logging.info(f"Model(s) saved to '{MODELS_DIR}'.")
 
-# sort model files by modification time (oldest first)
+# EVALUATION
+
+logging.info("Starting evaluation...")
+
+eval_episodes = 1
+model_class = type(model)
+
+model_files = list(MODELS_DIR.glob("*.zip"))
 model_files.sort(key=lambda x: x.stat().st_mtime)
 
-# 2. Run Each Model on the train_env and eval_env
+logging.info(f"Found {len(model_files)} model files in '{MODELS_DIR}'.")
+
 for model_file in model_files:
+
     logging.info(f"Loading model from {model_file}...")
+
     model = model_class.load(model_file, env=train_dummy_env)
+
     logging.info(f"Model loaded from {model_file}.")
 
-    this_model_path = results_path / model_file.stem
-    train_data_path = this_model_path / "train"
-    eval_data_path = this_model_path / "eval"
-    train_results_full_file = train_data_path / "data"
-    eval_results_full_file = eval_data_path / "data"
-    train_data_path.mkdir(parents=True, exist_ok=True)
+    model_name = model_file.stem
+    model_results_dir = RESULTS_DIR / model_name
+    train_results_dir = model_results_dir / "train"
+    eval_results_dir = model_results_dir / "eval"
+    train_results_file = train_results_dir / "data"
+    eval_results_file = eval_results_dir / "data"
 
     train_episode_length = train_env.max_episode_timesteps()
-    eval_episode_length = eval_env.market_data_df)
-    train_total_timesteps =
+    eval_episode_length = eval_env.max_episode_timesteps()
 
-    run_model_on_vec_env(model, train_env, train_results_full_file,
-                         total_steps=eval_episodes * train_episode_length, deterministic=deterministic,
-                         progress_bar=True)
+    run_model(model,
+              train_env,
+              train_results_file,
+              total_steps=eval_episodes * train_episode_length,
+              deterministic=True,
+              progress_bar=True
+              )
 
-    run_model_on_vec_env(model, eval_env, eval_results_full_file, total_steps=eval_episodes * eval_episode_length,
-                         deterministic=deterministic, progress_bar=True)
+    run_model(model,
+              eval_env,
+              eval_results_file,
+              total_steps=eval_episodes * eval_episode_length,
+              deterministic=True,
+              progress_bar=True
+              )
+
+logging.info("Finished evaluation.")
 
 # ANALYSIS
+
 logging.info("Analyzing results...")
+
 model_train_metrics = []
 model_eval_metrics = []
+
 for model_file in model_files:
+
     model_name = model_file.stem
-    this_model_path = results_path / model_name
-    train_data_path = this_model_path / "train"
-    eval_data_path = this_model_path / "eval"
-    train_results_full_file = train_data_path / "data.csv"
-    eval_results_full_file = eval_data_path / "data.csv"
-    if not train_results_full_file.exists() or not eval_results_full_file.exists():
-        logging.warning(f"Skipping analysis for {model_name} as one or both result files do not exist.")
-        continue
+    model_results_dir = RESULTS_DIR / model_name
+    train_results_dir = model_results_dir / "train"
+    eval_results_dir = model_results_dir / "eval"
+    train_results_file = train_results_dir / "data"
+    eval_results_file = eval_results_dir / "data"
 
     logging.info(f"Analyzing results for model: {model_name}")
 
     # Load train and eval results
-    results_df = pd.read_csv(train_results_full_file)
-    metrics = analyse_individual_run(results_df, train_data_path, name=model_name)
+    results_df = pd.read_csv(train_results_file)
+    metrics = analyse_individual_run(results_df, train_results_dir, name=model_name)
     model_train_metrics.append(metrics)
 
-    results_df = pd.read_csv(eval_results_full_file)
-    metrics = analyse_individual_run(results_df, eval_data_path, name=model_name)
+    results_df = pd.read_csv(eval_results_file)
+    metrics = analyse_individual_run(results_df, eval_results_dir, name=model_name)
     model_eval_metrics.append(metrics)
 
-analyse_finals(model_train_metrics, results_path, name="train_results")
-analyse_finals(model_eval_metrics, results_path, name="eval_results")
+analyse_finals(model_train_metrics, RESULTS_DIR, name="train_results")
+analyse_finals(model_eval_metrics, RESULTS_DIR, name="eval_results")
 
 logging.info("Analysis complete.")
 
 logging.info("Done!")
-
-logging.info("Finished")
-
-
