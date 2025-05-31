@@ -4,7 +4,6 @@ from typing import List, Dict, Any
 import matplotlib.pyplot as plt
 import pandas as pd
 
-
 def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> Dict[str, Any]:
     """
     Analyze the results DataFrame and save the analysis to the results_path.
@@ -50,17 +49,9 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
         "sharpe_ratio": sharpe_ratio,
     }
 
-
 def analyse_finals(final_metrics: List[Dict[str, Any]], results_path: Path, name: str) -> None:
     """
     Analyze the final results DataFrame and save the analysis to the results_path.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The DataFrame containing the final results.
-    results_path : Path
-        The path to save the analysis results.
     """
     # Ensure results_path exists
     results_path.mkdir(parents=True, exist_ok=True)
