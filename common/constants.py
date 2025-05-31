@@ -1,7 +1,9 @@
-from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from enum import IntEnum
+from pathlib import Path
+
 import pytz
-import torch 
+from torch.cuda import is_available
 
 COMMON_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = COMMON_DIR.parent
@@ -10,22 +12,55 @@ FOREX_DIR = DATA_DIR / "forex"
 
 SEED = 42
 
-class Col:
+class ColumnCollection(IntEnum):
+
+    @classmethod
+    def all_names(cls) -> list[str]:
+        """Returns all the names, in order of value"""
+        return [x.name for x in sorted(cls, key=lambda x: x.value)]
+
+class MarketDataCol(ColumnCollection):
+    """
+    Market Data Columns
+    """
+    open_bid = 0
+    open_ask = 1
+    high_bid = 2
+    high_ask = 3
+    low_bid = 4
+    low_ask = 5
+    close_bid = 6
+    close_ask = 7
+    volume_bid = 8
+    volume_ask = 9
+    date_gmt = 10
+
+class AgentDataCol(ColumnCollection):
+    """
+    Agent Data Columns
+    """
+    cash = 0
+    shares = 1
+    equity_open = 2
+    equity_high = 3
+    equity_low = 4
+    equity_close = 5
+
+class RawDataCol:
     """
     Class with static attributes to group column names in one place,
     helps prevent typos, and makes refactoring easier.
     """
-    
+
     TIME = "date_gmt"
     VOL = "volume"
-    
     OPEN = "open"
     HIGH = "high"
     LOW = "low"
     CLOSE = "close"
 
-NUMERIC_DATA_COLUMNS = [Col.OPEN, Col.HIGH, Col.LOW, Col.CLOSE, Col.VOL]
-DATA_COLUMNS = [Col.TIME, Col.OPEN, Col.HIGH, Col.LOW, Col.CLOSE, Col.VOL]
+NUMERIC_DATA_COLUMNS = [RawDataCol.OPEN, RawDataCol.HIGH, RawDataCol.LOW, RawDataCol.CLOSE, RawDataCol.VOL]
+DATA_COLUMNS = [RawDataCol.TIME, RawDataCol.OPEN, RawDataCol.HIGH, RawDataCol.LOW, RawDataCol.CLOSE, RawDataCol.VOL]
 
 DT_TIMEZONE = timezone.utc # datetime timezone
 PD_TIMEZONE = pytz.timezone("GMT") # pandas timezone
@@ -33,4 +68,4 @@ PD_TIMEZONE = pytz.timezone("GMT") # pandas timezone
 DATE_FORMAT = "%d.%m.%YT%H.%M"
 CSV_TIME_FORMAT = "%d.%m.%Y %H:%M:%S.%f"
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = "cuda" if is_available() else "cpu"

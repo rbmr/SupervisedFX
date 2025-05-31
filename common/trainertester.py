@@ -1,29 +1,30 @@
 
-import os
-import pandas as pd
-from common.constants import Col
-from common.scripts import combine_df, split_df
-from common.envs.forex_env import GeneralForexEnv
-from stable_baselines3.common.vec_env import DummyVecEnv
-from common.feature.feature_engineer import FeatureEngineer
-from common.feature.stepwise_feature_engineer import StepwiseFeatureEngineer
-from common.scripts import set_seed
-from stable_baselines3.common.base_class import BaseAlgorithm
-from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
-from stable_baselines3.common.logger import configure
-from typing import Any, Dict, List
-import gymnasium as gym
-from pathlib import Path
 import logging
+from pathlib import Path
+from typing import Any, Dict, List
+
+import pandas as pd
 from matplotlib import pyplot as plt
+from stable_baselines3.common.base_class import BaseAlgorithm
+from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.vec_env import DummyVecEnv
+
+from common.envs.callbacks import SaveOnEpisodeEndCallback
+from common.envs.forex_env import ForexEnv
+from common.scripts import set_seed, flatten_dict
 
 
-def train_test_analyze(train_env: GeneralForexEnv, eval_env: GeneralForexEnv, model: BaseAlgorithm, base_folder_path: Path, experiment_group_name: str, experiment_name: str,
-                        train_episodes: int = 10,
-                        eval_episodes: int = 1,
-                        checkpoints: bool = False,
-                        deterministic: bool = True
-                    ) -> None:
+def train_test_analyze(train_env: ForexEnv,
+                       eval_env: ForexEnv,
+                       model: BaseAlgorithm,
+                       base_folder_path: Path,
+                       experiment_group_name: str,
+                       experiment_name: str,
+                       train_episodes: int = 10,
+                       eval_episodes: int = 1,
+                       checkpoints: bool = False,
+                       deterministic: bool = True
+                       ) -> None:
     """
     Train the model on the training DataFrame, test it on the test DataFrame, and export the results.
     
@@ -49,19 +50,18 @@ def train_test_analyze(train_env: GeneralForexEnv, eval_env: GeneralForexEnv, mo
         raise ValueError(f"Model must be an instance of BaseAlgorithm, got {type(model)}")
     model_class = type(model)
 
-    # epoch lengths
-    episode_length = len(train_env.market_data_df)
-    total_timesteps = train_episodes * episode_length
-
     # set env
     train_dummy_env = DummyVecEnv([lambda: train_env])
     model.set_env(train_dummy_env)
+
+    # total timesteps
+    total_timesteps = train_env.max_episode_timesteps() * train_episodes
 
     # train the model (saving it every epoch)
     logging.info(f"Training model for {train_episodes} epochs...")
     callbacks = []
     if checkpoints:
-        checkpoint_callback = CheckpointCallback(save_freq=episode_length, save_path=str(models_path), name_prefix="model", save_replay_buffer=False, save_vecnormalize=False)
+        checkpoint_callback = SaveOnEpisodeEndCallback(save_path=str(models_path))
         callbacks.append(checkpoint_callback)
     model.learn(total_timesteps=total_timesteps, callback=callbacks, log_interval=1, progress_bar=True)
     logging.info("Training complete.")
@@ -139,18 +139,10 @@ def train_test_analyze(train_env: GeneralForexEnv, eval_env: GeneralForexEnv, mo
 
     logging.info("Done!")
 
-def run_model_on_vec_env(model: BaseAlgorithm, env: GeneralForexEnv, data_path: Path, total_steps: int, deterministic: bool, progress_bar: bool = True) -> None:
+def run_model_on_vec_env(model: BaseAlgorithm, env: ForexEnv, data_path: Path, total_steps: int, deterministic: bool, progress_bar: bool = True) -> None:
     """
     Run a trained RL model on a vectorized environment for a number of episodes,
     log each step, and write all logs at the end. Optionally displays a progress bar.
-
-    Args:
-        model (BaseAlgorithm): The trained RL model with a .predict() method.
-        env (GeneralForexEnv): The vectorized environment (e.g., Stable Baselines3 VecEnv).
-        data_path (Path): Path to save the JSON log file.
-        total_steps (int): Total number of steps to run the model.
-        deterministic (bool): Whether to use deterministic actions.
-        progress_bar (bool): If True, display a progress bar for step completion (requires tqdm).
     """
 
     if total_steps <= 0:
@@ -213,101 +205,10 @@ def run_model_on_vec_env(model: BaseAlgorithm, env: GeneralForexEnv, data_path: 
     log_df = pd.DataFrame(flat_log_entries)
     log_df.to_csv(data_path.with_suffix('.csv'), index=False)
 
-def flatten_dict(d: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Flatten a nested dictionary to a single level.
-    
-    Args:
-        d (Dict[str, Any]): The dictionary to flatten.
-        
-    Returns:
-        Dict[str, Any]: A flattened dictionary.
-    """
-    flat_dict = {}
-    for key, value in d.items():
-        if isinstance(value, dict):
-            value = flatten_dict(value)
-            for sub_key, sub_value in value.items():
-                flat_dict[f"{key}.{sub_key}"] = sub_value
-        else:
-            flat_dict[key] = value
-    return flat_dict
-
-def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> Dict[str, Any]:
-    """
-    Analyze the results DataFrame and save the analysis to the results_path.
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The DataFrame containing the results.
-    results_path : Path
-        The path to save the analysis results.
-    """
-    # Ensure results_path exists
-    results_path.mkdir(parents=True, exist_ok=True)
-
-    # plot close prices of market data
-    close_bid_prices = df['info.market_data.close_bid'].values
-    close_ask_prices = df['info.market_data.close_ask'].values
-    plt.figure(figsize=(12, 6))
-    plt.plot(close_bid_prices, label='Close Bid Prices')
-    plt.plot(close_ask_prices, label='Close Ask Prices')
-    plt.title(f"Close Prices for {name}")
-    plt.xlabel('Time Step')
-    plt.ylabel('Price')
-    plt.legend()
-    plt.savefig(results_path / f"market_data.png")
-    plt.close()
-
-    # plote open high low close of equity
-    equity_open = df['info.agent_data.equity.open'].values
-    equity_high = df['info.agent_data.equity.high'].values
-    equity_low = df['info.agent_data.equity.low'].values
-    equity_close = df['info.agent_data.equity.close'].values
-    plt.figure(figsize=(12, 6))
-    plt.plot(equity_open, label='Equity Open', color='blue')
-    plt.plot(equity_high, label='Equity High', color='green')
-    plt.plot(equity_low, label='Equity Low', color='red')
-    plt.plot(equity_close, label='Equity Close', color='orange')
-    plt.title(f"Equity OHLC for {name}")
-    plt.xlabel('Time Step')
-    plt.ylabel('Price')
-    plt.legend()
-    plt.savefig(results_path / f"equity_ohlc.png")
-    plt.close()
-
-    # calculate sharpe ratio on the close prices of equity
-    returns = df['info.agent_data.equity.close'].pct_change().dropna()
-    sharpe_ratio = returns.mean() / returns.std()
-
-    return {
-        "sharpe_ratio": sharpe_ratio,
-    }
 
 
-def analyse_finals(final_metrics: List[Dict[str, Any]], results_path: Path, name: str) -> None:
-    """
-    Analyze the final results DataFrame and save the analysis to the results_path.
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The DataFrame containing the final results.
-    results_path : Path
-        The path to save the analysis results.
-    """
-    # Ensure results_path exists
-    results_path.mkdir(parents=True, exist_ok=True)
 
-    # make a plot of the sharpe ratios
-    sharpe_ratios = [metrics['sharpe_ratio'] for metrics in final_metrics]
-    plt.figure(figsize=(12, 6))
-    plt.bar(range(len(sharpe_ratios)), sharpe_ratios, tick_label=[f"Model {i+1}" for i in range(len(sharpe_ratios))])
-    plt.title(f"Sharpe Ratios for {name}")
-    plt.xlabel('Model')
-    plt.ylabel('Sharpe Ratio')
-    plt.savefig(results_path / f"sharpe_ratios.png")
-    plt.close()
+
+
     
     

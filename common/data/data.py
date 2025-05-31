@@ -1,16 +1,16 @@
+import os
 import sys
-from pathlib import Path
-from enum import Enum
-import pandas as pd 
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
+from typing import NamedTuple
+
+import numpy as np
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
-from typing import NamedTuple
-import os
-import numpy as np
-from common.scripts import *
+
 from common.constants import *
+from common.scripts import *
 
 # Enum values are strings representing their component of the path
 
@@ -140,20 +140,20 @@ class ForexData:
                 return entry
             raise TypeError(f"Entry is not a time, was {type(entry)}")
         
-        df[Col.TIME] = df[Col.TIME].apply(convert_time)
+        df[RawDataCol.TIME] = df[RawDataCol.TIME].apply(convert_time)
         
         # sort rows based on increasing time
-        df.sort_values(by=Col.TIME, inplace=True)
+        df.sort_values(by=RawDataCol.TIME, inplace=True)
 
         # Check if start and end is correct
-        data_start, ref_start = df[Col.TIME].iloc[0], ref.start
+        data_start, ref_start = df[RawDataCol.TIME].iloc[0], ref.start
         assert data_start == ref_start, f"{data_start} must be equal to {ref_start}"
-        data_end, ref_end = df[Col.TIME].iloc[-1], ref.end
+        data_end, ref_end = df[RawDataCol.TIME].iloc[-1], ref.end
         assert data_end == ref_end, f"{data_end} must be equal to {ref_end}"
 
         # Check if granularity is correct
         time_delta = pd.Timedelta(seconds = ref.gran.get_interval())
-        deltas = df[Col.TIME].diff().dropna()
+        deltas = df[RawDataCol.TIME].diff().dropna()
         expected_n_deltas = (deltas == time_delta).sum() 
         n_deltas = len(deltas)
         assert (expected_n_deltas / n_deltas) > 0.8
@@ -231,8 +231,8 @@ class ForexData:
             end = self.ref.end
         pd_start = pd.to_datetime(start) 
         pd_end = pd.to_datetime(end)
-        self.df = self.df[self.df[Col.TIME] >= pd_start]
-        self.df = self.df[self.df[Col.TIME] <= pd_end]
+        self.df = self.df[self.df[RawDataCol.TIME] >= pd_start]
+        self.df = self.df[self.df[RawDataCol.TIME] <= pd_end]
         self.ref = ForexRef(self.ref.c1, self.ref.c2, self.ref.gran, self.ref.off, start, end)
         return self
     
@@ -251,7 +251,7 @@ class ForexData:
 if __name__ == "__main__":
 
     # Example on how to retrieve data.
-    forex_data = ForexData("C:\\Users\\rober\\TUD-CSE-RP-RLinFinance\\data\\forex\\EURUSD\\1M\\BID\\01.05.2022T00.00-01.05.2025T23.59.csv")
+    forex_data = ForexData("/data/forex/EURUSD/1M/BID/01.05.2022T00.00-01.05.2025T23.59.csv")
     forex_data.set_gran(Granularity.H1)
     df = forex_data.df
     print(df.head())

@@ -1,8 +1,11 @@
-import pandas as pd
+from typing import Any, Callable, Dict, List
+
 import numpy as np
-from typing import Callable, List, Dict, Any
+import pandas as pd
+
 
 class FeatureEngineer:
+
     def __init__(self):
         self._pipeline_steps: List[Callable[[pd.DataFrame], None]] = []
         
@@ -11,12 +14,12 @@ class FeatureEngineer:
         Add a step to the pipeline. Function should modify dataframe in place.
         """
         self._pipeline_steps.append(func)
-
         return self
     
     def run(self, df: pd.DataFrame, remove_original_columns=True) -> pd.DataFrame:
         """
         Run the pipeline on the given DataFrame.
+        Applies each of the steps in the pipeline to the dataframe in place.
         """
 
         df = df.copy(deep=True)  # Avoid modifying the original DataFrame

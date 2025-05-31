@@ -1,8 +1,11 @@
+import logging
 from pathlib import Path
-from common.data import *
+
 import pandas as pd
+
 from common.constants import *
-import logging 
+from common.data.data import ForexData, Currency, ForexRef, Granularity, OfferSide
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_csv_files(p: Path):
@@ -46,12 +49,12 @@ def parse(p: Path) -> ForexData:
     
     # rename columns to be as expected
     df.rename(columns={
-        "Volume" : Col.VOL,
-        "Gmt time" : Col.TIME,
-        "Low" : Col.LOW,
-        "High" : Col.HIGH,
-        "Open" : Col.OPEN,
-        "Close" : Col.CLOSE
+        "Volume" : RawDataCol.VOL,
+        "Gmt time" : RawDataCol.TIME,
+        "Low" : RawDataCol.LOW,
+        "High" : RawDataCol.HIGH,
+        "Open" : RawDataCol.OPEN,
+        "Close" : RawDataCol.CLOSE
     }, inplace=True)
 
     return ForexData(ref, df)
