@@ -59,7 +59,23 @@ class StepwiseFeatureEngineer:
             offset += n
 
         return res
-        
+
+#function to calculate historic lookback of another function
+def calculate_historic_lookback(data: np.ndarray, index: int, lookback: int, func: Callable[[np.ndarray, int], np.ndarray]) -> NDArray[np.float32]:
+    """
+    Calculate the historic lookback of a feature.
+    """
+    if index < lookback:
+        return np.zeros(lookback * func(data, 0).shape[0], dtype=np.float32)
+    
+    # Calculate the feature for the current index
+    current_feature = func(data, index)
+    
+    # Calculate the feature for the previous indices
+    historic_features = np.array([func(data, i) for i in range(index - lookback, index)])
+    
+    # Combine current and historic features
+    return np.concatenate((historic_features.flatten(), current_feature))
 
 def calculate_cash_percentage(data: np.ndarray, index) -> NDArray[np.float32]:
     """

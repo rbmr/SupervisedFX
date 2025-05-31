@@ -15,6 +15,8 @@ from common.trainertester import train_test_analyze
 from common.constants import *
 from common.scripts import *
 
+from typing import Callable, Dict, Any, List
+
 if __name__ == '__main__':
     
     set_seed(42)
@@ -55,9 +57,36 @@ if __name__ == '__main__':
         n_actions=1)
     logging.info("Environments created.")
 
-    policy_kwargs = dict(net_arch=[20,10])
     temp_env = DummyVecEnv([lambda: train_env])
-    model = DQN(
+
+    experiment_funcs: List[Callable[[DummyVecEnv], DQN]] = [
+        lambda env: experiment_1(env),
+    ]
+
+    for experiment_func in experiment_funcs:
+        logging.info(f"Running experiment: {experiment_func.__name__}")
+        dqn_model = experiment_func(temp_env)
+        logging.info("Running train test analyze...")
+        train_test_analyze(
+            train_env=train_env,
+            eval_env=eval_env,
+            model=dqn_model,
+            base_folder_path=RQ2_DIR,
+            experiment_group_name="hyperparameters",
+            experiment_name=experiment_func.__name__,
+            train_episodes=1,
+            eval_episodes=1,
+            checkpoints=True,
+            deterministic=True
+        )
+        logging.info(f"Experiment {experiment_func.__name__} completed.")
+    
+
+# EXPERIMENT FUNCTIONS
+
+def base_experiment_func(temp_env: DummyVecEnv) -> DQN:
+    policy_kwargs = dict(net_arch=[20, 10])
+    return DQN(
         policy="MlpPolicy",
         env=temp_env,
         learning_rate=0.001,
@@ -74,20 +103,15 @@ if __name__ == '__main__':
         exploration_final_eps=0.05,
         policy_kwargs=policy_kwargs,
         verbose=0,
-        seed=42,
+        seed=42
     )
 
-    logging.info("Running train test analyze...")
-    train_test_analyze(
-        train_env=train_env,
-        eval_env=eval_env,
-        model=model,
-        base_folder_path=RQ2_DIR,
-        experiment_group_name="hyperparameters",
-        experiment_name="experiment_1",
-        train_episodes=1,
-        eval_episodes=1,
-        checkpoints=True,
-        deterministic=True
-    )
-    
+def experiment_1(temp_env: DummyVecEnv) -> DQN:
+    """
+    Example experiment function that returns a DQN model with specific hyperparameters.
+    """
+    dqn = base_experiment_func(temp_env)
+    dqn.learning_rate = 0.001
+    dqn.buffer_size = 1000
+
+    return dqn
