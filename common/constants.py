@@ -23,16 +23,16 @@ class MarketDataCol(ColumnCollection):
     """
     Market Data Columns
     """
-    open_bid = 0
-    open_ask = 1
-    high_bid = 2
-    high_ask = 3
-    low_bid = 4
-    low_ask = 5
-    close_bid = 6
-    close_ask = 7
-    volume_bid = 8
-    volume_ask = 9
+    date_gmt = 0
+    open_bid = 1
+    open_ask = 2
+    high_bid = 3
+    high_ask = 4
+    low_bid = 5
+    low_ask = 6
+    close_bid = 7
+    close_ask = 8
+    volume_bid = 9
     date_gmt = 10
 
 class AgentDataCol(ColumnCollection):
