@@ -2,11 +2,12 @@ import logging
 from datetime import datetime, timezone
 
 import pandas as pd
-import pytz
 from stable_baselines3 import A2C
+from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.vec_env import DummyVecEnv
-
+import gymnasium as gym
 from RQ1.constants import RQ1_DIR
+from RQ1.scripts import train_model
 from common.analysis import analyse_individual_run, analyse_finals
 from common.constants import SEED
 from common.data.data import Timeframe, ForexCandleData
@@ -45,17 +46,14 @@ logging.info("Setting up stepwise feature engineer...")
 agent_feature_engineer = StepwiseFeatureEngineer()
 agent_feature_engineer.add(["cash_percentage"], calculate_cash_percentage)
 
-initial_capital = 10_000.0
-transaction_cost_pct = 0.0
-
 logging.info("Creating environments...")
 train_env, eval_env = ForexEnv.create_train_eval_envs(
     split_ratio=0.7,
     forex_candle_data=forex_candle_data,
     market_feature_engineer=market_feature_engineer,
     agent_feature_engineer=agent_feature_engineer,
-    initial_capital=initial_capital,
-    transaction_cost_pct=transaction_cost_pct,
+    initial_capital=10_000.0,
+    transaction_cost_pct=0.0,
     n_actions=0
 )
 logging.info("Environments created.")
@@ -63,32 +61,30 @@ logging.info("Environments created.")
 # MODEL
 
 logging.info("Creating model...")
-policy_kwargs = dict(net_arch=[128, 128])
-
-DEVICE = "cpu"
 
 model = A2C(
     policy="MlpPolicy",
-    env=train_env,
     learning_rate=0.001,
+    env=train_env,
     gamma=0.99,
     n_steps=10,
     ent_coef=0.02,
     gae_lambda=0.95,
     vf_coef=0.5,
     max_grad_norm=0.5,
-    policy_kwargs=policy_kwargs,
+    policy_kwargs=dict(net_arch=[128, 128]),
     verbose=0,
     seed=SEED,
-    device=DEVICE
+    device="cpu"
 )
+
 logging.info("Model created.")
 
 # FOLDERS
 
 EXPERIMENTS_DIR = RQ1_DIR / "experiments"
 experiment_group = "testing"
-experiment_name = datetime.now(pytz.timezone("Europe/Amsterdam")).strftime("%Y%m%d-%H%M%S")
+experiment_name = datetime.now().strftime("%Y%m%d-%H%M%S")
 experiment_dir = EXPERIMENTS_DIR / experiment_group / experiment_name
 logs_dir = experiment_dir / "logs"
 models_dir = experiment_dir / "models"
@@ -100,74 +96,11 @@ results_dir.mkdir(parents=True, exist_ok=True)
 
 # TRAINING
 
-train_episodes = 20
-train_dummy_env = DummyVecEnv([lambda: train_env])
-model.set_env(train_dummy_env)
-total_timesteps = train_env.total_steps * train_episodes
+callback = [SaveOnEpisodeEndCallback(models_dir)]
 
-logging.info(f"Training model for {train_episodes} episodes...")
-
-callback = [SaveOnEpisodeEndCallback(save_path=models_dir)]
-model.learn(total_timesteps=total_timesteps, callback=callback, log_interval=1, progress_bar=True)
-
-logging.info("Training complete.")
-
-# Saving the final model
-
-model.save(models_dir / f"model_{total_timesteps}_steps.zip")
-logging.info(f"Model(s) saved to '{models_dir}'.")
+train_model(model, train_env, train_episodes=5, callback=callback)
 
 # EVALUATION
-
-logging.info("Starting evaluation...")
-
-eval_episodes = 1
-model_class = type(model)
-
-model_files = list(models_dir.glob("*.zip"))
-model_files.sort(key=lambda x: x.stat().st_mtime)
-
-logging.info(f"Found {len(model_files)} model files in '{models_dir}'.")
-
-for model_file in model_files:
-
-    logging.info(f"Loading model from {model_file}...")
-
-    model = model_class.load(model_file, env=train_dummy_env, device=DEVICE)
-
-    logging.info(f"Model loaded from {model_file}.")
-
-    model_name = model_file.stem
-    model_results_dir = results_dir / model_name
-    train_results_dir = model_results_dir / "train"
-    eval_results_dir = model_results_dir / "eval"
-    train_results_file = train_results_dir / "data"
-    eval_results_file = eval_results_dir / "data"
-
-    train_episode_length = train_env.total_steps
-    eval_episode_length = eval_env.total_steps
-
-    logging.info("Running model on train environment.")
-
-    run_model(model,
-              train_env,
-              train_results_file,
-              total_steps=eval_episodes * train_episode_length,
-              deterministic=True,
-              progress_bar=True
-              )
-
-    logging.info("Running model on eval environment.")
-
-    run_model(model,
-              eval_env,
-              eval_results_file,
-              total_steps=eval_episodes * eval_episode_length,
-              deterministic=True,
-              progress_bar=True
-              )
-
-logging.info("Finished evaluation.")
 
 # ANALYSIS
 
@@ -182,8 +115,8 @@ for model_file in model_files:
     model_results_dir = results_dir / model_name
     train_results_dir = model_results_dir / "train"
     eval_results_dir = model_results_dir / "eval"
-    train_results_file = train_results_dir / "data"
-    eval_results_file = eval_results_dir / "data"
+    train_results_file = train_results_dir / "data.csv"
+    eval_results_file = eval_results_dir / "data.csv"
 
     logging.info(f"Analyzing results for model: {model_name}")
 
