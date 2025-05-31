@@ -77,7 +77,7 @@ if __name__ == '__main__':
         exploration_initial_eps=1.0,
         exploration_final_eps=0.05,
         policy_kwargs=policy_kwargs,
-        verbose=1,
+        verbose=0,
         seed=42,
     )
 

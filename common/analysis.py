@@ -64,10 +64,8 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
     if amount_years == 0:
         sharpe_ratio = 0.0  # Avoid division by zero
     else:
-        sharpe_ratio *= (252 / amount_years) ** 0.5  # Annualize the Sharpe ratio
-    N = equity_returns.shape[0] / amount_years
-
-    sharpe_ratio = sharpe_ratio * (N ** 0.5)  # Scale Sharpe ratio by sqrt(N)
+        N = equity_returns.shape[0] / amount_years
+        sharpe_ratio = sharpe_ratio * (N ** 0.5)  # Scale Sharpe ratio by sqrt(N)
 
     return {
         "sharpe_ratio": sharpe_ratio,
