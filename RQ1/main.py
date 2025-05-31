@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timezone
 
 import pandas as pd
+import pytz
 from stable_baselines3 import A2C
 from stable_baselines3.common.vec_env import DummyVecEnv
 
@@ -9,13 +10,12 @@ from RQ1.constants import RQ1_DIR
 from common.analysis import analyse_individual_run, analyse_finals
 from common.constants import SEED
 from common.data.data import Timeframe, ForexCandleData
-from common.envs.callbacks import SaveOnEpisodeEndCallback
-from common.envs.forex_env import ForexEnv
 from common.data.feature_engineer import (FeatureEngineer, history_lookback,
                                           remove_ohlcv, rsi)
 from common.data.stepwise_feature_engineer import (
     StepwiseFeatureEngineer, calculate_cash_percentage)
-from common.scripts import split_df
+from common.envs.callbacks import SaveOnEpisodeEndCallback
+from common.envs.forex_env import ForexEnv
 from common.trainertester import run_model
 
 if __name__ != '__main__':
@@ -88,7 +88,7 @@ logging.info("Model created.")
 
 EXPERIMENTS_DIR = RQ1_DIR / "experiments"
 experiment_group = "testing"
-experiment_name = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+experiment_name = datetime.now(pytz.timezone("Europe/Amsterdam")).strftime("%Y%m%d-%H%M%S")
 experiment_dir = EXPERIMENTS_DIR / experiment_group / experiment_name
 logs_dir = experiment_dir / "logs"
 models_dir = experiment_dir / "models"
