@@ -1,5 +1,5 @@
 """
-This file contains some simpel scripts that can be useful anywhere during the project.
+This file contains some simple scripts that can be useful anywhere during the project.
 """
 
 import random
