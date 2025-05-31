@@ -557,7 +557,7 @@ class ForexCandleData:
         start : pd.Timestamp, optional
             The start date for the period. If None, uses the earliest date in the DataFrame.
         end : pd.Timestamp, optional
-            The end date for the period. If None, uses the latest date in the DataFrame.
+            The end date for the period (exclusive). If None, uses the latest date in the DataFrame. 
 
         Returns
         -------
@@ -568,8 +568,9 @@ class ForexCandleData:
             start = self.df['date_gmt'].min()
         if end is None:
             end = self.df['date_gmt'].max()
+            end += pd.Timedelta(days=100)  # Make end exclusive
 
-        filtered_df = self.df[(self.df['date_gmt'] >= start) & (self.df['date_gmt'] <= end)].copy()
+        filtered_df = self.df[(self.df['date_gmt'] >= start) & (self.df['date_gmt'] < end)].copy()
         return ForexCandleData(source=self.source, instrument=self.instrument, granularity=self.granularity, df=filtered_df)
 
     def analyse_save(self):
