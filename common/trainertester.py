@@ -154,8 +154,6 @@ def run_model(model: BaseAlgorithm,
     data_path = Path(data_path)
     data_path.parent.mkdir(parents=True, exist_ok=True)
 
-    collected_log_entries: List[Dict[str, Any]] = []
-
     env = DummyVecEnv([lambda: env])  # Ensure env is wrapped in DummyVecEnv
     
     obs = env.reset()
@@ -170,20 +168,20 @@ def run_model(model: BaseAlgorithm,
                   "Install with: pip install tqdm")
 
     step_count = 1
+    logs_df = None
+    episode_logs: List[Dict[str, Any]] = []
     while step_count < total_steps:
         action, _ = model.predict(obs, deterministic=deterministic)
         next_obs, rewards, dones, infos = env.step(action)
 
-        for i in range(env.num_envs):
-            log_entry: Dict[str, Any] = {
-                "env_index": i,
-                "step": step_count,
-                "action": action[i].tolist(),
-                "reward": rewards[i],
-                "done": dones[i],
-                "info": infos[i],
-            }
-            collected_log_entries.append(log_entry)
+        
+        log_entry: Dict[str, Any] = {
+            "step": step_count,
+            "action": action[0].tolist(),
+            "reward": rewards[0],
+            "done": dones[0],
+        }
+        episode_logs.append(log_entry)
 
         if pbar:
             pbar.update(1)
@@ -195,6 +193,25 @@ def run_model(model: BaseAlgorithm,
             # Reset the environment
             obs = env.reset()
 
+            episode_info = infos[0] if infos else {}
+            market_data_df = episode_info.get('market_data', pd.DataFrame())
+            market_features_df = episode_info.get('market_features', pd.DataFrame())
+            agent_data_df = episode_info.get('agent_data', pd.DataFrame())
+            # preprend the dataframes columns with their respective names
+            market_data_df.columns = [f"info.market_data.{col}" for col in market_data_df.columns]
+            market_features_df.columns = [f"info.market_features.{col}" for col in market_features_df.columns]
+            agent_data_df.columns = [f"info.agent_data.{col}" for col in agent_data_df.columns]
+
+            temp_df = pd.DataFrame(episode_logs)
+            temp_df = pd.concat([temp_df, agent_data_df, market_data_df, market_features_df], axis=1)
+
+            if logs_df is None:
+                logs_df = temp_df
+            else:
+                logs_df = pd.concat([logs_df, temp_df], ignore_index=True)
+
+            episode_logs = []
+
         obs = next_obs
         step_count += 1
     
@@ -203,9 +220,9 @@ def run_model(model: BaseAlgorithm,
 
     # Save collected logs to JSON file
     # flatten each dictionary in collected_log_entries to be only one level deep. 
-    flat_log_entries = [flatten_dict(entry) for entry in collected_log_entries]
-    log_df = pd.DataFrame(flat_log_entries)
-    log_df.to_csv(data_path, index=False)
+    # flat_log_entries = [flatten_dict(entry) for entry in collected_log_entries]
+    # log_df = pd.DataFrame(flat_log_entries)
+    logs_df.to_csv(data_path, index=False)
 
 
 
