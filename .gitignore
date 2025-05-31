@@ -175,7 +175,9 @@ cython_debug/
 
 
 # Custom
-*/logs/*
-*/models/*
-*/experiments/*
-*/TICK/*
+RQ1/experiments/*
+RQ2/experiments/*
+RQ3/experiments/*
+RQ4/experiments/*
+RQ5/experiments/*
+data/TICK/*
