@@ -87,6 +87,9 @@ class ForexEnv(gym.Env):
             self.initial_capital, # equity_low
             self.initial_capital, # equity_close
         )
+        assert self.market_data.shape == (self.total_steps, len(MarketDataCol))
+        assert self.market_features.shape == (self.total_steps, len(self.market_feature_names))
+        assert self.agent_data.shape == (self.total_steps, len(AgentDataCol))
 
         # Action space
         self.prev_action = None
