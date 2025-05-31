@@ -7,6 +7,7 @@ import pandas as pd
 from gymnasium import spaces
 
 from common.constants import *
+from common.data.data import ForexCandleData
 from common.data.feature_engineer import FeatureEngineer
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
 from common.scripts import find_first_row_with_nan, find_first_row_without_nan
@@ -100,7 +101,66 @@ class ForexEnv(gym.Env):
         num_market_features = len(market_feature_df.columns)
         num_state_features = self.agent_feature_engineer.num_of_features()
         observation_space_shape = num_market_features + num_state_features
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(observation_space_shape,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(observation_space_shape,), dtype=np.float32)   
+    
+    @staticmethod
+    def create_train_eval_envs(
+        split_ratio: float,
+        forex_candle_data: ForexCandleData,
+        market_feature_engineer: FeatureEngineer,
+        agent_feature_engineer: StepwiseFeatureEngineer,
+        initial_capital: float = 10000.0,
+        transaction_cost_pct: float = 0.0,
+        n_actions: int = 1,
+        custom_reward_function: Optional[Callable[['ForexEnv'], float]] = None,
+    ) -> tuple['ForexEnv', 'ForexEnv']:
+        """
+        Creates training and evaluation environments from ForexCandleData and FeatureEngineers.
+        Splits the data into 70% training and 30% evaluation.
+        """
+        if split_ratio <= 0.0 or split_ratio >= 1.0:
+            raise ValueError(f"split_ratio must be between 0.0 and 1.0, was {split_ratio}. For 70% training, use 0.7.")
+        if not isinstance(forex_candle_data, ForexCandleData):
+            raise ValueError(f"forex_candle_data must be an instance of ForexCandleData, was {type(forex_candle_data)}.")
+        if not isinstance(market_feature_engineer, FeatureEngineer):
+            raise ValueError(f"market_feature_engineer must be an instance of FeatureEngineer, was {type(market_feature_engineer)}.")
+        
+
+        market_data_df = forex_candle_data.df.copy(deep=True)
+        market_features_df = market_feature_engineer.run(market_data_df, remove_original_columns=True)
+
+        # Split data
+        split_index = int(len(market_data_df) * split_ratio)
+        train_market_data = market_data_df.iloc[:split_index]
+        eval_market_data = market_data_df.iloc[split_index:]
+        train_market_features = market_features_df.iloc[:split_index]
+        eval_market_features = market_features_df.iloc[split_index:]
+
+        # Create training environment
+        train_env = ForexEnv(
+            market_data_df=train_market_data,
+            market_feature_df=train_market_features,
+            agent_feature_engineer=agent_feature_engineer,
+            initial_capital=initial_capital,
+            transaction_cost_pct=transaction_cost_pct,
+            n_actions=n_actions,
+            custom_reward_function=custom_reward_function
+        )
+
+        # Create evaluation environment
+        eval_env = ForexEnv(
+            market_data_df=eval_market_data,
+            market_feature_df=eval_market_features,
+            agent_feature_engineer=agent_feature_engineer,
+            initial_capital=initial_capital,
+            transaction_cost_pct=transaction_cost_pct,
+            n_actions=n_actions,
+            custom_reward_function=custom_reward_function
+        )
+
+        return train_env, eval_env
+        
+        
 
     def max_episode_timesteps(self):
         return self.total_steps

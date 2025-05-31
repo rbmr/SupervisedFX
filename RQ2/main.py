@@ -6,9 +6,9 @@ from common.scripts import combine_df
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from common.envs.forex_env import GeneralForexEnv
-from common.feature.feature_engineer import FeatureEngineer, rsi, history_lookback, remove_ohlcv
-from common.feature.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
+from common.envs.forex_env import ForexEnv
+from common.data.feature_engineer import FeatureEngineer, rsi, history_lookback, remove_ohlcv
+from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
 from RQ2.constants import RQ2_DIR
 
 from common.data import ForexCandleData, Timeframe
@@ -48,14 +48,14 @@ if __name__ == '__main__':
     stepwise_feature_engineer.add(calculate_cash_percentage)
 
     logging.info("Creating environments...")
-    train_env = GeneralForexEnv(
+    train_env = ForexEnv(
         market_data_df=train_df,
         data_feature_engineer=feature_engineer,
         agent_feature_engineer=stepwise_feature_engineer,
         initial_capital=INITIAL_CAPITAL,
         transaction_cost_pct=TRANSACTION_COST_PCT,
     )
-    eval_env = GeneralForexEnv(
+    eval_env = ForexEnv(
         market_data_df=eval_df,
         data_feature_engineer=feature_engineer,
         agent_feature_engineer=stepwise_feature_engineer,
