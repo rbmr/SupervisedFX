@@ -77,7 +77,7 @@ class ForexEnv(gym.Env):
         # Use numpy arrays for speed
         self.market_data = market_data_df.to_numpy(dtype=np.float32)
         self.market_features = market_feature_df.to_numpy(dtype=np.float32)
-        self.market_feature_col_names = market_feature_df.columns.tolist()
+        self.market_feature_names = market_feature_df.columns.tolist()
         self.agent_data = np.zeros(shape = (self.market_data.shape[0], len(AgentDataCol.all_names())), dtype=np.float32)
         self.agent_data[0, :] = (
             self.initial_capital, # cash
@@ -87,6 +87,9 @@ class ForexEnv(gym.Env):
             self.initial_capital, # equity_low
             self.initial_capital, # equity_close
         )
+        assert self.market_data.shape == (self.total_steps, len(MarketDataCol))
+        assert self.market_features.shape == (self.total_steps, len(self.market_feature_names))
+        assert self.agent_data.shape == (self.total_steps, len(AgentDataCol))
 
         # Action space
         self.prev_action = None
@@ -184,7 +187,9 @@ class ForexEnv(gym.Env):
         current_shares = self.agent_data[self.current_step - 1, AgentDataCol.shares]
         new_cash, new_shares = self._execute_action(action, self.prev_action, current_data, current_cash, current_shares)
         equity_open, equity_high, equity_low, equity_close = self._calculate_equity(current_data, new_cash, new_shares)
-        self.agent_data[self.current_step, :] = (new_cash, new_shares, equity_open, equity_high, equity_low, equity_close)
+        agent_step_data = (new_cash, new_shares, equity_open, equity_high, equity_low, equity_close)
+        agent_step_data = tuple(float(x) for x in agent_step_data) # convert from (1,) shape arrays to floats
+        self.agent_data[self.current_step, :] = agent_step_data
 
         # calculate reward
         reward = self._get_reward()
@@ -209,7 +214,7 @@ class ForexEnv(gym.Env):
             agent_data = self.agent_data[:number_of_steps, :]
 
             market_data_df = pd.DataFrame(market_data, columns=MarketDataCol.all_names())
-            market_features_df = pd.DataFrame(market_features, columns=self.market_feature_col_names)
+            market_features_df = pd.DataFrame(market_features, columns=self.market_feature_names)
             agent_data_df = pd.DataFrame(agent_data, columns=AgentDataCol.all_names())
 
             info['market_data'] = market_data_df
