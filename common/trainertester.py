@@ -129,8 +129,8 @@ def train_test_analyze(train_env: ForexEnv,
         metrics = analyse_individual_run(results_df, eval_data_path, name=model_name)
         model_eval_metrics.append(metrics)
 
-    analyse_finals(model_train_metrics, results_path, name="train_results")
-    analyse_finals(model_eval_metrics, results_path, name="eval_results")
+    analyse_finals(model_train_metrics, results_path / "train", name="train_results")
+    analyse_finals(model_eval_metrics, results_path / "eval", name="eval_results")
     
     logging.info("Analysis complete.")
 
@@ -222,7 +222,7 @@ def run_model(model: BaseAlgorithm,
         else:
             obs = next_obs
 
-            
+
         step_count += 1
     
     if pbar:

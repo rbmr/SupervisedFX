@@ -8,7 +8,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from common.envs.forex_env import ForexEnv
 from common.data.feature_engineer import FeatureEngineer, rsi, history_lookback, remove_ohlcv
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
-from RQ2.constants import RQ2_DIR
+from RQ2.constants import RQ2_DIR, RQ2_HYPERPARAMETERS_START_DATE, RQ2_HYPERPARAMETERS_END_DATE, RQ2_EXPERIMENTS_START_DATE, RQ2_EXPERIMENTS_END_DATE, RQ2_DATA_SPLIT_RATIO
 
 from common.data.data import ForexCandleData, Timeframe
 from common.trainertester import train_test_analyze
@@ -29,13 +29,9 @@ if __name__ == '__main__':
     forex_data = ForexCandleData.load(source="dukascopy",
                                       instrument="EURUSD",
                                       granularity=Timeframe.M15,
-                                      start_time=datetime(2022, 1, 2, 22, 0, 0, 0),
-                                      end_time=datetime(2025, 5, 16, 20, 45, 0, 0),
+                                      start_time=RQ2_HYPERPARAMETERS_START_DATE,
+                                      end_time= RQ2_HYPERPARAMETERS_END_DATE,
                                     )
-    forex_data = forex_data.set_period(
-        start=datetime(2022, 1, 2, 22, 0, 0, 0),
-        end=datetime(2023, 1, 2, 22, 0, 0, 0)
-    )
     
     # --- Feature Engineering ---
     # Create a feature engineer object
@@ -50,7 +46,7 @@ if __name__ == '__main__':
 
     logging.info("Creating environments...")
     train_env, eval_env = ForexEnv.create_train_eval_envs(
-        split_ratio=0.8,
+        split_ratio=RQ2_DATA_SPLIT_RATIO,
         forex_candle_data=forex_data,
         market_feature_engineer=feature_engineer,
         agent_feature_engineer=stepwise_feature_engineer,
@@ -77,7 +73,7 @@ if __name__ == '__main__':
         exploration_initial_eps=1.0,
         exploration_final_eps=0.05,
         policy_kwargs=policy_kwargs,
-        verbose=1,
+        verbose=0,
         seed=42,
     )
 
@@ -87,9 +83,9 @@ if __name__ == '__main__':
         eval_env=eval_env,
         model=model,
         base_folder_path=RQ2_DIR,
-        experiment_group_name="testing123",
-        experiment_name="capitalcom",
-        train_episodes=1,
+        experiment_group_name="hyperparameters",
+        experiment_name="experiment_0",
+        train_episodes=4,
         eval_episodes=1,
         checkpoints=False,
         deterministic=True
