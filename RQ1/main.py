@@ -7,7 +7,7 @@ from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.vec_env import DummyVecEnv
 import gymnasium as gym
 from RQ1.constants import RQ1_DIR
-from RQ1.scripts import train_model
+from RQ1.scripts import train_model, evaluate_models
 from common.analysis import analyse_individual_run, analyse_finals
 from common.constants import SEED
 from common.data.data import Timeframe, ForexCandleData
@@ -101,6 +101,13 @@ callback = [SaveOnEpisodeEndCallback(models_dir)]
 train_model(model, train_env, train_episodes=5, callback=callback)
 
 # EVALUATION
+
+eval_envs = {
+    "train": train_env,
+    "eval": eval_env,
+}
+
+evaluate_models(models_dir, results_dir, eval_envs, eval_episodes=1)
 
 # ANALYSIS
 
