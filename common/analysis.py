@@ -45,6 +45,30 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
     returns = df['info.agent_data.equity.close'].pct_change().dropna()
     sharpe_ratio = returns.mean() / returns.std()
 
+    # calculate sharpe ratio on the close prices of equity. 
+    # Then scale it to be annulaized.
+    # Base this annulaization factor based on the number of steps in a year.
+    # The timefram can be anything, and no assumption is made about the time between steps.
+    equity_returns = df['info.agent_data.equity.close'].pct_change().dropna()
+    mean_return = equity_returns.mean()
+    std_return = equity_returns.std()
+    if std_return == 0:
+        sharpe_ratio = 0.0  # Avoid division by zero
+    else:
+        sharpe_ratio = mean_return / std_return
+    # Annualize the Sharpe ratio assuming 252 trading days in a year
+    min_date = df['info.market_data.date_gmt'].min()
+    max_date = df['info.market_data.date_gmt'].max()
+    date_range = pd.to_datetime(max_date) - pd.to_datetime(min_date)
+    amount_years = date_range.days / 365.25  # Use 365.25 to account for leap years
+    if amount_years == 0:
+        sharpe_ratio = 0.0  # Avoid division by zero
+    else:
+        sharpe_ratio *= (252 / amount_years) ** 0.5  # Annualize the Sharpe ratio
+    N = equity_returns.shape[0] / amount_years
+
+    sharpe_ratio = sharpe_ratio * (N ** 0.5)  # Scale Sharpe ratio by sqrt(N)
+
     return {
         "sharpe_ratio": sharpe_ratio,
     }
