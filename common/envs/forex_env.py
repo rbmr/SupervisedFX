@@ -187,7 +187,9 @@ class ForexEnv(gym.Env):
         current_shares = self.agent_data[self.current_step - 1, AgentDataCol.shares]
         new_cash, new_shares = self._execute_action(action, self.prev_action, current_data, current_cash, current_shares)
         equity_open, equity_high, equity_low, equity_close = self._calculate_equity(current_data, new_cash, new_shares)
-        self.agent_data[self.current_step, :] = (new_cash, new_shares, equity_open, equity_high, equity_low, equity_close)
+        agent_step_data = (new_cash, new_shares, equity_open, equity_high, equity_low, equity_close)
+        agent_step_data = tuple(float(x) for x in agent_step_data) # convert from (1,) shape arrays to floats
+        self.agent_data[self.current_step, :] = agent_step_data
 
         # calculate reward
         reward = self._get_reward()
