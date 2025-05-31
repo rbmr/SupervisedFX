@@ -5,31 +5,14 @@ import gymnasium as gym
 import numpy as np
 import pandas as pd
 from gymnasium import spaces
-from numpy.typing import NDArray
 
 from common.constants import *
 from common.data.data import ForexCandleData
 from common.data.feature_engineer import FeatureEngineer
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
-from common.scripts import find_first_row_with_nan, find_first_row_without_nan
+from common.scripts import find_first_row_with_nan, find_first_row_without_nan, calculate_ohlc_equity, calculate_equity
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-def calculate_equity(bid_price: float, ask_price: float, cash: float, shares: float) -> float:
-    """
-    Calculates the equity based on current cash, shares and prices.
-    """
-    return cash + shares * (bid_price if shares >= 0 else ask_price)
-
-def calculate_ohlc_equity(current_prices: NDArray[np.float32], cash: float, shares: float) -> tuple[float, float, float, float]:
-    """
-    Calculates the equity based on current cash, shares and prices.
-    """
-    equity_open = calculate_equity(current_prices[MarketDataCol.open_bid], current_prices[MarketDataCol.open_ask], cash, shares)
-    equity_high = calculate_equity(current_prices[MarketDataCol.high_bid], current_prices[MarketDataCol.high_ask], cash, shares)
-    equity_low = calculate_equity(current_prices[MarketDataCol.low_bid], current_prices[MarketDataCol.low_ask], cash, shares)
-    equity_close = calculate_equity(current_prices[MarketDataCol.close_bid], current_prices[MarketDataCol.close_ask], cash, shares)
-    return equity_open, equity_high, equity_low, equity_close
 
 class ForexEnv(gym.Env):
 
@@ -145,8 +128,8 @@ class ForexEnv(gym.Env):
             raise ValueError(f"forex_candle_data must be an instance of ForexCandleData, was {type(forex_candle_data)}.")
         if not isinstance(market_feature_engineer, FeatureEngineer):
             raise ValueError(f"market_feature_engineer must be an instance of FeatureEngineer, was {type(market_feature_engineer)}.")
-        
 
+        # Retrieve market data and features.
         market_data_df = forex_candle_data.df.copy(deep=True)
         market_features_df = market_feature_engineer.run(market_data_df, remove_original_columns=True)
 
@@ -214,10 +197,9 @@ class ForexEnv(gym.Env):
         truncated = False
         if equity_close <= 0:
             terminated = True
-            logging.info(f"Step {self.current_step}: Agent ruined. Equity: {equity_close}.")
+            logging.warning(f"Step {self.current_step}: Agent ruined. Equity: {equity_close}.")
         if self.current_step >= self.total_steps - 1:
             truncated = True
-            logging.info(f"Step {self.current_step}: End of data reached.") 
 
         # Determine info dict
         info = {}
@@ -256,7 +238,7 @@ class ForexEnv(gym.Env):
         Returns the current observation of the environment.
         The observation is a combination of market features and state features.
         """
-        market_features: np.ndarray = self.market_features[self.current_step]
+        market_features = self.market_features[self.current_step]
         state_features = self.agent_feature_engineer.run(self.agent_data, self.current_step)
         observation = np.concatenate((market_features, state_features), axis=0)
         
@@ -331,7 +313,6 @@ class ForexEnv(gym.Env):
         # Compute updated portfolio state
         updated_cash = current_cash - shares_bought * cost_per_share
         updated_shares = current_shares + shares_bought
-
         return updated_cash, updated_shares
 
     def _sell_instrument(self, shares_to_sell: float, bid_price: float, ask_price: float, current_cash: float, current_shares: float) -> tuple[float, float]:
