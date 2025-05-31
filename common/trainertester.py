@@ -9,6 +9,7 @@ from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
 
+from common.analysis import analyse_finals, analyse_individual_run
 from common.envs.callbacks import SaveOnEpisodeEndCallback
 from common.envs.forex_env import ForexEnv
 from common.scripts import set_seed, flatten_dict
@@ -99,11 +100,9 @@ def train_test_analyze(train_env: ForexEnv,
         train_episode_length = len(train_env.market_data_df)
         eval_episode_length = len(eval_env.market_data_df)
 
-        run_model_on_vec_env(model, train_env, train_results_full_file, total_steps=eval_episodes * train_episode_length, deterministic=deterministic, progress_bar=True)
+        run_model(model, train_env, train_results_full_file, total_steps=eval_episodes * train_episode_length, deterministic=deterministic, progress_bar=True)
 
-        run_model_on_vec_env(model, eval_env, eval_results_full_file, total_steps=eval_episodes * eval_episode_length, deterministic=deterministic, progress_bar=True)
-
-
+        run_model(model, eval_env, eval_results_full_file, total_steps=eval_episodes * eval_episode_length, deterministic=deterministic, progress_bar=True)
 
     # ANALYSIS
     logging.info("Analyzing results...")
@@ -136,10 +135,13 @@ def train_test_analyze(train_env: ForexEnv,
     
     logging.info("Analysis complete.")
 
-
-    logging.info("Done!")
-
-def run_model_on_vec_env(model: BaseAlgorithm, env: ForexEnv, data_path: Path, total_steps: int, deterministic: bool, progress_bar: bool = True) -> None:
+def run_model(model: BaseAlgorithm,
+              env: ForexEnv,
+              data_path: Path,
+              total_steps: int,
+              deterministic: bool,
+              progress_bar: bool = True
+              ) -> None:
     """
     Run a trained RL model on a vectorized environment for a number of episodes,
     log each step, and write all logs at the end. Optionally displays a progress bar.
@@ -203,7 +205,7 @@ def run_model_on_vec_env(model: BaseAlgorithm, env: ForexEnv, data_path: Path, t
     # flatten each dictionary in collected_log_entries to be only one level deep. 
     flat_log_entries = [flatten_dict(entry) for entry in collected_log_entries]
     log_df = pd.DataFrame(flat_log_entries)
-    log_df.to_csv(data_path.with_suffix('.csv'), index=False)
+    log_df.to_csv(data_path, index=False)
 
 
 
