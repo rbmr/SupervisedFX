@@ -105,7 +105,7 @@ train_dummy_env = DummyVecEnv([lambda: train_env])
 model.set_env(train_dummy_env)
 total_timesteps = train_env.total_steps * train_episodes
 
-logging.info(f"Training model for {train_episodes} epochs...")
+logging.info(f"Training model for {train_episodes} episodes...")
 
 callback = [SaveOnEpisodeEndCallback(save_path=models_dir)]
 model.learn(total_timesteps=total_timesteps, callback=callback, log_interval=1, progress_bar=True)
@@ -147,6 +147,8 @@ for model_file in model_files:
     train_episode_length = train_env.total_steps
     eval_episode_length = eval_env.total_steps
 
+    logging.info("Running model on train environment.")
+
     run_model(model,
               train_env,
               train_results_file,
@@ -154,6 +156,8 @@ for model_file in model_files:
               deterministic=True,
               progress_bar=True
               )
+
+    logging.info("Running model on eval environment.")
 
     run_model(model,
               eval_env,
