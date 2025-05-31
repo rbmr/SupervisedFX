@@ -33,9 +33,7 @@ if __name__ == '__main__':
                                       start_time=datetime(2022, 1, 2, 22, 0, 0, 0),
                                       end_time=datetime(2025, 5, 16, 20, 45, 0, 0),
                                     )
-    forex_data_df = forex_data.df
-    train_df, eval_df = split_df(forex_data_df, 0.7)
-
+    
     # --- Feature Engineering ---
     # Create a feature engineer object
     feature_engineer = FeatureEngineer()
@@ -48,20 +46,14 @@ if __name__ == '__main__':
     stepwise_feature_engineer.add(calculate_cash_percentage)
 
     logging.info("Creating environments...")
-    train_env = ForexEnv(
-        market_data_df=train_df,
-        data_feature_engineer=feature_engineer,
+    train_env, eval_env = ForexEnv.create_train_eval_envs(
+        split_ratio=0.8,
+        forex_candle_data=forex_data,
+        market_feature_engineer=feature_engineer,
         agent_feature_engineer=stepwise_feature_engineer,
         initial_capital=INITIAL_CAPITAL,
         transaction_cost_pct=TRANSACTION_COST_PCT,
-    )
-    eval_env = ForexEnv(
-        market_data_df=eval_df,
-        data_feature_engineer=feature_engineer,
-        agent_feature_engineer=stepwise_feature_engineer,
-        initial_capital=INITIAL_CAPITAL,
-        transaction_cost_pct=TRANSACTION_COST_PCT,
-    )
+        n_actions=1)
     logging.info("Environments created.")
 
     policy_kwargs = dict(net_arch=[20,10])
