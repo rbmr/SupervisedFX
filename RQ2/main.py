@@ -85,9 +85,9 @@ if __name__ == '__main__':
         base_folder_path=RQ2_DIR,
         experiment_group_name="hyperparameters",
         experiment_name="experiment_0",
-        train_episodes=4,
+        train_episodes=20,
         eval_episodes=1,
-        checkpoints=False,
+        checkpoints=True,
         deterministic=True
     )
     

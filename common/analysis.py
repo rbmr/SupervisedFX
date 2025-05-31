@@ -81,7 +81,7 @@ def analyse_finals(final_metrics: List[Dict[str, Any]], results_path: Path, name
     # make a plot of the sharpe ratios
     sharpe_ratios = [metrics['sharpe_ratio'] for metrics in final_metrics]
     plt.figure(figsize=(12, 6))
-    plt.bar(range(len(sharpe_ratios)), sharpe_ratios, tick_label=[f"Model {i + 1}" for i in range(len(sharpe_ratios))])
+    plt.bar(range(len(sharpe_ratios)), sharpe_ratios, tick_label=[f"{i + 1}" for i in range(len(sharpe_ratios))])
     plt.title(f"Sharpe Ratios for {name}")
     plt.xlabel('Model')
     plt.ylabel('Sharpe Ratio')

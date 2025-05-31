@@ -67,9 +67,10 @@ def train_test_analyze(train_env: ForexEnv,
     logging.info("Training complete.")
 
     # save the final model
-    save_path = models_path / f"model_{total_timesteps}_steps.zip"
-    model.save(save_path)
-    logging.info(f"Model(s) saved to '{models_path}'.")
+    if not checkpoints:
+        save_path = models_path / f"model_{train_episodes}_episodes.zip"
+        model.save(save_path)
+        logging.info(f"Model(s) saved to '{models_path}'.")
     
     
     # TESTING THE MODELS
@@ -156,7 +157,8 @@ def run_model(model: BaseAlgorithm,
     
     pbar = None
     if progress_bar:
-        pbar = tqdm(total=total_steps, desc="Total Steps")
+        pbar = tqdm(total=total_steps, desc="Total Steps", )
+        pbar.update(1)
 
     step_count = 1
     logs_df = None
