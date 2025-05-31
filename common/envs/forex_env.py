@@ -5,6 +5,7 @@ import gymnasium as gym
 import numpy as np
 import pandas as pd
 from gymnasium import spaces
+from numpy.typing import NDArray
 
 from common.constants import *
 from common.data.data import ForexCandleData
@@ -13,6 +14,22 @@ from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
 from common.scripts import find_first_row_with_nan, find_first_row_without_nan
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def calculate_equity(bid_price: float, ask_price: float, cash: float, shares: float) -> float:
+    """
+    Calculates the equity based on current cash, shares and prices.
+    """
+    return cash + shares * (bid_price if shares >= 0 else ask_price)
+
+def calculate_ohlc_equity(current_prices: NDArray[np.float32], cash: float, shares: float) -> tuple[float, float, float, float]:
+    """
+    Calculates the equity based on current cash, shares and prices.
+    """
+    equity_open = calculate_equity(current_prices[MarketDataCol.open_bid], current_prices[MarketDataCol.open_ask], cash, shares)
+    equity_high = calculate_equity(current_prices[MarketDataCol.high_bid], current_prices[MarketDataCol.high_ask], cash, shares)
+    equity_low = calculate_equity(current_prices[MarketDataCol.low_bid], current_prices[MarketDataCol.low_ask], cash, shares)
+    equity_close = calculate_equity(current_prices[MarketDataCol.close_bid], current_prices[MarketDataCol.close_ask], cash, shares)
+    return equity_open, equity_high, equity_low, equity_close
 
 class ForexEnv(gym.Env):
 
@@ -96,7 +113,7 @@ class ForexEnv(gym.Env):
         self.n_actions = n_actions
         if self.n_actions == 0:
             logging.info(f"n_actions is zero, using continuous action space")
-            self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
+            self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(), dtype=np.float32)
         else:
             logging.info(f"n_actions is larger than zero, using discrete action space with {n_actions} actions for buys, {n_actions} for sells, and 1 action for no_participation.")
             self.action_space = spaces.Discrete(2 * n_actions + 1)
@@ -186,10 +203,8 @@ class ForexEnv(gym.Env):
         current_cash = self.agent_data[self.current_step - 1, AgentDataCol.cash]
         current_shares = self.agent_data[self.current_step - 1, AgentDataCol.shares]
         new_cash, new_shares = self._execute_action(action, self.prev_action, current_data, current_cash, current_shares)
-        equity_open, equity_high, equity_low, equity_close = self._calculate_equity(current_data, new_cash, new_shares)
-        agent_step_data = (new_cash, new_shares, equity_open, equity_high, equity_low, equity_close)
-        agent_step_data = tuple(float(x) for x in agent_step_data) # convert from (1,) shape arrays to floats
-        self.agent_data[self.current_step, :] = agent_step_data
+        equity_open, equity_high, equity_low, equity_close = calculate_ohlc_equity(current_data, new_cash, new_shares)
+        self.agent_data[self.current_step, :] = (new_cash, new_shares, equity_open, equity_high, equity_low, equity_close)
 
         # calculate reward
         reward = self._get_reward()
@@ -236,24 +251,7 @@ class ForexEnv(gym.Env):
         prev_equity = self.agent_data[self.current_step - 1, AgentDataCol.equity_close]
         return current_equity - prev_equity
 
-    def _calculate_equity(self, prices: np.ndarray, cash: float, shares: float):
-        """
-        Calculates the equity based on current cash, shares and prices.
-        """
-        equity_open = self._calculate_equity_from_prices(prices[MarketDataCol.open_bid], prices[MarketDataCol.open_ask], cash, shares)
-        equity_high = self._calculate_equity_from_prices(prices[MarketDataCol.high_bid], prices[MarketDataCol.high_ask], cash, shares)
-        equity_low = self._calculate_equity_from_prices(prices[MarketDataCol.low_bid], prices[MarketDataCol.low_ask], cash, shares)
-        equity_close = self._calculate_equity_from_prices(prices[MarketDataCol.close_bid], prices[MarketDataCol.close_ask], cash, shares)
-        return equity_open, equity_high, equity_low, equity_close
-    
-    def _calculate_equity_from_prices(self, bid_price, ask_price, cash: float, shares: float) -> float:
-        """
-        Calculates the equity based on current cash, shares and prices.
-        """
-        current_price = bid_price if shares >= 0 else ask_price
-        return cash + (shares * current_price)
-
-    def _get_observation(self): 
+    def _get_observation(self):
         """
         Returns the current observation of the environment.
         The observation is a combination of market features and state features.
@@ -275,129 +273,80 @@ class ForexEnv(gym.Env):
 
     def _execute_action(self, action, prev_action, current_data, current_cash, current_shares) -> tuple[float, float]:
         """
-        Determines the target position based on the agent's action (percentage of equity)
+        Determines the target position based on the agent's action (= percentage of equity)
         and executes trades by calling buy or sell instrument methods.
         """
-
         # Jitter Mitigation: action hasn't changed significantly, do nothing.
         if prev_action is not None and abs(action - prev_action) < 1e-5:
             logging.debug(f"Step {self.current_step}: Raw action {action} close to previous {prev_action}. No trade due to jitter mitigation.")
             return current_cash, current_shares
 
         # Calculate current equity (mark-to-market)
-        # Equity calculation uses bid for valuing long positions, ask for valuing short positions (cost to close)
-        current_equity = self._calculate_equity_from_prices(current_data[MarketDataCol.open_bid], current_data[MarketDataCol.open_ask], current_cash, current_shares)
-        
-        # Ensure equity is not negative for target calculation, as it might lead to reversed logic if agent is bankrupt
-        # Although termination on equity <= 0 should prevent this during active trading.
-        if current_equity <= 0:
-            raise ValueError(f"current_equity should be greater than zero, was {current_equity:.2f}")
+        open_bid = current_data[MarketDataCol.open_bid]
+        open_ask = current_data[MarketDataCol.open_ask]
+        current_equity = calculate_equity(open_bid, open_ask, current_cash, current_shares)
+        assert current_equity > 0, f"current_equity should be greater than zero, was {current_equity:.2f}"
 
         # Determine target position value in currency
         target_position_value = action * current_equity
         
         # Determine target number of shares based on target value
-        if abs(action) < 1e-6: # Target is to be flat
-            target_num_shares = 0.0
-        elif action > 0: # Target is LONG
-            current_open_ask = current_data[MarketDataCol.open_ask]
-            if current_open_ask <= 1e-6:
-                raise ValueError(f"Step {self.current_step}: Invalid ask price ({current_open_ask}) for calculating long target shares.")
-            target_num_shares = target_position_value / current_open_ask
-        else: # Target is SHORT (target_percentage < 0)
-            current_open_bid = current_data[MarketDataCol.open_bid]
-            if current_open_bid <= 1e-6:
-                raise ValueError(f"Step {self.current_step}: Invalid bid price ({current_open_bid}) for calculating short target shares.")
-            target_num_shares = target_position_value / current_open_bid
+        if action > 0: # Target is LONG
+            target_num_shares = target_position_value / open_ask
+        else: # Target is SHORT
+            target_num_shares = target_position_value / open_bid
 
         # Determine the change in shares needed
         shares_to_trade = target_num_shares - current_shares
 
-        if abs(shares_to_trade) < 1e-6:
-            logging.debug(f"Step {self.current_step}: Target shares effectively same as current. No trade execution needed.")
-            return current_cash, current_shares
-
         if shares_to_trade > 0: # Need to buy
             new_cash, new_shares = self._buy_instrument(
-                shares_to_buy_abs=shares_to_trade, 
-                ask_price=current_data[MarketDataCol.open_ask],
+                shares_to_buy=shares_to_trade,
+                ask_price=open_ask,
                 current_cash=current_cash, 
                 current_shares=current_shares
             )
         else: # Need to sell
             new_cash, new_shares = self._sell_instrument(
-                shares_to_sell_abs=abs(shares_to_trade),
-                bid_price=current_data[MarketDataCol.open_bid],
+                shares_to_sell=-shares_to_trade,
+                bid_price=open_bid,
+                ask_price=open_ask, # needed to determine max shares to sell
                 current_cash=current_cash, 
                 current_shares=current_shares
             )
             
         return new_cash, new_shares
-    
-    def _buy_instrument(self, shares_to_buy_abs: float, ask_price: float, current_cash: float, current_shares: float) -> tuple[float, float]:
+
+    def _buy_instrument(self, shares_to_buy: float, ask_price: float, current_cash: float, current_shares: float) -> tuple[float, float]:
         """
         Executes a buy order for a specified absolute number of shares.
         """
-        if shares_to_buy_abs < 1e-6:  # Effectively zero shares, no action needed
-            return current_cash, current_shares
-        if ask_price <= 1e-6:  # Invalid price
-            logging.warning(f"Step {self.current_step}: Attempted to buy with invalid price: {ask_price}")
-            return current_cash, current_shares # No transaction
+        assert ask_price > 1e-6, f"Step {self.current_step}: Attempted to buy with invalid ask_price: {ask_price}"
 
-        # Calculate cost including commission
-        cost_per_share_incl_commission = ask_price * (1 + self.transaction_cost_pct)
+        # Determine shares to sell such that we don't go above 100% leverage.
+        cost_per_share = ask_price * (1 + self.transaction_cost_pct)
+        max_shares_to_buy = current_cash / cost_per_share
+        shares_bought = min(shares_to_buy, max_shares_to_buy)
 
-        affordable_shares = max(0.0, current_cash / cost_per_share_incl_commission)
-        
-        actual_shares_bought = min(shares_to_buy_abs, affordable_shares)
-
-        cost_before_commission = actual_shares_bought * ask_price
-        total_commission = cost_before_commission * self.transaction_cost_pct
-
-        updated_cash = current_cash - (cost_before_commission + total_commission)
-        updated_shares = current_shares + actual_shares_bought
+        # Compute updated portfolio state
+        updated_cash = current_cash - shares_bought * cost_per_share
+        updated_shares = current_shares + shares_bought
 
         return updated_cash, updated_shares
 
-    def _sell_instrument(self, shares_to_sell_abs: float, bid_price: float, current_cash: float, current_shares: float) -> tuple[float, float]:
+    def _sell_instrument(self, shares_to_sell: float, bid_price: float, ask_price: float, current_cash: float, current_shares: float) -> tuple[float, float]:
         """
-        Executes a sell order, potentially closing a long position and/or initiating/increasing a short position.
-        Shorting is limited by a margin rule: total absolute short position value * 2 <= available cash.
+        Executes a sell order for a specified absolute number of shares.
         """
-        if shares_to_sell_abs < 1e-6:  # Effectively zero shares
-            return current_cash, current_shares
-        if bid_price <= 1e-6:  # Invalid price
-            logging.warning(f"Step {self.current_step}: Attempted to sell with invalid price: {bid_price}")
-            return current_cash, current_shares
+        assert ask_price > 1e-6, f"Step {self.current_step}: Attempted to sell with invalid ask_price: {ask_price}"
+        assert bid_price > 1e-6, f"Step {self.current_step}: Attempted to sell with invalid bid_price: {bid_price}"
 
-        # Part 1: Handle closing of any existing long position
-        if current_shares > 0: # If currently long
-            shares_sold_from_long = min(shares_to_sell_abs, current_shares)
-            proceeds = shares_sold_from_long * bid_price
-            commission = proceeds * self.transaction_cost_pct
-            current_cash += (proceeds - commission)
-            current_shares -= shares_sold_from_long
-            shares_to_sell_abs -= shares_sold_from_long
+        # Determine shares to sell such that we don't go below -100% leverage.
+        proceeds_per_share = bid_price * (1 - self.transaction_cost_pct)
+        max_shares_to_sell = (current_cash + 2 * current_shares * ask_price) / (2 * ask_price - proceeds_per_share)
+        shares_sold = min(shares_to_sell, max_shares_to_sell)
 
-        # Part 2: Handle shares intended for shorting (initiating or increasing short)
-        # These are the shares remaining from the original sell order after closing any long position.
-
-        # Apply margin rule: max_total_abs_short_shares = available_cash / (2 * price)
-        # available_cash for margin is updated_cash (cash after closing any long positions).
-        max_total_abs_short_position_allowed = max(0.0, current_cash / (2 * bid_price))
-
-        # current_abs_short_position is abs(updated_shares) because updated_shares is the state *after* closing longs.
-        # At this point, updated_shares <= 0 if we are considering shorting.
-        current_abs_short_portion = abs(current_shares) # Should be 0 if we just closed a long, or abs of existing short.
-
-        # How many *more* shares can we short without violating the total limit?
-        allowable_additional_short_shares = max(0.0, max_total_abs_short_position_allowed - current_abs_short_portion)
-
-        actual_shares_shorted = min(shares_to_sell_abs, allowable_additional_short_shares)
-
-        proceeds = actual_shares_shorted * bid_price
-        commission = proceeds * self.transaction_cost_pct
-        current_cash += (proceeds - commission) # Cash increases from short sale
-        current_shares -= actual_shares_shorted   # Makes share count more negative
-
-        return current_cash, current_shares
+        # Compute updated portfolio state
+        updated_cash = current_cash + shares_sold * proceeds_per_share
+        updated_shares = current_shares - shares_sold
+        return updated_cash, updated_shares
