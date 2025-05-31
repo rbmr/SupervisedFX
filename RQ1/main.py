@@ -7,7 +7,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 
 from RQ1.constants import RQ1_DIR
 from common.analysis import analyse_individual_run, analyse_finals
-from common.constants import DEVICE, SEED
+from common.constants import SEED
 from common.data.data import Timeframe, ForexCandleData
 from common.envs.callbacks import SaveOnEpisodeEndCallback
 from common.envs.forex_env import ForexEnv
@@ -65,18 +65,20 @@ logging.info("Environments created.")
 logging.info("Creating model...")
 policy_kwargs = dict(net_arch=[128, 128])
 
+DEVICE = "cpu"
+
 model = A2C(
     policy="MlpPolicy",
     env=train_env,
     learning_rate=0.001,
     gamma=0.99,
-    n_steps=10,                 # Slightly higher n_steps for more stable estimates
-    ent_coef=0.02,              # Increase entropy coefficient to encourage more exploration
-    gae_lambda=0.95,            # Lower lambda for more bias, but faster learning
-    vf_coef=0.5,                # Value function loss coefficient (default)
-    max_grad_norm=0.5,          # Gradient clipping (default)
+    n_steps=10,
+    ent_coef=0.02,
+    gae_lambda=0.95,
+    vf_coef=0.5,
+    max_grad_norm=0.5,
     policy_kwargs=policy_kwargs,
-    verbose=1,
+    verbose=0,
     seed=SEED,
     device=DEVICE
 )
@@ -128,7 +130,7 @@ for model_file in model_files:
 
     logging.info(f"Loading model from {model_file}...")
 
-    model = model_class.load(model_file, env=train_dummy_env)
+    model = model_class.load(model_file, env=train_dummy_env, device=DEVICE)
 
     logging.info(f"Model loaded from {model_file}.")
 
