@@ -109,7 +109,7 @@ def train_test_analyze(train_env: ForexEnv,
     model_train_metrics = []
     model_eval_metrics = []
     for model_file in model_files:
-        model_name = model_file.stem + f"({experiment_group_name}/{experiment_name})"
+        model_name = model_file.stem
         this_model_path = results_path / model_name
         train_data_path = this_model_path / "train"
         eval_data_path = this_model_path / "eval"
@@ -123,11 +123,11 @@ def train_test_analyze(train_env: ForexEnv,
         
         # Load train and eval results
         results_df = pd.read_csv(train_results_full_file)
-        metrics = analyse_individual_run(results_df, train_data_path, name=model_name)
+        metrics = analyse_individual_run(results_df, train_data_path, name=model_name+ f"({experiment_group_name}/{experiment_name})")
         model_train_metrics.append(metrics)
 
         results_df = pd.read_csv(eval_results_full_file)
-        metrics = analyse_individual_run(results_df, eval_data_path, name=model_name)
+        metrics = analyse_individual_run(results_df, eval_data_path, name=model_name+ f"({experiment_group_name}/{experiment_name})")
         model_eval_metrics.append(metrics)
 
     analyse_finals(model_train_metrics, results_path / "train", name="train_results")

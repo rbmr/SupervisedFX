@@ -103,6 +103,7 @@ class ForexEnv(gym.Env):
             self.initial_capital, # equity_high
             self.initial_capital, # equity_low
             self.initial_capital, # equity_close
+            0.0                   # action (no action at start)
         )
         assert self.market_data.shape == (self.total_steps, len(MarketDataCol))
         assert self.market_features.shape == (self.total_steps, len(self.market_feature_names))
@@ -204,7 +205,7 @@ class ForexEnv(gym.Env):
         current_shares = self.agent_data[self.current_step - 1, AgentDataCol.shares]
         new_cash, new_shares = self._execute_action(action, self.prev_action, current_data, current_cash, current_shares)
         equity_open, equity_high, equity_low, equity_close = calculate_ohlc_equity(current_data, new_cash, new_shares)
-        self.agent_data[self.current_step, :] = (new_cash, new_shares, equity_open, equity_high, equity_low, equity_close)
+        self.agent_data[self.current_step, :] = (new_cash, new_shares, equity_open, equity_high, equity_low, equity_close, action)
 
         # calculate reward
         reward = self._get_reward()
