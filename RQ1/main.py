@@ -24,55 +24,36 @@ if __name__ != '__main__':
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.info("Finished imports")
 
-# Load, preprocess and split market data
+# ENVIRONMENT
 
 logging.info("Loading market data...")
-market_data = ForexCandleData.load(
+forex_candle_data = ForexCandleData.load(
     source="dukascopy",
     instrument="EURUSD",
     granularity=Timeframe.M15,
     start_time=datetime(2022, 1, 2, 22, 0, 0, 0),
     end_time=datetime(2025, 5, 16, 20, 45, 0, 0),
-).df
-
-logging.info("Generating market features...")
-fe = FeatureEngineer()
-fe.add(rsi)
-fe.add(remove_ohlcv)
-fe.add(lambda df: history_lookback(df, 20))
-
-market_features = fe.run(market_data)
-
-logging.info("Splitting data...")
-train_data_df, eval_data_df = split_df(market_data, 0.7)
-train_feature_df, eval_feature_df = split_df(market_features, 0.7)
-
-# Setup stepwise feature engineering
-
-logging.info("Setting up stepwise feature engineer...")
-stepwise_feature_engineer = StepwiseFeatureEngineer()
-stepwise_feature_engineer.add(["cash_percentage"], calculate_cash_percentage)
-
-# Creating environments
-
-initial_capital = 10_000.0
-transaction_cost_pct = 0.0  # Example: 0.1% commission per trade
-
-logging.info("Creating training environment...")
-train_env = ForexEnv(
-    market_data_df=train_data_df,
-    market_feature_df=train_feature_df,
-    agent_feature_engineer=stepwise_feature_engineer,
-    initial_capital=initial_capital,
-    transaction_cost_pct=transaction_cost_pct,
-    n_actions=0
 )
 
-logging.info("Creating evaluation environment...")
-eval_env = ForexEnv(
-    market_data_df=eval_data_df,
-    market_feature_df=eval_feature_df,
-    agent_feature_engineer=stepwise_feature_engineer,
+logging.info("Generating market features...")
+market_feature_engineer = FeatureEngineer()
+market_feature_engineer.add(rsi)
+market_feature_engineer.add(remove_ohlcv)
+market_feature_engineer.add(lambda df: history_lookback(df, 20))
+
+logging.info("Setting up stepwise feature engineer...")
+agent_feature_engineer = StepwiseFeatureEngineer()
+agent_feature_engineer.add(["cash_percentage"], calculate_cash_percentage)
+
+initial_capital = 10_000.0
+transaction_cost_pct = 0.0
+
+logging.info("Creating environments...")
+train_env, eval_env = ForexEnv.create_train_eval_envs(
+    split_ratio=0.7,
+    forex_candle_data=forex_candle_data,
+    market_feature_engineer=market_feature_engineer,
+    agent_feature_engineer=agent_feature_engineer,
     initial_capital=initial_capital,
     transaction_cost_pct=transaction_cost_pct,
     n_actions=0
