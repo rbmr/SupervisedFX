@@ -4,15 +4,14 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pandas as pd
-from matplotlib import pyplot as plt
 from stable_baselines3.common.base_class import BaseAlgorithm
-from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
+from tqdm import tqdm
 
 from common.analysis import analyse_finals, analyse_individual_run
 from common.envs.callbacks import SaveOnEpisodeEndCallback
 from common.envs.forex_env import ForexEnv
-from common.scripts import set_seed, flatten_dict
+from common.scripts import set_seed
 
 
 def train_test_analyze(train_env: ForexEnv,
@@ -148,8 +147,7 @@ def run_model(model: BaseAlgorithm,
     """
 
     if total_steps <= 0:
-        logging.warning("Total steps must be greater than 0. No steps will be executed.")
-        return
+        raise ValueError("Total steps must be greater than 0.")
 
     data_path = Path(data_path)
     data_path.parent.mkdir(parents=True, exist_ok=True)
@@ -158,12 +156,7 @@ def run_model(model: BaseAlgorithm,
     
     pbar = None
     if progress_bar:
-        try:
-            from tqdm import tqdm
-            pbar = tqdm(total=total_steps, desc="Total Steps")
-        except ImportError:
-            print("Warning: tqdm is not installed. Progress bar will not be shown. "
-                  "Install with: pip install tqdm")
+        pbar = tqdm(total=total_steps, desc="Total Steps")
 
     step_count = 1
     logs_df = None

@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 from stable_baselines3 import A2C
@@ -86,14 +86,17 @@ logging.info("Model created.")
 
 # FOLDERS
 
-EXPERIMENT_DIR = RQ1_DIR / "experiments" / "testing123" / "test2"
-LOGS_DIR = EXPERIMENT_DIR / "logs"
-MODELS_DIR = EXPERIMENT_DIR / "models"
-RESULTS_DIR = EXPERIMENT_DIR / "results"
+EXPERIMENTS_DIR = RQ1_DIR / "experiments"
+experiment_group = "testing"
+experiment_name = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+experiment_dir = EXPERIMENTS_DIR / experiment_group / experiment_name
+logs_dir = experiment_dir / "logs"
+models_dir = experiment_dir / "models"
+results_dir = experiment_dir / "results"
 
-LOGS_DIR.mkdir(parents=True, exist_ok=True)
-MODELS_DIR.mkdir(parents=True, exist_ok=True)
-RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+logs_dir.mkdir(parents=True, exist_ok=True)
+models_dir.mkdir(parents=True, exist_ok=True)
+results_dir.mkdir(parents=True, exist_ok=True)
 
 # TRAINING
 
@@ -104,15 +107,15 @@ total_timesteps = train_env.total_steps * train_episodes
 
 logging.info(f"Training model for {train_episodes} episodes...")
 
-callback = [SaveOnEpisodeEndCallback(save_path=MODELS_DIR)]
+callback = [SaveOnEpisodeEndCallback(save_path=models_dir)]
 model.learn(total_timesteps=total_timesteps, callback=callback, log_interval=1, progress_bar=True)
 
 logging.info("Training complete.")
 
 # Saving the final model
 
-model.save(MODELS_DIR / f"model_{total_timesteps}_steps.zip")
-logging.info(f"Model(s) saved to '{MODELS_DIR}'.")
+model.save(models_dir / f"model_{total_timesteps}_steps.zip")
+logging.info(f"Model(s) saved to '{models_dir}'.")
 
 # EVALUATION
 
@@ -121,10 +124,10 @@ logging.info("Starting evaluation...")
 eval_episodes = 1
 model_class = type(model)
 
-model_files = list(MODELS_DIR.glob("*.zip"))
+model_files = list(models_dir.glob("*.zip"))
 model_files.sort(key=lambda x: x.stat().st_mtime)
 
-logging.info(f"Found {len(model_files)} model files in '{MODELS_DIR}'.")
+logging.info(f"Found {len(model_files)} model files in '{models_dir}'.")
 
 for model_file in model_files:
 
@@ -135,7 +138,7 @@ for model_file in model_files:
     logging.info(f"Model loaded from {model_file}.")
 
     model_name = model_file.stem
-    model_results_dir = RESULTS_DIR / model_name
+    model_results_dir = results_dir / model_name
     train_results_dir = model_results_dir / "train"
     eval_results_dir = model_results_dir / "eval"
     train_results_file = train_results_dir / "data"
@@ -144,6 +147,8 @@ for model_file in model_files:
     train_episode_length = train_env.total_steps
     eval_episode_length = eval_env.total_steps
 
+    logging.info("Running model on train environment.")
+
     run_model(model,
               train_env,
               train_results_file,
@@ -151,6 +156,8 @@ for model_file in model_files:
               deterministic=True,
               progress_bar=True
               )
+
+    logging.info("Running model on eval environment.")
 
     run_model(model,
               eval_env,
@@ -172,7 +179,7 @@ model_eval_metrics = []
 for model_file in model_files:
 
     model_name = model_file.stem
-    model_results_dir = RESULTS_DIR / model_name
+    model_results_dir = results_dir / model_name
     train_results_dir = model_results_dir / "train"
     eval_results_dir = model_results_dir / "eval"
     train_results_file = train_results_dir / "data"
@@ -189,8 +196,8 @@ for model_file in model_files:
     metrics = analyse_individual_run(results_df, eval_results_dir, name=model_name)
     model_eval_metrics.append(metrics)
 
-analyse_finals(model_train_metrics, RESULTS_DIR, name="train_results")
-analyse_finals(model_eval_metrics, RESULTS_DIR, name="eval_results")
+analyse_finals(model_train_metrics, results_dir, name="train_results")
+analyse_finals(model_eval_metrics, results_dir, name="eval_results")
 
 logging.info("Analysis complete.")
 
