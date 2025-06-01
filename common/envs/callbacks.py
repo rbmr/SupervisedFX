@@ -1,11 +1,13 @@
 from pathlib import Path
 
 import logging
+
+import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
-import os
-
+from common.constants import AgentDataCol
+from common.envs.forex_env import ForexEnv
 from common.models.utils import save_model_with_metadata
-
+from common.scripts import circ_slice, render_horz_bar
 
 class SaveOnEpisodeEndCallback(BaseCallback):
     def __init__(self, save_path: Path, verbose=0):
@@ -25,4 +27,34 @@ class SaveOnEpisodeEndCallback(BaseCallback):
             save_model_with_metadata(self.model, filename)
             if self.verbose > 0:
                 logging.info(f"Saved model at episode {self.episode_num} to {filename}")
+        return True
+
+
+class ActionHistogramCallback(BaseCallback):
+    """
+    Logs a histogram of actions taken during training, every `log_freq` steps.
+    """
+    def __init__(self, env: ForexEnv, log_freq: int = 1000, verbose=0):
+        super().__init__(verbose)
+        self.env = env
+        self.log_freq = log_freq
+        self.bins = 11 if env.n_actions == 0 or env.n_actions > 5 else env.n_actions
+        self.max_height = 40
+
+    def _on_step(self) -> bool:
+        if self.num_timesteps % self.log_freq != 0:
+            return True
+
+        start = self.num_timesteps - self.log_freq
+        end = self.num_timesteps
+        actions = circ_slice(self.env.agent_data[:, AgentDataCol.action], start, end)
+        hist, bin_edges = np.histogram(actions, bins=self.bins)
+        max_count = hist.max()
+        if max_count == 0:
+            return True
+        bar_heights = hist / max_count * self.max_height
+        for height, count, bin_start, bin_end in zip(bar_heights, hist, bin_edges[:-1], bin_edges[1:]):
+            label = f"({bin_start:>5.2f})–({bin_end:>5.2f})"
+            bar = f"{render_horz_bar(height)} ({count})"
+            logging.info(f"{label}: {bar}")
         return True
