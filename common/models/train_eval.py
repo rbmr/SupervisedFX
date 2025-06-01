@@ -155,7 +155,7 @@ def analyse_results(results_dir: Path) -> None:
         assert model_dir.parent == results_dir, f"{results_file} is not a great-grandchild of {results_dir}"
 
         # Load results
-        df = pd.read_csv(results_file)
+        df = pd.read_csv(results_file, low_memory=False)
         if df.empty:
             logging.warning(f"Results file {results_file} is empty, skipping.")
             continue
