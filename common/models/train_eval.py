@@ -124,6 +124,53 @@ def evaluate_models(models_dir: Path,
 
     logging.info("Finished evaluation.")
 
+def analyse_results(results_dir: Path) -> None:
+    """
+    Recursively searches a directory for data.csv files, and performs analysis.
+
+    Directory structure assumption:
+    - Each immediate subdirectory of 'results_dir' corresponds to a different model.
+    - Each model directory contains one or more subdirectories, each representing a different environment.
+    - Each environment directory contains exactly one 'data.csv' file.
+    """
+    logging.info("Analysing results...")
+
+    # Validate input
+    if not results_dir.exists():
+        raise ValueError(f"Directory {results_dir} does not exist.")
+    if not results_dir.is_dir():
+        raise ValueError(f"{results_dir} is not a directory.")
+
+    # Setup
+    eval_envs_metrics = {}
+    for results_file in list(results_dir.rglob("data.csv")):
+
+        # Extract names (shady business)
+        env_dir = results_file.parent
+        env_name = env_dir.name
+        if eval_envs_metrics.get(env_name, None) is None:
+            eval_envs_metrics[env_name] = []
+        model_dir = env_dir.parent
+        model_name = model_dir.name
+        assert model_dir.parent == results_dir, f"{results_file} is not a great-grandchild of {results_dir}"
+
+        # Load results
+        df = pd.read_csv(results_file)
+        if df.empty:
+            logging.warning(f"Results file {results_file} is empty, skipping.")
+            continue
+
+        # Analyze results
+        logging.info(f"Analyzing results of {model_name} on {env_name} from {results_file}...")
+        metrics = analyse_individual_run(df, env_dir, name=model_name)
+        eval_envs_metrics[env_name].append(metrics) # save results
+
+    # Aggregate environment results
+    for eval_env_name, metrics in eval_envs_metrics.items():
+        analyse_finals(metrics, results_dir / eval_env_name, name=eval_env_name)
+
+    logging.info("Analysis complete.")
+
 def analyse_evaluation_results(models_dir: Path,
                                results_dir: Path,
                                eval_envs_names: list[str],
@@ -136,6 +183,7 @@ def analyse_evaluation_results(models_dir: Path,
     """
 
     logging.info("Analyzing results...")
+    logging.warning("This method (analyze_evaluation_results) is a little wonky, please use analyse_results instead.")
 
     eval_envs_model_metrics: dict[str, list[dict[str, Any]]] = {name: [] for name in eval_envs_names}
 
