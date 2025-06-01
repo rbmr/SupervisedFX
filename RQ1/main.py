@@ -11,7 +11,7 @@ from common.data.feature_engineer import (FeatureEngineer, history_lookback,
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
 from common.envs.callbacks import SaveOnEpisodeEndCallback
 from common.envs.forex_env import ForexEnv
-from common.models.train_eval import train_model, evaluate_models
+from common.models.train_eval import train_model, evaluate_models, analyse_evaluation_results
 from common.models.utils import save_model_with_metadata
 from common.scripts import most_recent_modified
 
@@ -97,35 +97,11 @@ eval_envs = {
 evaluate_models(models_dir, results_dir, eval_envs, eval_episodes=2)
 
 # ANALYSIS
-#
-# logging.info("Analyzing results...")
-#
-# model_train_metrics = []
-# model_eval_metrics = []
-#
-# for model_file in model_files:
-#
-#     model_name = model_file.stem
-#     model_results_dir = results_dir / model_name
-#     train_results_dir = model_results_dir / "train"
-#     eval_results_dir = model_results_dir / "eval"
-#     train_results_file = train_results_dir / "data.csv"
-#     eval_results_file = eval_results_dir / "data.csv"
-#
-#     logging.info(f"Analyzing results for model: {model_name}")
-#
-#     # Load train and eval results
-#     results_df = pd.read_csv(train_results_file)
-#     metrics = analyse_individual_run(results_df, train_results_dir, name=model_name)
-#     model_train_metrics.append(metrics)
-#
-#     results_df = pd.read_csv(eval_results_file)
-#     metrics = analyse_individual_run(results_df, eval_results_dir, name=model_name)
-#     model_eval_metrics.append(metrics)
-#
-# analyse_finals(model_train_metrics, results_dir, name="train_results")
-# analyse_finals(model_eval_metrics, results_dir, name="eval_results")
-#
-# logging.info("Analysis complete.")
+
+analyse_evaluation_results(
+    models_dir=models_dir,
+    results_dir=results_dir,
+    eval_envs_names=list(eval_envs.keys()),
+)
 
 logging.info("Done!")
