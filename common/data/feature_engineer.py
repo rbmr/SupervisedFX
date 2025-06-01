@@ -1,8 +1,12 @@
-from typing import Any, Callable, Dict, List
+import warnings
+from typing import Callable, List
 
 import numpy as np
 import pandas as pd
+from pandas.errors import PerformanceWarning
 
+# Suppress only the specific PerformanceWarning
+warnings.simplefilter(action="ignore", category=PerformanceWarning)
 
 class FeatureEngineer:
 
@@ -165,7 +169,7 @@ def historic_pct_change(df: pd.DataFrame, window: int = 14):
     This is a momentum indicator that shows how much the price has changed over the window.
     """
     df[f'historic_pct_change_{window}'] = df['close_bid'].pct_change(periods=window) * 100
-    df[f'historic_pct_change_{window}'].fillna(0, inplace=True)  # Fill NaN values with 0
+    df[f'historic_pct_change_{window}'] = df[f'historic_pct_change_{window}'].fillna(0)  # Fill NaN values with 0
 
 def cci(df: pd.DataFrame, window: int = 20):
     """
@@ -187,7 +191,7 @@ def williams_r(df: pd.DataFrame, window: int = 14):
     low_min = df['low_bid'].rolling(window=window).min()
     
     df[f'williams_r_{window}'] = -100 * (high_max - df['close_bid']) / (high_max - low_min)
-    df[f'williams_r_{window}'].fillna(0, inplace=True)  # Fill NaN values with 0
+    df[f'williams_r_{window}'] = df[f'williams_r_{window}'].fillna(0)  # Fill NaN values with 0
 
 # VOLUME Indicators
 def obv(df: pd.DataFrame):
@@ -212,7 +216,7 @@ def vwap(df: pd.DataFrame, window: int = 14):
     cumulative_volume = df['volume'].cumsum()
     cumulative_vwap = (df['close_bid'] * df['volume']).cumsum() / cumulative_volume
     df[f'vwap_{window}'] = cumulative_vwap.rolling(window=window).mean()
-    df[f'vwap_{window}'].fillna(0, inplace=True)  # Fill NaN values with 0
+    df[f'vwap_{window}'] = df[f'vwap_{window}'].fillna(0)  # Fill NaN values with 0
 
 def mfi(df: pd.DataFrame, window: int = 14):
     """
@@ -237,8 +241,7 @@ def cmf(df: pd.DataFrame, window: int = 20):
     money_flow_volume = money_flow_multiplier * df['volume']
     
     df[f'cmf_{window}'] = money_flow_volume.rolling(window=window).sum() / df['volume'].rolling(window=window).sum()
-    df[f'cmf_{window}'].fillna(0, inplace=True)  # Fill NaN values with 0
-
+    df[f'cmf_{window}'] = df[f'cmf_{window}'].fillna(0)  # Fill NaN values with 0
 
 def ad_line(df: pd.DataFrame):
     """
@@ -256,15 +259,15 @@ def as_pct_change(df: pd.DataFrame, column: str):
     Normalize a column as percentage change.
     """
     df[f'{column}'] = df[column].pct_change() * 100
-    df[f'{column}'].fillna(0, inplace=True)  # Fill NaN values with 0
+    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
 
 def as_ratio_of_other_column(df: pd.DataFrame, column: str, other_column: str):
     """
     Normalize a column as a ratio of another column.
     """
     df[f'{column}'] = df[column] / df[other_column]
-    df[f'{column}'].fillna(0, inplace=True)  # Fill NaN values with 0
-    df[f'{column}'].replace(np.inf, 0, inplace=True)  # Replace inf with 0
+    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
+    df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
 
 def as_z_score(df: pd.DataFrame, column: str, window: int = 500):
     """
@@ -273,16 +276,16 @@ def as_z_score(df: pd.DataFrame, column: str, window: int = 500):
     """
 
     df[f'{column}'] = (df[column] - df[column].rolling(window=window, min_periods=1).mean()) / df[column].rolling(window=window, min_periods=1).std()
-    df[f'{column}'].fillna(0, inplace=True)  # Fill NaN values with 0
-    df[f'{column}'].replace(np.inf, 0, inplace=True)  # Replace inf with 0
+    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
+    df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
 
 def as_min_max_window(df: pd.DataFrame, column: str, window: int = 500):
     """
     Normalize a column as min-max scaling with a rolling window.
     """
     df[f'{column}'] = (df[column] - df[column].rolling(window=window, min_periods=1).min()) / (df[column].rolling(window=window, min_periods=1).max() - df[column].rolling(window=window, min_periods=1).min())
-    df[f'{column}'].fillna(0, inplace=True)  # Fill NaN values with 0
-    df[f'{column}'].replace(np.inf, 0, inplace=True)  # Replace inf with 0
+    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
+    df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
 
 def as_min_max_fixed(df: pd.DataFrame, column: str, min: int = 0, max: int = 100):
     """
@@ -290,8 +293,8 @@ def as_min_max_fixed(df: pd.DataFrame, column: str, min: int = 0, max: int = 100
     This is not recommended for training, but can be used for testing.
     """
     df[f'{column}'] = (df[column] - min) / (max - min)
-    df[f'{column}'].fillna(0, inplace=True)  # Fill NaN values with 0
-    df[f'{column}'].replace(np.inf, 0, inplace=True)  # Replace inf with 0
+    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
+    df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
 
 ## other
 def remove_columns(df: pd.DataFrame, columns: List[str]):
@@ -326,5 +329,5 @@ def copy_column(df: pd.DataFrame, source_column: str, target_column: str):
     Copy a column from source to target.
     """
     df[target_column] = df[source_column].copy()
-    df[target_column].fillna(0, inplace=True)  # Fill NaN values with 0
-    df[target_column].replace(np.inf, 0, inplace=True)  # Replace inf with 0
+    df[target_column] = df[target_column].fillna(0)  # Fill NaN values with 0
+    df[target_column] = df[target_column].replace(np.inf, 0)  # Replace inf with 0
