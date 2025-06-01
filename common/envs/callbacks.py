@@ -29,6 +29,37 @@ class SaveOnEpisodeEndCallback(BaseCallback):
                 logging.info(f"Saved model at episode {self.episode_num} to {filename}")
         return True
 
+class CoolStatsCallback(BaseCallback):
+    """
+    Prints some cool stats about the agents actions, every `log_freq` steps.
+    """
+    def __init__(self, env: ForexEnv, log_freq: int = 1000, verbose=0):
+        super().__init__(verbose)
+        self.env = env
+        self.log_freq = log_freq
+
+    def _on_step(self) -> bool:
+        if self.num_timesteps % self.log_freq != 0:
+            return True
+
+        # Wrap indices
+        n = self.env.total_steps
+        i = (self.num_timesteps - self.log_freq) % n
+        j = self.num_timesteps % n
+
+        # Calculate and log difference in equity.
+        if i > j:
+            # ignore the gap
+            equity_1 = self.env.agent_data[i:, AgentDataCol.equity_close]
+            equity_2 = self.env.agent_data[:j, AgentDataCol.equity_close]
+            d_equity1 = equity_1[-1] - equity_1[0]
+            d_equity2 = equity_2[-1] - equity_2[0]
+            d_equity = d_equity1 + d_equity2
+        else:
+            equity = self.env.agent_data[i:j, AgentDataCol.equity_close]
+            d_equity = equity[-1] - equity[0]
+        logging.info(f"Change in equity: {d_equity}")
+        return True
 
 class ActionHistogramCallback(BaseCallback):
     """
