@@ -63,7 +63,7 @@ def load_model_with_metadata(path: Path) -> BaseAlgorithm:
     # Load metadata
     with zipfile.ZipFile(f"{path}", 'r') as zip_file:
         if not METADATA_FILE in zip_file.namelist():
-            raise ValueError("Zip file is missing metadata")
+            raise ValueError(f"Zip file at {path} is missing metadata")
         with zip_file.open(METADATA_FILE) as f:
             metadata = json.load(f)
 
