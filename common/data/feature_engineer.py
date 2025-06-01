@@ -255,16 +255,16 @@ def as_pct_change(df: pd.DataFrame, column: str):
     """
     Normalize a column as percentage change.
     """
-    df[f'{column}_pct_change'] = df[column].pct_change() * 100
-    df[f'{column}_pct_change'].fillna(0, inplace=True)  # Fill NaN values with 0
+    df[f'{column}'] = df[column].pct_change() * 100
+    df[f'{column}'].fillna(0, inplace=True)  # Fill NaN values with 0
 
 def as_ratio_of_other_column(df: pd.DataFrame, column: str, other_column: str):
     """
     Normalize a column as a ratio of another column.
     """
-    df[f'{column}_to_{other_column}'] = df[column] / df[other_column]
-    df[f'{column}_to_{other_column}'].fillna(0, inplace=True)  # Fill NaN values with 0
-    df[f'{column}_to_{other_column}'].replace(np.inf, 0, inplace=True)  # Replace inf with 0
+    df[f'{column}'] = df[column] / df[other_column]
+    df[f'{column}'].fillna(0, inplace=True)  # Fill NaN values with 0
+    df[f'{column}'].replace(np.inf, 0, inplace=True)  # Replace inf with 0
 
 def as_z_score(df: pd.DataFrame, column: str, window: int = 500):
     """
@@ -272,26 +272,26 @@ def as_z_score(df: pd.DataFrame, column: str, window: int = 500):
     To reduce NaNs, we use 0:index window for the rows where index<window.
     """
 
-    df[f'{column}_z_score'] = (df[column] - df[column].rolling(window=window, min_periods=1).mean()) / df[column].rolling(window=window, min_periods=1).std()
-    df[f'{column}_z_score'].fillna(0, inplace=True)  # Fill NaN values with 0
-    df[f'{column}_z_score'].replace(np.inf, 0, inplace=True)  # Replace inf with 0
+    df[f'{column}'] = (df[column] - df[column].rolling(window=window, min_periods=1).mean()) / df[column].rolling(window=window, min_periods=1).std()
+    df[f'{column}'].fillna(0, inplace=True)  # Fill NaN values with 0
+    df[f'{column}'].replace(np.inf, 0, inplace=True)  # Replace inf with 0
 
 def as_min_max_window(df: pd.DataFrame, column: str, window: int = 500):
     """
     Normalize a column as min-max scaling with a rolling window.
     """
-    df[f'{column}_min_max'] = (df[column] - df[column].rolling(window=window, min_periods=1).min()) / (df[column].rolling(window=window, min_periods=1).max() - df[column].rolling(window=window, min_periods=1).min())
-    df[f'{column}_min_max'].fillna(0, inplace=True)  # Fill NaN values with 0
-    df[f'{column}_min_max'].replace(np.inf, 0, inplace=True)  # Replace inf with 0
+    df[f'{column}'] = (df[column] - df[column].rolling(window=window, min_periods=1).min()) / (df[column].rolling(window=window, min_periods=1).max() - df[column].rolling(window=window, min_periods=1).min())
+    df[f'{column}'].fillna(0, inplace=True)  # Fill NaN values with 0
+    df[f'{column}'].replace(np.inf, 0, inplace=True)  # Replace inf with 0
 
 def as_min_max_fixed(df: pd.DataFrame, column: str, min: int = 0, max: int = 100):
     """
     Normalize a column as min-max scaling with a lookahead bias.
     This is not recommended for training, but can be used for testing.
     """
-    df[f'{column}_min_max'] = (df[column] - min) / (max - min)
-    df[f'{column}_min_max'].fillna(0, inplace=True)  # Fill NaN values with 0
-    df[f'{column}_min_max'].replace(np.inf, 0, inplace=True)  # Replace inf with 0
+    df[f'{column}'] = (df[column] - min) / (max - min)
+    df[f'{column}'].fillna(0, inplace=True)  # Fill NaN values with 0
+    df[f'{column}'].replace(np.inf, 0, inplace=True)  # Replace inf with 0
 
 ## other
 def remove_columns(df: pd.DataFrame, columns: List[str]):
@@ -320,3 +320,11 @@ def history_lookback(df: pd.DataFrame, lookback_window_size: int, columns: List[
     for col in columns:
         for i in range(1, lookback_window_size + 1):
             df[f'{col}_shift_{i}'] = df[col].shift(i)
+
+def copy_column(df: pd.DataFrame, source_column: str, target_column: str):
+    """
+    Copy a column from source to target.
+    """
+    df[target_column] = df[source_column].copy()
+    df[target_column].fillna(0, inplace=True)  # Fill NaN values with 0
+    df[target_column].replace(np.inf, 0, inplace=True)  # Replace inf with 0
