@@ -11,7 +11,7 @@ from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calcu
 from RQ2.constants import RQ2_DIR, RQ2_HYPERPARAMETERS_START_DATE, RQ2_HYPERPARAMETERS_END_DATE, RQ2_EXPERIMENTS_START_DATE, RQ2_EXPERIMENTS_END_DATE, RQ2_DATA_SPLIT_RATIO
 
 from common.data.data import ForexCandleData, Timeframe
-from common.trainertester import train_test_analyze
+from common.models.train_eval import train_test_analyse
 from common.constants import *
 from common.scripts import *
 
@@ -78,16 +78,15 @@ if __name__ == '__main__':
     )
 
     logging.info("Running train test analyze...")
-    train_test_analyze(
+    train_test_analyse(
         train_env=train_env,
         eval_env=eval_env,
         model=model,
         base_folder_path=RQ2_DIR,
         experiment_group_name="hyperparameters",
-        experiment_name="experiment_1",
+        experiment_name="experiment_2",
         train_episodes=1,
         eval_episodes=1,
-        checkpoints=True,
-        deterministic=True
+        checkpoints=True
     )
     

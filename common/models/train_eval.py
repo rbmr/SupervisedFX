@@ -8,9 +8,91 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
 from tqdm import tqdm
 
+from common.envs.callbacks import SaveOnEpisodeEndCallback
 from common.envs.forex_env import ForexEnv
+from common.scripts import set_seed
 from common.models.utils import load_models
+from common.analysis import analyse_individual_run, analyse_finals
 
+
+def train_test_analyse(train_env: ForexEnv,
+                       eval_env: ForexEnv,
+                       model: BaseAlgorithm,
+                       base_folder_path: Path,
+                       experiment_group_name: str,
+                       experiment_name: str,
+                       train_episodes: int = 10,
+                       eval_episodes: int = 1,
+                       checkpoints: bool = False
+                       ) -> None:
+    """
+    Train the model on the training DataFrame, test it on the test DataFrame, and export the results.
+    
+    Parameters
+    ----------
+    
+    """
+    # Set seeds
+    set_seed(42)
+
+    # Set up folders
+    experiment_path = base_folder_path / "experiments" / experiment_group_name / experiment_name
+    results_path = experiment_path / "results"
+    logs_path = experiment_path / "logs"
+    models_path = experiment_path / "models"
+
+    models_path.mkdir(parents=True, exist_ok=True)
+    results_path.mkdir(parents=True, exist_ok=True)
+    logs_path.mkdir(parents=True, exist_ok=True)
+
+    # model class
+    if not isinstance(model, BaseAlgorithm):
+        raise ValueError(f"Model must be an instance of BaseAlgorithm, got {type(model)}")
+
+    # -- TRAINING THE MODEL
+    logging.info(f"Training model for {train_episodes} episodes...")
+    callbacks = []
+    if checkpoints:
+        checkpoint_callback = SaveOnEpisodeEndCallback(save_path=models_path)
+        callbacks.append(checkpoint_callback)
+
+    train_model(model, train_env=train_env, train_episodes=train_episodes, callback=callbacks)
+
+    # save the final model if we are not saving checkpoints
+    if not checkpoints:
+        save_path = models_path / f"model_{train_episodes}_episodes.zip"
+        model.save(save_path)
+        logging.info(f"Model(s) saved to '{models_path}'.")
+    
+    logging.info("Training complete.")
+    # -- END TRAINING
+
+    # -- EVALUATING THE MODEL(S)
+    logging.info("Starting evaluation...")
+
+    evaluate_models(models_dir=models_path,
+                    results_dir=results_path,
+                    eval_envs={
+                        "train": train_env,
+                        "eval": eval_env
+                        },
+                    eval_episodes=eval_episodes)    
+    logging.info("Evaluation complete.")
+    # -- END EVALUATION
+
+    # -- ANALYZING RESULTS
+    logging.info("Analyzing results...")
+    analyse_evaluation_results(
+        models_dir=models_path,
+        results_dir=results_path,
+        eval_envs_names= ["train", "eval"],
+        model_name_suffix=f"[{experiment_group_name}::{experiment_name}]"
+    )
+    logging.info("Analysis complete.")
+    # -- END ANALYSIS
+
+    
+    
 
 def train_model(model: BaseAlgorithm,
                 train_env: ForexEnv,
@@ -63,6 +145,42 @@ def evaluate_models(models_dir: Path,
                       )
 
     logging.info("Finished evaluation.")
+
+def analyse_evaluation_results(models_dir: Path,
+                               results_dir: Path,
+                               eval_envs_names: list[str],
+                               model_name_suffix: str = "",
+                               ) -> None:
+    """
+    Analyze evaluation results from multiple models and environments.
+    This function reads the results from the specified models and environments,
+    and generates a summary of the performance metrics.
+    """
+
+    eval_envs_model_metrics: dict[str, list[dict[str, Any]]] = {name: [] for name in eval_envs_names}
+
+    for model_name, model in load_models(models_dir):
+        model_results_dir = results_dir / model_name
+
+        for eval_env_name in eval_envs_names:
+            env_results_dir = model_results_dir / eval_env_name
+            env_results_file = env_results_dir / "data.csv"
+
+            if not env_results_file.exists():
+                logging.warning(f"Results file {env_results_file} does not exist, skipping.")
+                continue
+
+            # Load results
+            df = pd.read_csv(env_results_file)
+            if df.empty:
+                logging.warning(f"Results file {env_results_file} is empty, skipping.")
+                continue
+            logging.info(f"Analyzing results for model: {model_name} on environment: {eval_env_name}")
+            metrics = analyse_individual_run(df, env_results_dir, name=model_name + model_name_suffix)
+            eval_envs_model_metrics[eval_env_name].append(metrics)
+    
+    for eval_env_name, metrics in eval_envs_model_metrics.items():
+        analyse_finals(metrics, results_dir / eval_env_name, name="eval_results_" + eval_env_name)
 
 def run_model(model: BaseAlgorithm,
               env: ForexEnv,
