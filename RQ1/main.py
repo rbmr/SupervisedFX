@@ -1,23 +1,19 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
-import pandas as pd
 from stable_baselines3 import A2C
-from stable_baselines3.common.base_class import BaseAlgorithm
-from stable_baselines3.common.vec_env import DummyVecEnv
-import gymnasium as gym
-from RQ1.constants import RQ1_DIR
-from RQ1.scripts import train_model, evaluate_models
-from common.analysis import analyse_individual_run, analyse_finals
+
+from RQ1.constants import EXPERIMENTS_DIR, EXPERIMENT_NAME_FORMAT
 from common.constants import SEED
 from common.data.data import Timeframe, ForexCandleData
 from common.data.feature_engineer import (FeatureEngineer, history_lookback,
                                           remove_ohlcv, rsi)
-from common.data.stepwise_feature_engineer import (
-    StepwiseFeatureEngineer, calculate_cash_percentage)
+from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
 from common.envs.callbacks import SaveOnEpisodeEndCallback
 from common.envs.forex_env import ForexEnv
-from common.trainertester import run_model
+from common.models.train_eval import train_model, evaluate_models
+from common.models.utils import save_model_with_metadata
+from common.scripts import most_recent_modified
 
 if __name__ != '__main__':
     raise ImportError("Do not import this module.")
@@ -58,7 +54,7 @@ train_env, eval_env = ForexEnv.create_train_eval_envs(
 )
 logging.info("Environments created.")
 
-# MODEL
+# TRAINING
 
 logging.info("Creating model...")
 
@@ -80,65 +76,56 @@ model = A2C(
 
 logging.info("Model created.")
 
-# FOLDERS
-
-EXPERIMENTS_DIR = RQ1_DIR / "experiments"
-experiment_group = "testing"
-experiment_name = datetime.now().strftime("%Y%m%d-%H%M%S")
-experiment_dir = EXPERIMENTS_DIR / experiment_group / experiment_name
-logs_dir = experiment_dir / "logs"
+experiment_name = datetime.now().strftime(EXPERIMENT_NAME_FORMAT)
+experiment_dir = EXPERIMENTS_DIR / experiment_name
 models_dir = experiment_dir / "models"
-results_dir = experiment_dir / "results"
-
-logs_dir.mkdir(parents=True, exist_ok=True)
 models_dir.mkdir(parents=True, exist_ok=True)
-results_dir.mkdir(parents=True, exist_ok=True)
-
-# TRAINING
 
 callback = [SaveOnEpisodeEndCallback(models_dir)]
-
-train_model(model, train_env, train_episodes=5, callback=callback)
+train_model(model, train_env, train_episodes=1, callback=callback)
+save_model_with_metadata(model, models_dir / "model_final.zip")
 
 # EVALUATION
 
+experiment_dir = most_recent_modified(EXPERIMENTS_DIR)
+models_dir = experiment_dir / "models"
+results_dir = experiment_dir / "results"
 eval_envs = {
     "train": train_env,
     "eval": eval_env,
 }
-
-evaluate_models(models_dir, results_dir, eval_envs, eval_episodes=1)
+evaluate_models(models_dir, results_dir, eval_envs, eval_episodes=2)
 
 # ANALYSIS
-
-logging.info("Analyzing results...")
-
-model_train_metrics = []
-model_eval_metrics = []
-
-for model_file in model_files:
-
-    model_name = model_file.stem
-    model_results_dir = results_dir / model_name
-    train_results_dir = model_results_dir / "train"
-    eval_results_dir = model_results_dir / "eval"
-    train_results_file = train_results_dir / "data.csv"
-    eval_results_file = eval_results_dir / "data.csv"
-
-    logging.info(f"Analyzing results for model: {model_name}")
-
-    # Load train and eval results
-    results_df = pd.read_csv(train_results_file)
-    metrics = analyse_individual_run(results_df, train_results_dir, name=model_name)
-    model_train_metrics.append(metrics)
-
-    results_df = pd.read_csv(eval_results_file)
-    metrics = analyse_individual_run(results_df, eval_results_dir, name=model_name)
-    model_eval_metrics.append(metrics)
-
-analyse_finals(model_train_metrics, results_dir, name="train_results")
-analyse_finals(model_eval_metrics, results_dir, name="eval_results")
-
-logging.info("Analysis complete.")
+#
+# logging.info("Analyzing results...")
+#
+# model_train_metrics = []
+# model_eval_metrics = []
+#
+# for model_file in model_files:
+#
+#     model_name = model_file.stem
+#     model_results_dir = results_dir / model_name
+#     train_results_dir = model_results_dir / "train"
+#     eval_results_dir = model_results_dir / "eval"
+#     train_results_file = train_results_dir / "data.csv"
+#     eval_results_file = eval_results_dir / "data.csv"
+#
+#     logging.info(f"Analyzing results for model: {model_name}")
+#
+#     # Load train and eval results
+#     results_df = pd.read_csv(train_results_file)
+#     metrics = analyse_individual_run(results_df, train_results_dir, name=model_name)
+#     model_train_metrics.append(metrics)
+#
+#     results_df = pd.read_csv(eval_results_file)
+#     metrics = analyse_individual_run(results_df, eval_results_dir, name=model_name)
+#     model_eval_metrics.append(metrics)
+#
+# analyse_finals(model_train_metrics, results_dir, name="train_results")
+# analyse_finals(model_eval_metrics, results_dir, name="eval_results")
+#
+# logging.info("Analysis complete.")
 
 logging.info("Done!")
