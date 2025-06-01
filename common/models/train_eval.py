@@ -123,17 +123,17 @@ def run_model(model: BaseAlgorithm,
             market_features_df.columns = [f"info.market_features.{col}" for col in market_features_df.columns]
             agent_data_df.columns = [f"info.agent_data.{col}" for col in agent_data_df.columns]
 
-            assert len(episode_logs) == len(market_data_df)
-            assert len(episode_logs) == len(market_features_df)
-            assert len(episode_logs) == len(agent_data_df)
+            assert len(episode_log) == len(market_data_df)
+            assert len(episode_log) == len(market_features_df)
+            assert len(episode_log) == len(agent_data_df)
 
-            temp_df = pd.DataFrame(episode_logs)
+            temp_df = pd.DataFrame(episode_log)
             temp_df = pd.concat([temp_df, agent_data_df, market_data_df, market_features_df], axis=1)
             logs_df = temp_df if logs_df is None else pd.concat([logs_df, temp_df], ignore_index=True, axis=0)
 
             # Start new episode
             obs = env.reset()
-            episode_logs = [{
+            episode_log = [{
                 "step": 0,
                 "action": None,
                 "reward": None,
