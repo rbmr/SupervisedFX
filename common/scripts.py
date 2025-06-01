@@ -11,6 +11,15 @@ from numpy.typing import NDArray
 
 from common.constants import *
 
+def most_recent_modified(dir_path: Path):
+    """finds the most recently modified file or folder in a directory"""
+    if not dir_path.is_dir():
+        raise ValueError(f"{dir_path} is not a directory")
+    entries = list(dir_path.iterdir())
+    if len(entries) == 0:
+        return None
+    return max(entries, key=lambda p: p.stat().st_mtime)
+
 def calculate_equity(bid_price: float, ask_price: float, cash: float, shares: float) -> float:
     """
     Calculates the equity based on current cash, shares and prices.

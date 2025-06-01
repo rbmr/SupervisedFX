@@ -35,10 +35,10 @@ class DummyModel(BaseAlgorithm):
         raise NotImplementedError("DummyModel does not support loading.")
 
     def get_env(self):
-        raise NotImplementedError("DummyModel has no environment.")
+        raise NotImplementedError("DummyModel has no environments.")
 
     def set_env(self, *args, **kwargs):
-        raise NotImplementedError("DummyModel does not support environments.")
+        raise NotImplementedError("DummyModel has no environments.")
 
     def get_parameters(self):
         raise NotImplementedError("DummyModel has no parameters.")
@@ -70,3 +70,4 @@ def get_hold_model(action_space: Space) -> DummyModel:
 
 def get_random_model(action_space: Space) -> DummyModel:
     return DummyModel(lambda: action_space.sample())
+

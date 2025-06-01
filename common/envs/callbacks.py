@@ -4,6 +4,9 @@ import logging
 from stable_baselines3.common.callbacks import BaseCallback
 import os
 
+from common.models.utils import save_model_with_metadata
+
+
 class SaveOnEpisodeEndCallback(BaseCallback):
     def __init__(self, save_path: Path, verbose=0):
         super().__init__(verbose)
@@ -19,7 +22,7 @@ class SaveOnEpisodeEndCallback(BaseCallback):
         if done_array is not None and any(done_array):
             self.episode_num += 1
             filename = self.save_path / f"model_{self.episode_num}_episodes.zip"
-            self.model.save(filename)
+            save_model_with_metadata(self.model, filename)
             if self.verbose > 0:
                 logging.info(f"Saved model at episode {self.episode_num} to {filename}")
         return True
