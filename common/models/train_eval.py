@@ -143,7 +143,9 @@ def analyse_results(results_dir: Path) -> None:
 
     # Setup
     eval_envs_metrics = {}
-    for results_file in list(results_dir.rglob("data.csv")):
+    result_files = list(results_dir.rglob("data.csv"))
+    result_files.sort(key=lambda x: x.stat().st_mtime) # Old to new
+    for results_file in result_files:
 
         # Extract names (shady business)
         env_dir = results_file.parent
