@@ -264,7 +264,7 @@ class ForexEnv(gym.Env):
         # Jitter Mitigation, skip action if it has no significant effect.
         current_exposure = (current_equity - current_cash) / current_equity
         if abs(target_exposure - current_exposure) < 1e-5:
-            logging.info(f"Step {self.current_step}: target exposure {target_exposure} close to current_exposure {current_exposure}. No trade due to jitter mitigation.")
+            logging.debug(f"Step {self.current_step}: target exposure {target_exposure} close to current_exposure {current_exposure}. No trade due to jitter mitigation.")
             return current_cash, current_shares
 
         # Determine target position value in currency
