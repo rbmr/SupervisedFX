@@ -3,13 +3,57 @@ This file contains some simple scripts that can be useful anywhere during the pr
 """
 
 import random
+from datetime import datetime, timedelta
 from typing import Any, Dict
 
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
+from pathlib import Path
 
-from common.constants import *
+from common.constants import MarketDataCol
+
+def has_subdir(path: Path, subdir_name: str) -> bool:
+    """Checks if a path has a subdirectory with some name"""
+    return path.is_dir() and (path / subdir_name).is_dir()
+
+def lookup(options: list[tuple[str, Any]], key: str):
+    for k, v in options:
+        if k == key:
+            return v
+    return None
+
+def safe_int(i: str) -> int | None:
+    try:
+        return int(i)
+    except ValueError:
+        return None
+
+def picker(options: list[tuple[str, Any]], default: int | None = 0) -> Any:
+    """
+    Prompts user to pick one of a list of options.
+    Supports default values.
+    """
+    default_str = "" if default is None else f" (default: {default})"
+    print(f"Pick one of the following options{default_str}:")
+    for i, (name, _) in reversed(list(enumerate(options))):
+        print(f"[{i}] {name}")
+
+    while True:
+
+        inp = input("> ").strip()
+        if inp == "" and default is not None:
+            return options[0][1]
+        i = safe_int(inp)
+        if i is not None:
+            if 0 <= i < len(options):
+                return options[i][1]
+            print("Index out of range. Try again.")
+            continue
+        val = lookup(options, inp)
+        if val is not None:
+            return val
+        print("Name not found. Try again.")
 
 def most_recent_modified(dir_path: Path):
     """finds the most recently modified file or folder in a directory"""
