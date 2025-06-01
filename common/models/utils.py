@@ -87,15 +87,31 @@ def load_models(models_dir: Path) -> Generator[tuple[str, BaseAlgorithm], None, 
     if not models_dir.is_dir():
         raise ValueError(f"{models_dir} is not a directory")
 
-    model_zips = list(f for f in models_dir.glob("*.zip") if f.is_file())
-    model_zips.sort(key=lambda x: x.stat().st_mtime) # sort on last modified
-    logging.info(f"Found {len(model_zips)} model zips in '{models_dir}'.")
+    i = 0
+    model_queue = list(f for f in models_dir.glob("*.zip") if f.is_file())
+    model_queue.sort(key=lambda x: x.stat().st_mtime) # sort on last modified
 
-    for model_zip in model_zips:
+    logging.info(f"Found {len(model_queue)} model zips in '{models_dir}'.")
 
+    while i < len(model_queue):
+
+        # Get current model_zip, skip to next model.
+        model_zip = model_queue[i]
+        i += 1
+
+        # Load and yield model
         logging.info(f"Loading model from {model_zip}...")
         model_name = model_zip.stem
         model = load_model_with_metadata(model_zip)
         logging.info(f"{model.__class__.__name__} model loaded from {model_zip}.")
-
         yield model_name, model
+
+        # Add newly created zips to the queue.
+        model_zips: set[Path] = set(f for f in models_dir.glob("*.zip") if f.is_file())
+        new_model_zips = list(model_zips - set(model_queue))
+        new_model_zips.sort(key=lambda x: x.stat().st_mtime)
+        if len(new_model_zips) > 0:
+            new_models = ", ".join(str(f.name) for f in new_model_zips)
+            logging.info(f"Found {len(new_model_zips)} new model zips ({new_models}). Adding them to the queue.")
+        model_queue.extend(new_model_zips)
+
