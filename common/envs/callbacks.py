@@ -53,6 +53,7 @@ class ActionHistogramCallback(BaseCallback):
         if max_count == 0:
             return True
         bar_heights = hist / max_count * self.max_height
+        logging.info(f"Histogram of actions taken in the past {self.log_freq} steps.")
         for height, count, bin_start, bin_end in zip(bar_heights, hist, bin_edges[:-1], bin_edges[1:]):
             label = f"({bin_start:>5.2f})–({bin_end:>5.2f})"
             bar = f"{render_horz_bar(height)} ({count})"
