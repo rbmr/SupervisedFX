@@ -240,3 +240,33 @@ def analyse_finals(final_metrics: List[Dict[str, Any]], results_path: Path, name
     plt.ylabel('Sharpe Ratio')
     plt.savefig(results_path / f"sharpe_ratios.png")
     plt.close()
+
+    # make a plot of the max drawdowns
+    max_drawdowns = [metrics['max_drawdown'] for metrics in final_metrics]
+    plt.figure(figsize=(12, 6))
+    plt.bar(range(len(max_drawdowns)), max_drawdowns, tick_label=[f"{i + 1}" for i in range(len(max_drawdowns))])
+    plt.title(f"Max Drawdowns for {name}")
+    plt.xlabel('Model')
+    plt.ylabel('Max Drawdown')
+    plt.savefig(results_path / f"max_drawdowns.png")
+    plt.close()
+
+    # make a plot of the profit factors
+    profit_factors = [metrics['profit_factor'] for metrics in final_metrics]
+    plt.figure(figsize=(12, 6))
+    plt.bar(range(len(profit_factors)), profit_factors, tick_label=[f"{i + 1}" for i in range(len(profit_factors))])
+    plt.title(f"Profit Factors for {name}")
+    plt.xlabel('Model')
+    plt.ylabel('Profit Factor')
+    plt.savefig(results_path / f"profit_factors.png")
+    plt.close()
+
+    # make a plot of the total pnl
+    total_trades_returns = [metrics['total_trades_returns'] for metrics in final_metrics]
+    plt.figure(figsize=(12, 6))
+    plt.bar(range(len(total_trades_returns)), total_trades_returns, tick_label=[f"{i + 1}" for i in range(len(total_trades_returns))])
+    plt.title(f"Total Trades Returns for {name}")
+    plt.xlabel('Model')
+    plt.ylabel('Total Trades Returns')
+    plt.savefig(results_path / f"total_trades_returns.png")
+    plt.close()

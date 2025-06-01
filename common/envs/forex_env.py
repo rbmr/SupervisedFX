@@ -133,6 +133,11 @@ class ForexEnv(gym.Env):
         market_data_df = forex_candle_data.df.copy(deep=True)
         market_features_df = market_feature_engineer.run(market_data_df, remove_original_columns=True)
 
+        # log the amount of features, and the specific column names
+        logging.info(f"Market data contains {len(market_data_df)} rows and {len(market_data_df.columns)} columns.")
+        logging.info(f"Market features contain {len(market_features_df)} rows and {len(market_features_df.columns)} columns: {market_features_df.columns.tolist()}.")
+        logging.info(f"Agent feature engineer contains {agent_feature_engineer.num_of_features()} features: {agent_feature_engineer.get_features()}.")
+
         # Split data
         split_index = int(len(market_data_df) * split_ratio)
         train_market_data = market_data_df.iloc[:split_index]
