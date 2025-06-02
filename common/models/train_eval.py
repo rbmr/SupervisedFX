@@ -95,6 +95,7 @@ def evaluate_models(models_dir: Path,
                     results_dir: Path,
                     eval_envs: dict[str, ForexEnv],
                     eval_episodes: int = 1,
+                    force_eval: bool = False
                     ) -> None:
     """
     Evaluates each model in a directory on a set of ForexEnvs for a given number of episodes.
@@ -105,6 +106,9 @@ def evaluate_models(models_dir: Path,
     for model_name, model in load_models(models_dir):
 
         model_results_dir = results_dir / model_name
+        if not force_eval and model_results_dir.exists():
+            logging.info(f"{model_name} has already been evaluated, skipping...")
+            continue
 
         for eval_env_name, eval_env in eval_envs.items():
 
