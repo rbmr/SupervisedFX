@@ -1,54 +1,95 @@
 """
-This file contains some simpel scripts that can be useful anywhere during the project.
+This file contains some simple scripts that can be useful anywhere during the project.
 """
 
-from datetime import datetime, timedelta
-import pandas as pd
-from stockstats import StockDataFrame
-from common.constants import *
-from stable_baselines3.common.vec_env import VecEnv
-from typing import Any, Dict, List
-import json
-from tqdm.auto import tqdm
-
 import random
-import os
+from datetime import datetime, timedelta
+from typing import Any, Dict
+
 import numpy as np
-import tensorflow as tf
-import torch
+import pandas as pd
+from numpy.typing import NDArray
+from pathlib import Path
 
-def combine_df(bid_df: pd.DataFrame, ask_df: pd.DataFrame) -> pd.DataFrame:
+from common.constants import MarketDataCol
+
+def has_nonempty_subdir(path: Path, subdir_name: str) -> bool:
+    return has_subdir(path, subdir_name) and not is_empty(path / subdir_name)
+
+def has_subdir(path: Path, subdir_name: str) -> bool:
+    """Checks if a path has a subdirectory with some name"""
+    return path.is_dir() and (path / subdir_name).is_dir()
+
+def lookup(options: list[tuple[str, Any]], key: str):
+    for k, v in options:
+        if k == key:
+            return v
+    return None
+
+def safe_int(i: str) -> int | None:
+    try:
+        return int(i)
+    except ValueError:
+        return None
+
+def is_empty(p: Path) -> bool:
+    return n_children(p) == 0
+
+def n_children(p: Path) -> int:
+    return sum(1 for _ in p.iterdir())
+
+def picker(options: list[tuple[str, Any]], default: int | None = 0) -> Any:
     """
-    Combines bid and ask DataFrames into a single `DataFrame`, renaming columns
-    by adding a `_bid`, or `_ask` postfix, and calculating the average volume.
+    Prompts user to pick one of a list of options.
+    Supports default values.
     """
-    bid_columns = set(bid_df.columns)
-    ask_columns = set(ask_df.columns)
-    expected_columns = set(DATA_COLUMNS)
-    if bid_columns != expected_columns or ask_columns != expected_columns:
-        raise ValueError(f"{bid_columns} and {ask_columns} must be equal to {expected_columns}")
+    default_str = "" if default is None else f" (default: {default})"
+    print(f"Pick one of the following options{default_str}:")
+    for i, (name, _) in reversed(list(enumerate(options))):
+        print(f"[{i}] {name}")
 
-    bid_rename = {
-        Col.VOL : "volume_bid",
-        Col.HIGH : "high_bid",
-        Col.LOW : "low_bid",
-        Col.OPEN : "open_bid",
-        Col.CLOSE : "close_bid"
-    }
-    ask_rename = {
-        Col.VOL : "volume_ask",
-        Col.HIGH : "high_ask",
-        Col.LOW : "low_ask",
-        Col.OPEN : "open_ask",
-        Col.CLOSE : "close_ask"
-    }
-    bid_df.rename(columns=bid_rename, inplace=True)
-    ask_df.rename(columns=ask_rename, inplace=True)
+    while True:
 
-    df = pd.merge(bid_df, ask_df, on=Col.TIME, how="inner")
-    df[Col.VOL] = (df["volume_bid"] + df["volume_ask"] ) / 2
+        inp = input("> ").strip()
+        if inp == "" and default is not None:
+            return options[0][1]
+        i = safe_int(inp)
+        if i is not None:
+            if 0 <= i < len(options):
+                return options[i][1]
+            print("Index out of range. Try again.")
+            continue
+        val = lookup(options, inp)
+        if val is not None:
+            return val
+        print("Name not found. Try again.")
 
-    return df
+def most_recent_modified(dir_path: Path):
+    """finds the most recently modified file or folder in a directory"""
+    if not dir_path.is_dir():
+        raise ValueError(f"{dir_path} is not a directory")
+    entries = list(dir_path.iterdir())
+    if len(entries) == 0:
+        return None
+    return max(entries, key=lambda p: p.stat().st_mtime)
+
+def calculate_equity(bid_price: float, ask_price: float, cash: float, shares: float) -> float:
+    """
+    Calculates the equity based on current cash, shares and prices.
+    """
+    return cash + shares * (bid_price if shares >= 0 else ask_price)
+
+def calculate_ohlc_equity(current_prices: NDArray[np.float32], cash: float, shares: float) -> tuple[float, float, float, float]:
+    """
+    Calculates the equity based on current cash, shares and prices.
+    """
+    assert current_prices.ndim == 1
+    assert current_prices.shape[0] == len(MarketDataCol)
+    equity_open = calculate_equity(current_prices[MarketDataCol.open_bid], current_prices[MarketDataCol.open_ask], cash, shares)
+    equity_high = calculate_equity(current_prices[MarketDataCol.high_bid], current_prices[MarketDataCol.high_ask], cash, shares)
+    equity_low = calculate_equity(current_prices[MarketDataCol.low_bid], current_prices[MarketDataCol.low_ask], cash, shares)
+    equity_close = calculate_equity(current_prices[MarketDataCol.close_bid], current_prices[MarketDataCol.close_ask], cash, shares)
+    return equity_open, equity_high, equity_low, equity_close
 
 def round_datetime(date_time: datetime, interval: int) -> datetime:
     """
@@ -68,6 +109,26 @@ def exact_divide(a: int, b: int) -> int:
         return a // b
     raise ValueError(f"{a} is not divisible by {b}")
 
+    blocks = []
+
+def render_horz_bar(height: float) -> str:
+    """Renders a horizontal bar using fractional Unicode block characters"""
+    full_blocks = int(height)
+    remainder = height - full_blocks
+    partial_block = " ▏▎▍▌▋▊▉"[int(remainder * 8)] # 0/8 - 7/8
+    return "█" * full_blocks + partial_block
+
+def circ_slice(arr, i, j):
+    """Perform circular (wraparound) slicing on a NumPy array."""
+    n = len(arr)
+    i %= n
+    j %= n
+    if i > j:
+        return np.concatenate((arr[i:], arr[:j]))
+    if j > i:
+        return arr[i:j]
+    return arr[:]
+
 def split_df(df: pd.DataFrame, ratio: float):
     """
     Splits a dataframe into two parts based on a given ratio.
@@ -75,131 +136,42 @@ def split_df(df: pd.DataFrame, ratio: float):
     if ratio < 0 or ratio > 1:
         raise ValueError(f"{ratio} is not a valid ratio")
     split_index = int(len(df) * ratio)
-    df1 = df.iloc[:split_index]
-    df2 = df.iloc[split_index:]
+    df1 = df.iloc[:split_index].reset_index(drop=True)
+    df2 = df.iloc[split_index:].reset_index(drop=True)
     return df1, df2
 
 def find_first_row_without_nan(df: pd.DataFrame) -> int:
     """
-    Removes leading rows with NaN values in any of the columns
+    Returns the index of the first row that contains no NaN values.
+    Returns -1 if no such row exists.
     """
-    found_nan = True
-    index = 0
+    for i in range(len(df)):
+        if not df.iloc[i].isnull().any():
+            return i
+    return -1
 
-    while found_nan:
-        found_nan = False
-        for col in df.columns:
-            if pd.isna(df.iloc[index][col]):
-                found_nan = True
-                break
-        if found_nan:
-            index += 1
-
-    return index
-
-def run_model_on_vec_env(
-        model: Any,
-        env: 'VecEnv', # Use quotes for forward reference if VecEnv is not yet defined
-        log_path: str | Path,
-        n_episodes: int = 1,
-        progress_bar: bool = True, # New parameter for progress bar
-    ):
+def find_first_row_with_nan(df: pd.DataFrame) -> int:
     """
-    Run a trained RL model on a vectorized environment for a number of episodes,
-    log each step, and write all logs at the end. Optionally displays a progress bar.
-
-    Args:
-        model: The trained RL model with a .predict() method.
-        env: The vectorized environment (e.g., Stable Baselines3 VecEnv).
-        log_path: Path to save the JSON log file.
-        n_episodes: Number of episodes to run per environment.
-        progress_bar: If True, display a progress bar for episode completion (requires tqdm).
+    Returns the index of the first row that contains a NaN value.
+    Returns -1 if no such row exists.
     """
-    log_path = Path(log_path)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-
-    collected_log_entries: List[str] = []
-    episode_counts: List[int] = [0] * env.num_envs
-    timesteps: List[int] = [0] * env.num_envs
-    
-    # Ensure obs is initialized before the loop, especially if n_episodes might be 0
-    if n_episodes == 0:
-        with open(log_path, "w") as f: # Create an empty file if no episodes
-            pass
-        return
-
-    obs = env.reset()
-
-    pbar = None
-    if progress_bar:
-        if tqdm is None:
-            print("Warning: tqdm is not installed. Progress bar will not be shown. "
-                  "Install with: pip install tqdm")
-        else:
-            total_episodes_to_complete = env.num_envs * n_episodes
-            if total_episodes_to_complete > 0 : # Only initialize if there's work to do
-                pbar = tqdm(total=total_episodes_to_complete, desc="Running Episodes", unit="ep")
-
-    try:
-        while min(episode_counts) < n_episodes:
-            action, _ = model.predict(obs, deterministic=True)
-            next_obs, rewards, dones, infos = env.step(action)
-
-            for i in range(env.num_envs):
-                # Log data only if the current environment hasn't completed its n_episodes
-                if episode_counts[i] < n_episodes:
-                    log_entry: Dict[str, Any] = {
-                        "env_index": i,
-                        "episode": episode_counts[i],
-                        "timestep": timesteps[i],
-                        "action": action[i].tolist() if hasattr(action[i], 'tolist') else action[i],
-                        "obs": obs[i].tolist() if hasattr(obs[i], 'tolist') else obs[i],
-                        "reward": float(rewards[i]),
-                        "done": bool(dones[i]),
-                        "info": infos[i] # infos[i] can be an empty dict or contain data
-                    }
-                    collected_log_entries.append(log_entry)
-                    timesteps[i] += 1
-
-                    if dones[i]:
-                        episode_counts[i] += 1
-                        timesteps[i] = 0
-                        if pbar:
-                            pbar.update(1)
-            
-            obs = next_obs
-    finally:
-        if pbar:
-            pbar.close()
-
-    # add .csv to the log_path if it doesn't exist
-    if not log_path.suffix:
-        log_path = log_path.with_suffix(".csv")
-    with open(log_path, "w") as f:
-        print(f"Writing {len(collected_log_entries)} log entries to {log_path}")
-        df = pd.DataFrame(collected_log_entries)
-        df.to_csv(f, index=False)
-        print(f"Log entries written to {log_path}")
+    for i in range(len(df)):
+        if df.iloc[i].isnull().any():
+            return i
+    return -1
 
 def set_seed(seed_value: int):
     """
     Sets the random seed for Python, NumPy, TensorFlow, and PyTorch.
-
-    Args:
-        seed_value (int): The integer value to use as the seed.
     """
-    # 1. Set Python's built-in random module seed
+    import tensorflow as tf
+    import torch
+
     random.seed(seed_value)
-
-    # 2. Set NumPy's seed
     np.random.seed(seed_value)
-
-    # 3. Set TensorFlow's seed
-    # For TensorFlow 2.x
     tf.random.set_seed(seed_value)
-
-    # 4. Set PyTorch's seed
     torch.manual_seed(seed_value)
+
     # If you are using CUDA:
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed_value)
@@ -210,6 +182,20 @@ def set_seed(seed_value: int):
         torch.backends.cudnn.benchmark = False
 
     print(f"Seeds set to {seed_value} for Python, NumPy, TensorFlow, and PyTorch.")
+
+def flatten_dict(d: Dict[str, Any], sep=".") -> Dict[str, Any]:
+    """
+    Flatten a nested dictionary to a single level.
+    """
+    flat_dict = {}
+    for key, value in d.items():
+        if isinstance(value, dict):
+            value = flatten_dict(value)
+            for sub_key, sub_value in value.items():
+                flat_dict[f"{key}{sep}{sub_key}"] = sub_value
+        else:
+            flat_dict[key] = value
+    return flat_dict
 
 def prepare_data(df: pd.DataFrame, lookback_window_size: int, features: list[str], RSI_PERIOD = 14):
     """
