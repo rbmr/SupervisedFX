@@ -9,7 +9,6 @@ from gymnasium import spaces
 from common.constants import *
 from common.data.data import ForexCandleData
 from common.data.feature_engineer import FeatureEngineer
-from common.data.reward_functions import equity_diff
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
 from common.scripts import find_first_row_with_nan, find_first_row_without_nan, calculate_ohlc_equity, calculate_equity
 
@@ -24,7 +23,7 @@ class ForexEnv(gym.Env):
                  initial_capital: float = 10000.0,
                  transaction_cost_pct: float = 0.0,
                  n_actions: int = 1,
-                 custom_reward_function: Optional[Callable[['ForexEnv'], float]] = None
+                 custom_reward_function: Callable[['ForexEnv'], float] | None = None
                  ):
         super(ForexEnv, self).__init__()
 
@@ -333,3 +332,17 @@ class ForexEnv(gym.Env):
         updated_cash = current_cash + shares_sold * proceeds_per_share
         updated_shares = current_shares - shares_sold
         return updated_cash, updated_shares
+
+def log_equity_diff(env: ForexEnv) -> float:
+    current_equity = env.agent_data[env.current_step, AgentDataCol.equity_close]
+    prev_equity = env.agent_data[env.current_step - 1, AgentDataCol.equity_close]
+    # we assume prev_equity is always > 0, since episodes ends if it goes below zero.
+    # however, current_equity may be below zero because .step() does not immediately exit.
+    if current_equity <= 0:
+        return 0.0
+    return np.log(current_equity) - np.log(prev_equity)
+
+def equity_diff(env: ForexEnv) -> float:
+    current_equity = env.agent_data[env.current_step, AgentDataCol.equity_close]
+    prev_equity = env.agent_data[env.current_step - 1, AgentDataCol.equity_close]
+    return current_equity - prev_equity

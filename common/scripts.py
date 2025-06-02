@@ -123,7 +123,11 @@ def circ_slice(arr, i, j):
     n = len(arr)
     i %= n
     j %= n
-    return np.concatenate((arr[i:], arr[:j])) if i > j else arr[i:j]
+    if i > j:
+        return np.concatenate((arr[i:], arr[:j]))
+    if j > i:
+        return arr[i:j]
+    return arr[:]
 
 def split_df(df: pd.DataFrame, ratio: float):
     """

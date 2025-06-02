@@ -55,8 +55,11 @@ class CoolStatsCallback(BaseCallback):
             d_equity1 = equity_1[-1] - equity_1[0]
             d_equity2 = equity_2[-1] - equity_2[0]
             d_equity = d_equity1 + d_equity2
-        else:
+        elif j > i:
             equity = self.env.agent_data[i:j, AgentDataCol.equity_close]
+            d_equity = equity[-1] - equity[0]
+        else:
+            equity = self.env.agent_data[:, AgentDataCol.equity_close]
             d_equity = equity[-1] - equity[0]
         logging.info(f"Change in equity: {d_equity}")
         return True
