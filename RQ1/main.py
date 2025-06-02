@@ -4,11 +4,46 @@ from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+
+def get_feature_engineer():
+    from common.data.feature_engineer import FeatureEngineer, as_pct_change, ema, rsi, copy_column, as_ratio_of_other_column, as_min_max_fixed
+
+    feature_engineer = FeatureEngineer()
+
+    # Suggestion: Use fewer features and no history_lookback at first.
+    # Let the agent's recurrent policy (if you use one) or the network itself find temporal patterns.
+
+    # 1. Price Change (Momentum)
+    def feature_1(df):
+        copy_column(df, "close_bid", "close_pct_change_1")
+        as_pct_change(df, "close_pct_change_1", periods=1)
+        copy_column(df, "close_bid", "close_pct_change_5")
+        as_pct_change(df, "close_pct_change_5", periods=5)  # Look at change over 5 periods
+
+    feature_engineer.add(feature_1)
+
+    # 2. Trend (EMA)
+    def feature_2(df):
+        ema(df, window=20)
+        as_ratio_of_other_column(df, "ema_20_close_bid", "close_bid")  # How far is the price from the EMA?
+        ema(df, window=50)
+        as_ratio_of_other_column(df, "ema_50_close_bid", "close_bid")
+
+    feature_engineer.add(feature_2)
+
+    # 3. Oscillator (RSI)
+    def feature_3(df):
+        rsi(df, window=14)
+        as_min_max_fixed(df, "rsi_14", 0, 100)  # Normalize between 0 and 1
+
+    feature_engineer.add(feature_3)
+
+    return feature_engineer
+
 def get_environments():
     from common.data.data import ForexCandleData, Timeframe
-    from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
-    from common.envs.forex_env import ForexEnv
-    from RQ2.main import get_feature_engineer
+    from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_current_exposure
+    from common.envs.forex_env import ForexEnv, log_equity_diff
 
     logging.info("Loading market data...")
     forex_candle_data = ForexCandleData.load(
@@ -24,7 +59,7 @@ def get_environments():
 
     logging.info("Setting up stepwise feature engineer...")
     agent_feature_engineer = StepwiseFeatureEngineer()
-    agent_feature_engineer.add(["cash_percentage"], calculate_cash_percentage)
+    agent_feature_engineer.add(["current_exposure"], calculate_current_exposure)
 
     logging.info("Creating environments...")
     train_env, eval_env = ForexEnv.create_train_eval_envs(
@@ -34,7 +69,8 @@ def get_environments():
         agent_feature_engineer=agent_feature_engineer,
         initial_capital=10_000.0,
         transaction_cost_pct=0.0,
-        n_actions=0
+        n_actions=0,
+        custom_reward_function=log_equity_diff,
     )
     logging.info("Environments created.")
 
@@ -56,13 +92,13 @@ def train():
         policy="MlpPolicy",
         env=train_env,
         learning_rate=1e-4,
-        n_steps=5_000,
-        gamma=0.995,
-        gae_lambda=0.9,
-        ent_coef=0.005,
-        vf_coef=0.4,
+        n_steps=512,
+        gamma=0.99,
+        gae_lambda=0.95,
+        ent_coef=0.01,
+        vf_coef=0.5,
         max_grad_norm=0.5,
-        policy_kwargs=dict(net_arch=[128, 128]),
+        policy_kwargs=dict(net_arch=[dict(pi=[64, 64], vf=[64, 64])]),
         seed=SEED,
         verbose=1,
         device="cpu"
@@ -76,9 +112,9 @@ def train():
     models_dir.mkdir(parents=True, exist_ok=True)
 
     callback = [SaveOnEpisodeEndCallback(models_dir),
-                ActionHistogramCallback(train_env, log_freq=model.n_steps),
-                CoolStatsCallback(train_env, log_freq=model.n_steps)]
-    train_model(model, train_env, train_episodes=50, callback=callback)
+                ActionHistogramCallback(train_env, log_freq=train_env.total_steps),
+                CoolStatsCallback(train_env, log_freq=train_env.total_steps)]
+    train_model(model, train_env, train_episodes=200, callback=callback)
     save_model_with_metadata(model, models_dir / "model_final.zip")
 
 def evaluate(experiments_dir, limit = 10):
@@ -89,7 +125,7 @@ def evaluate(experiments_dir, limit = 10):
     experiment_dirs = list(f for f in experiment_dirs if has_nonempty_subdir(f, "models"))
     experiment_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     experiment_dirs = experiment_dirs[:limit] if limit is not None else experiment_dirs
-    named_dirs = list((f"{f.name} ({n_children(f/"models")}", f) for f in experiment_dirs)
+    named_dirs = list((f"{f.name} ({n_children(f/"models")})", f) for f in experiment_dirs)
 
     experiment_dir = picker(named_dirs)
     models_dir = experiment_dir / "models"
