@@ -4,44 +4,9 @@ from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
-def get_feature_engineer():
-    from common.data.feature_engineer import FeatureEngineer, as_pct_change, ema, rsi, copy_column, as_ratio_of_other_column, as_min_max_fixed
-
-    feature_engineer = FeatureEngineer()
-
-    # Suggestion: Use fewer features and no history_lookback at first.
-    # Let the agent's recurrent policy (if you use one) or the network itself find temporal patterns.
-
-    # 1. Price Change (Momentum)
-    def feature_1(df):
-        copy_column(df, "close_bid", "close_pct_change_1")
-        as_pct_change(df, "close_pct_change_1", periods=1)
-        copy_column(df, "close_bid", "close_pct_change_5")
-        as_pct_change(df, "close_pct_change_5", periods=5)  # Look at change over 5 periods
-
-    feature_engineer.add(feature_1)
-
-    # 2. Trend (EMA)
-    def feature_2(df):
-        ema(df, window=20)
-        as_ratio_of_other_column(df, "ema_20_close_bid", "close_bid")  # How far is the price from the EMA?
-        ema(df, window=50)
-        as_ratio_of_other_column(df, "ema_50_close_bid", "close_bid")
-
-    feature_engineer.add(feature_2)
-
-    # 3. Oscillator (RSI)
-    def feature_3(df):
-        rsi(df, window=14)
-        as_min_max_fixed(df, "rsi_14", 0, 100)  # Normalize between 0 and 1
-
-    feature_engineer.add(feature_3)
-
-    return feature_engineer
-
 def get_environments():
     from common.data.data import ForexCandleData, Timeframe
+    from RQ1.some_feature_engineers import get_feature_engineer_chatgpt
     from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_current_exposure
     from common.envs.forex_env import ForexEnv, log_equity_diff
 
@@ -55,7 +20,7 @@ def get_environments():
     )
 
     logging.info("Setting up feature engineer...")
-    market_feature_engineer = get_feature_engineer()
+    market_feature_engineer = get_feature_engineer_chatgpt()
 
     logging.info("Setting up stepwise feature engineer...")
     agent_feature_engineer = StepwiseFeatureEngineer()
@@ -69,7 +34,7 @@ def get_environments():
         agent_feature_engineer=agent_feature_engineer,
         initial_capital=10_000.0,
         transaction_cost_pct=0.0,
-        n_actions=0,
+        n_actions=1,
         custom_reward_function=log_equity_diff,
     )
     logging.info("Environments created.")
@@ -77,31 +42,36 @@ def get_environments():
     return train_env, eval_env
 
 def train():
-    from stable_baselines3 import A2C
+    from stable_baselines3 import PPO
     from RQ1.constants import EXPERIMENTS_DIR, EXPERIMENT_NAME_FORMAT
-    from common.constants import SEED
+    from common.constants import SEED, DEVICE
     from common.envs.callbacks import SaveOnEpisodeEndCallback, ActionHistogramCallback, CoolStatsCallback
     from common.models.train_eval import train_model
     from common.models.utils import save_model_with_metadata
+    from torch.optim import AdamW
 
     train_env, _ = get_environments()
 
     logging.info("Creating model...")
 
-    model = A2C(
+    model = PPO(
         policy="MlpPolicy",
         env=train_env,
-        learning_rate=1e-4,
-        n_steps=512,
+        learning_rate=3e-4,
+        n_steps=2048,
+        batch_size=64,
+        n_epochs=10,
         gamma=0.99,
         gae_lambda=0.95,
-        ent_coef=0.01,
+        ent_coef=0.05,
         vf_coef=0.5,
         max_grad_norm=0.5,
-        policy_kwargs=dict(net_arch=[dict(pi=[64, 64], vf=[64, 64])]),
+        policy_kwargs=dict(
+            net_arch=[dict(pi=[64, 64], vf=[64, 64])],
+        ),
         seed=SEED,
         verbose=1,
-        device="cpu"
+        device=DEVICE
     )
 
     logging.info("Model created.")
