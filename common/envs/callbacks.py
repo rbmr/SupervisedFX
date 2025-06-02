@@ -46,22 +46,27 @@ class CoolStatsCallback(BaseCallback):
         n = self.env.total_steps
         i = (self.num_timesteps - self.log_freq) % n
         j = self.num_timesteps % n
+        equity_data = self.env.agent_data[:, AgentDataCol.equity_close]
 
-        # Calculate and log difference in equity.
-        if i > j:
-            # ignore the gap
-            equity_1 = self.env.agent_data[i:, AgentDataCol.equity_close]
-            equity_2 = self.env.agent_data[:j, AgentDataCol.equity_close]
-            d_equity1 = equity_1[-1] - equity_1[0]
-            d_equity2 = equity_2[-1] - equity_2[0]
+        # Change in equity.
+        if i > j: # Interval crossed episode boundary, ignore the gap.
+            equity_1 = equity_data[i:]
+            d_equity1 = equity_1[-1] - equity_1[0] if len(equity_1) >= 2 else 0.0
+            equity_2 = equity_data[:j]
+            d_equity2 = equity_2[-1] - equity_2[0] if len (equity_2) >= 2 else 0.0
             d_equity = d_equity1 + d_equity2
-        elif j > i:
-            equity = self.env.agent_data[i:j, AgentDataCol.equity_close]
-            d_equity = equity[-1] - equity[0]
-        else:
-            equity = self.env.agent_data[:, AgentDataCol.equity_close]
-            d_equity = equity[-1] - equity[0]
-        logging.info(f"Change in equity: {d_equity}")
+        elif j > i: # Interval within episode
+            equity = equity_data[i:j]
+            d_equity = equity[-1] - equity[0] if len(equity) >= 2 else 0.0
+        else: # Exactly one full episode, log change over full episode.
+            equity = equity_data[:]
+            d_equity = equity[-1] - equity[0] if len(equity) >= 2 else 0.0
+        logging.info(f"Change in equity over last {self.log_freq} steps: {d_equity}")
+
+        # Current equity
+        curr_equity = equity_data[j]
+        logging.info(f"Current equity: {curr_equity}")
+
         return True
 
 class ActionHistogramCallback(BaseCallback):
