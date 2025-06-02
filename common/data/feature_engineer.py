@@ -258,7 +258,7 @@ def as_pct_change(df: pd.DataFrame, column: str, periods: int = 1):
     """
     Normalize a column as percentage change.
     """
-    df[f'{column}'] = df[column].pct_change(periods=periods) * 100
+    df[f'{column}'] = df[column].pct_change(periods=periods)
     df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
 
 def as_ratio_of_other_column(df: pd.DataFrame, column: str, other_column: str):

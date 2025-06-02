@@ -2,6 +2,7 @@ import logging
 import random
 
 import torch.optim as optim
+from torch.nn import ReLU, LeakyReLU
 
 from common.scripts import set_seed
 from stable_baselines3 import DQN
@@ -16,6 +17,9 @@ from common.data.data import ForexCandleData, Timeframe
 from common.models.train_eval import train_test_analyse
 from common.constants import *
 from common.scripts import *
+from common.rewards import risk_adjusted_return
+
+
 
 
 def get_feature_engineer() -> FeatureEngineer:
@@ -145,16 +149,17 @@ if __name__ == '__main__':
         agent_feature_engineer=stepwise_feature_engineer,
         initial_capital=INITIAL_CAPITAL,
         transaction_cost_pct=TRANSACTION_COST_PCT,
-        n_actions=1)
+        n_actions=1,
+        custom_reward_function=risk_adjusted_return)
     logging.info("Environments created.")
 
-    policy_kwargs = dict(net_arch=[120,75,20], optimizer_class=optim.Adam)
+    policy_kwargs = dict(net_arch=[140,100,50], optimizer_class=optim.Adam, activation_fn=LeakyReLU)
     temp_env = DummyVecEnv([lambda: train_env])
     model = DQN(
         policy="MlpPolicy",
         env=temp_env,
-        learning_rate=0.00025,
-        buffer_size=480,
+        learning_rate=0.0001,
+        buffer_size=5000,
         learning_starts=480,
         batch_size=32,
         tau=1.0,
@@ -172,8 +177,7 @@ if __name__ == '__main__':
     q_net = model.policy.q_net
     # print layer names and shapes
     for name, param in q_net.named_parameters():
-        if param.requires_grad:
-            logging.info(f"Layer: {name}, Shape: {param.shape}")
+        logging.info(f"Layer: {name}, Shape: {param.shape}")
 
     logging.info("Running train test analyze...")
     train_test_analyse(
@@ -182,9 +186,10 @@ if __name__ == '__main__':
         model=model,
         base_folder_path=RQ2_DIR,
         experiment_group_name="hyperparameters",
-        experiment_name="experiment_0",
-        train_episodes=20,
+        experiment_name="experiment_only_positive_actions",
+        train_episodes=100,
         eval_episodes=1,
-        checkpoints=True
+        checkpoints=True,
+        tensorboard_logging=True
     )
     
