@@ -19,7 +19,7 @@ def get_environments():
         end_time=datetime(2025, 5, 16, 20, 45, 0, 0),
     )
 
-    logging.info("Generating market features...")
+    logging.info("Setting up feature engineer...")
     market_feature_engineer = get_feature_engineer()
 
     logging.info("Setting up stepwise feature engineer...")
@@ -83,13 +83,13 @@ def train():
 
 def evaluate(experiments_dir, limit = 10):
     from common.models.train_eval import evaluate_models
-    from common.scripts import picker, has_subdir
+    from common.scripts import picker, has_nonempty_subdir, n_children
 
     experiment_dirs: list[Path] = list(experiments_dir.iterdir())
-    experiment_dirs = list(f for f in experiment_dirs if has_subdir(f, "models"))
+    experiment_dirs = list(f for f in experiment_dirs if has_nonempty_subdir(f, "models"))
     experiment_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     experiment_dirs = experiment_dirs[:limit] if limit is not None else experiment_dirs
-    named_dirs = list((f.name, f) for f in experiment_dirs)
+    named_dirs = list((f"{f.name} ({n_children(f/"models")}", f) for f in experiment_dirs)
 
     experiment_dir = picker(named_dirs)
     models_dir = experiment_dir / "models"
@@ -105,14 +105,14 @@ def evaluate(experiments_dir, limit = 10):
     evaluate_models(models_dir, results_dir, eval_envs, eval_episodes=1)
 
 def analyze(experiments_dir, limit = 10):
-    from common.scripts import picker, has_subdir
+    from common.scripts import picker, has_nonempty_subdir, n_children
     from common.models.train_eval import analyse_results
 
     experiment_dirs: list[Path] = list(experiments_dir.iterdir())
-    experiment_dirs = list(f for f in experiment_dirs if has_subdir(f, "results"))
+    experiment_dirs = list(f for f in experiment_dirs if has_nonempty_subdir(f, "results"))
     experiment_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     experiment_dirs = experiment_dirs[:limit] if limit is not None else experiment_dirs
-    named_dirs = list((f.name, f) for f in experiment_dirs)
+    named_dirs = list((f"{f.name} ({n_children(f/"results")})", f) for f in experiment_dirs)
 
     experiment_dir = picker(named_dirs)
     results_dir = experiment_dir / "results"
