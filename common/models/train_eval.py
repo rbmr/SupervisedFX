@@ -23,7 +23,8 @@ def train_test_analyse(train_env: ForexEnv,
                        experiment_name: str,
                        train_episodes: int = 10,
                        eval_episodes: int = 1,
-                       checkpoints: bool = False
+                       checkpoints: bool = False,
+                       tensorboard_logging: bool = False
                        ) -> None:
     """
     Train the model on the training DataFrame, test it on the test DataFrame, and export the results.
@@ -44,6 +45,10 @@ def train_test_analyse(train_env: ForexEnv,
         raise ValueError(f"Model must be an instance of BaseAlgorithm, got {type(model)}")
 
     # TRAINING THE MODEL
+
+    # set tensorboard logging if enabled
+    if tensorboard_logging:
+        model.tensorboard_log = str(experiment_path / "tensorboard_logs")
 
     callbacks = []
     if checkpoints:
