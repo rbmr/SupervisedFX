@@ -77,6 +77,16 @@ def calculate_historic_lookback(data: np.ndarray, index: int, lookback: int, fun
     # Combine current and historic features
     return np.concatenate((historic_features.flatten(), current_feature))
 
+def calculate_current_exposure(data: np.ndarray, index: int) -> NDArray[np.float32]:
+    """Calculates the current exposure as a value between -1 and 1."""
+    equity = data[index, AgentDataCol.equity_close]
+    cash = data[index, AgentDataCol.cash]
+    if equity <= 0:
+        exposure = 0.0
+    else:
+        exposure = (equity - cash) / equity
+    return np.array([exposure,], dtype=np.float32)
+
 def calculate_cash_percentage(data: np.ndarray, index) -> NDArray[np.float32]:
     """
     Calculate the cash to shares ratio.
