@@ -82,16 +82,26 @@ def adx(df: pd.DataFrame, window: int = 14):
     low = df['low_bid']
     close = df['close_bid']
 
-    tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
+    # True Range
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     atr = tr.rolling(window=window).mean()
 
-    plus_dm = np.where((high.diff() > low.diff()) & (high.diff() > 0), high.diff(), 0)
-    minus_dm = np.where((low.diff() > high.diff()) & (low.diff() > 0), low.diff(), 0)
+    # Directional Movement
+    up_move = high.diff()
+    down_move = low.diff()
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0), index=df.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0), index=df.index)
 
     plus_di = 100 * (plus_dm.rolling(window=window).sum() / atr)
     minus_di = 100 * (minus_dm.rolling(window=window).sum() / atr)
 
-    df['adx'] = 100 * (abs(plus_di - minus_di) / (plus_di + minus_di)).rolling(window=window).mean()
+    dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di))
+    adx = dx.rolling(window=window).mean()
+
+    df['adx'] = adx
 
 def parabolic_sar(df: pd.DataFrame, acceleration_factor: float = 0.02, max_acceleration: float = 0.2):
     """

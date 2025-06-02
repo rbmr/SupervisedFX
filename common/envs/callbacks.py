@@ -72,7 +72,7 @@ class ActionHistogramCallback(BaseCallback):
         super().__init__(verbose)
         self.env = env
         self.log_freq = log_freq
-        self.bins = 11 if env.n_actions == 0 or env.n_actions > 5 else env.n_actions
+        self.bins = 11 if env.n_actions == 0 or env.n_actions > 5 else env.n_actions * 2 + 1
         self.max_height = 40
 
     def _on_step(self) -> bool:
