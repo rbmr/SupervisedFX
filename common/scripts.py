@@ -13,6 +13,9 @@ from pathlib import Path
 
 from common.constants import MarketDataCol
 
+def has_nonempty_subdir(path: Path, subdir_name: str) -> bool:
+    return has_subdir(path, subdir_name) and not is_empty(path / subdir_name)
+
 def has_subdir(path: Path, subdir_name: str) -> bool:
     """Checks if a path has a subdirectory with some name"""
     return path.is_dir() and (path / subdir_name).is_dir()
@@ -28,6 +31,12 @@ def safe_int(i: str) -> int | None:
         return int(i)
     except ValueError:
         return None
+
+def is_empty(p: Path) -> bool:
+    return n_children(p) == 0
+
+def n_children(p: Path) -> int:
+    return sum(1 for _ in p.iterdir())
 
 def picker(options: list[tuple[str, Any]], default: int | None = 0) -> Any:
     """
