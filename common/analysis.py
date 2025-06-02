@@ -2,7 +2,61 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+
+def calculate_streaks(win_conditions: np.ndarray, lose_conditions: np.ndarray):
+    """Calculate winning and losing streaks using vectorized operations"""
+    assert win_conditions.shape == lose_conditions.shape
+    assert win_conditions.ndim == lose_conditions.ndim == 1
+
+    # Create sequence of wins (1), losses (-1), and neutrals (0)
+    sequence = np.zeros(len(win_conditions))
+    sequence[win_conditions] = 1
+    sequence[lose_conditions] = -1
+
+    # Find streak lengths
+    def get_max_streak(seq, target_value):
+        if len(seq) == 0:
+            return 0
+
+        # Create groups of consecutive values
+        changes = np.diff(np.concatenate(([0], seq, [0])) != target_value)
+        start_indices = np.where(changes)[0][::2]
+        end_indices = np.where(changes)[0][1::2]
+
+        if len(start_indices) == 0:
+            return 0
+
+        streak_lengths = end_indices - start_indices
+        return np.max(streak_lengths) if len(streak_lengths) > 0 else 0
+
+    return get_max_streak(sequence, 1), get_max_streak(sequence, -1)
+
+def calculate_trade_returns(open_signals: np.ndarray, close_signals: np.ndarray, prices: np.ndarray, trade_type: str='long'):
+    """Vectorized calculation of trade returns"""
+    assert trade_type in ('long', 'short')
+    assert open_signals.shape == close_signals.shape == prices.shape
+    assert open_signals.ndim == close_signals.ndim == prices.ndim == 1
+
+    returns = np.zeros(len(prices))
+
+    # Get indices where trades open and close
+    open_indices = np.where(open_signals)[0]
+    close_indices = np.where(close_signals)[0]
+
+    # Match open and close signals
+    for open_idx in open_indices:
+        # Find the next close after this open
+        future_closes = close_indices[close_indices > open_idx]
+        if len(future_closes) > 0:
+            close_idx = future_closes[0]
+            if trade_type == 'long':
+                returns[close_idx] = prices[close_idx] - prices[open_idx]
+            else:  # short
+                returns[close_idx] = prices[open_idx] - prices[close_idx]
+
+    return returns
 
 def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> Dict[str, Any]:
     """
@@ -11,12 +65,18 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
     # Ensure results_path exists
     results_path.mkdir(parents=True, exist_ok=True)
 
-    # plot close prices of market data
-    close_bid_prices = df['info.market_data.close_bid'].values
-    close_ask_prices = df['info.market_data.close_ask'].values
+    # Pre-compute commonly used arrays (avoid repeated DataFrame access)
+    data = df[['info.market_data.close_bid', 'info.market_data.close_ask',
+               'info.agent_data.equity_open', 'info.agent_data.equity_high',
+               'info.agent_data.equity_low', 'info.agent_data.equity_close',
+               'info.agent_data.action']].values
+
+    close_bid, close_ask, equity_open, equity_high, equity_low, equity_close, actions = data.T
+
+    # Plot market data
     plt.figure(figsize=(12, 6))
-    plt.plot(close_bid_prices, label='Close Bid Prices')
-    plt.plot(close_ask_prices, label='Close Ask Prices')
+    plt.plot(close_bid, label='Close Bid Prices')
+    plt.plot(close_ask, label='Close Ask Prices')
     plt.title(f"Close Prices for {name}")
     plt.xlabel('Time Step')
     plt.ylabel('Price')
@@ -24,11 +84,7 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
     plt.savefig(results_path / f"market_data.png")
     plt.close()
 
-    # plote open high low close of equity
-    equity_open = df['info.agent_data.equity_open'].values
-    equity_high = df['info.agent_data.equity_high'].values
-    equity_low = df['info.agent_data.equity_low'].values
-    equity_close = df['info.agent_data.equity_close'].values
+    # Plot equity OHLC
     plt.figure(figsize=(12, 6))
     plt.plot(equity_open, label='Equity Open', color='blue')
     plt.plot(equity_high, label='Equity High', color='green')
@@ -41,116 +97,86 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
     plt.savefig(results_path / f"equity_ohlc.png")
     plt.close()
 
+    # calculate sharpe ratio on the close prices of equity.
+    # Then scale it to be annualized.
+    # Base this annualization factor based on the number of steps in a year.
+    # The timeframe can be anything, and no assumption is made about the time between steps.
+    equity_returns = np.diff(equity_close) / equity_close[:-1]
+    mean_return = np.mean(equity_returns)
+    std_return = np.std(equity_returns, ddof=1)
+    sharpe_ratio = mean_return / std_return
 
-    # calculate sharpe ratio on the close prices of equity. 
-    # Then scale it to be annulaized.
-    # Base this annulaization factor based on the number of steps in a year.
-    # The timefram can be anything, and no assumption is made about the time between steps.
-    equity_returns = df['info.agent_data.equity_close'].pct_change().dropna()
-    mean_return = equity_returns.mean()
-    std_return = equity_returns.std()
-    if std_return == 0:
-        sharpe_ratio = 0.0  # Avoid division by zero
-    else:
-        sharpe_ratio = mean_return / std_return
     # Annualize the Sharpe ratio assuming 252 trading days in a year
     min_date = df['info.market_data.date_gmt'].min()
     max_date = df['info.market_data.date_gmt'].max()
     date_range = pd.to_datetime(max_date) - pd.to_datetime(min_date)
-    amount_years = date_range.days / 365.25  # Use 365.25 to account for leap years
-    if amount_years == 0:
-        sharpe_ratio = 0.0  # Avoid division by zero
-    else:
-        N = equity_returns.shape[0] / amount_years
-        sharpe_ratio = sharpe_ratio * (N ** 0.5)  # Scale Sharpe ratio by sqrt(N)
+    amount_years = date_range.days / 365.25
 
-    # Drawdown plot
-    df['drawdown'] = df['info.agent_data.equity_close'] - df['info.agent_data.equity_close'].cummax()
+    if amount_years > 0:
+        N = equity_returns.shape[0] / amount_years
+        sharpe_ratio = sharpe_ratio * np.sqrt(N)
+
+    # Vectorized drawdown calculation
+    cummax_equity = np.maximum.accumulate(equity_close)
+    drawdown = equity_close - cummax_equity
+    max_drawdown = np.min(drawdown)
+
+    # Plot drawdown
     plt.figure(figsize=(12, 6))
-    plt.plot(df['drawdown'], label='Drawdown', color='purple')
+    plt.plot(drawdown, label='Drawdown', color='purple')
     plt.title(f"Drawdown for {name}")
     plt.xlabel('Time Step')
     plt.ylabel('Drawdown')
     plt.legend()
     plt.savefig(results_path / f"drawdown.png")
     plt.close()
-    max_drawdown = df['drawdown'].min()  # Maximum drawdown is the minimum value of the drawdown series
 
     # profit factor. Calulate the gross profit (all positive returns) and gross loss (all negative returns)
-    df['returns'] = df['info.agent_data.equity_close'].pct_change().fillna(0)
-    gross_profit = df[df['returns'] > 0]['returns'].sum()
-    gross_loss = -df[df['returns'] < 0]['returns'].sum()  # Use negative returns for loss
-    profit_factor = gross_profit / gross_loss if gross_loss != 0 else float('inf')  # Avoid division by zero
+    positive_returns = equity_returns[equity_returns > 0]
+    negative_returns = equity_returns[equity_returns < 0]
+    gross_profit = np.sum(positive_returns)
+    gross_loss = -np.sum(negative_returns)
+    profit_factor = gross_profit / gross_loss if gross_loss != 0 else float('inf')
 
-    # a long trade is opened when the agent_data.action goes from <= 0 to > 0
-    df['open_long'] = (df['info.agent_data.action'] > 0) & (df['info.agent_data.action'].shift(1) <= 0)
-    df['close_long'] = (df['info.agent_data.action'] <= 0) & (df['info.agent_data.action'].shift(1) > 0)
-    # a short trade is opened when the agent_data.action goes from >= 0 to < 0
-    df['open_short'] = (df['info.agent_data.action'] < 0) & (df['info.agent_data.action'].shift(1) >= 0)
-    df['close_short'] = (df['info.agent_data.action'] >= 0) & (df['info.agent_data.action'].shift(1) < 0)
+    # Vectorized trade detection
+    actions_prev = np.roll(actions, 1)
+    actions_prev[0] = 0  # Handle first element
 
-    long_trades_count = df['open_long'].sum()
-    short_trades_count = df['open_short'].sum()
+    # Trade opening/closing conditions
+    open_long = (actions > 0) & (actions_prev <= 0)
+    close_long = (actions <= 0) & (actions_prev > 0)
+    open_short = (actions < 0) & (actions_prev >= 0)
+    close_short = (actions >= 0) & (actions_prev < 0)
+
+    # Count trades
+    long_trades_count = np.sum(open_long)
+    short_trades_count = np.sum(open_short)
     total_trades_count = long_trades_count + short_trades_count
 
     # for close_long, determine the returns since the last open_long
-    df['long_returns'] = 0.0
-    last_open_long_index = None
-    for i in range(len(df)):
-        if df['open_long'].iloc[i]:
-            last_open_long_index = i
-        if last_open_long_index is not None and df['close_long'].iloc[i]:
-            df.at[i, 'long_returns'] = df['info.agent_data.equity_close'].iloc[i] - df['info.agent_data.equity_close'].iloc[last_open_long_index]
-    long_trades_returns = df['long_returns'].sum()
-    # for close_short, determine the returns since the last open_short
-    df['short_returns'] = 0.0
-    last_open_short_index = None
-    for i in range(len(df)):
-        if df['open_short'].iloc[i]:
-            last_open_short_index = i
-        if last_open_short_index is not None and df['close_short'].iloc[i]:
-            df.at[i, 'short_returns'] = df['info.agent_data.equity_close'].iloc[last_open_short_index] - df['info.agent_data.equity_close'].iloc[i]
-    short_trades_returns = df['short_returns'].sum()
-    # Calculate total returns from trades
+    long_returns = calculate_trade_returns(open_long, close_long, equity_close, 'long')
+    short_returns = calculate_trade_returns(open_short, close_short, equity_close, 'short')
+
+    long_trades_returns = np.sum(long_returns)
+    short_trades_returns = np.sum(short_returns)
     total_trades_returns = long_trades_returns + short_trades_returns
 
-    # long winning trades
-    long_winning_trades = df[df['close_long'] & (df['long_returns'] > 0)].shape[0]
-    long_winning_ratio = long_winning_trades / long_trades_count if long_trades_count > 0 else 0.0
-
-    # short winning trades
-    short_winning_trades = df[df['close_short'] & (df['short_returns'] > 0)].shape[0]
-    short_winning_ratio = short_winning_trades / short_trades_count if short_trades_count > 0 else 0.0
-
-    # win rate
+    # Winning trades calculation
+    long_winning_trades = np.sum(close_long & (long_returns > 0))
+    short_winning_trades = np.sum(close_short & (short_returns > 0))
     total_winning_trades = long_winning_trades + short_winning_trades
+
+    long_winning_ratio = long_winning_trades / long_trades_count if long_trades_count > 0 else 0.0
+    short_winning_ratio = short_winning_trades / short_trades_count if short_trades_count > 0 else 0.0
     total_winning_ratio = total_winning_trades / total_trades_count if total_trades_count > 0 else 0.0
 
-    # longest winning streak, defined by close_long or close_short with positive returns
-    df['winning_streak'] = 0
-    current_streak = 0
-    for i in range(len(df)):
-        if (df['close_long'].iloc[i] and df['long_returns'].iloc[i] > 0) or (df['close_short'].iloc[i] and df['short_returns'].iloc[i] > 0):
-            current_streak += 1
-        else:
-            current_streak = 0
-        df.at[i, 'winning_streak'] = current_streak
-    longest_winning_streak = df['winning_streak'].max()
+    # Streaks
+    win_conditions = (close_long & (long_returns > 0)) | (close_short & (short_returns > 0))
+    lose_conditions = (close_long & (long_returns < 0)) | (close_short & (short_returns < 0))
 
-    # longest losing streak, defined by close_long or close_short with negative returns
-    df['losing_streak'] = 0
-    current_streak = 0
-    for i in range(len(df)):
-        if (df['close_long'].iloc[i] and df['long_returns'].iloc[i] < 0) or (df['close_short'].iloc[i] and df['short_returns'].iloc[i] < 0):
-            current_streak += 1
-        else:
-            current_streak = 0
-        df.at[i, 'losing_streak'] = current_streak
-    longest_losing_streak = df['losing_streak'].max()
+    longest_winning_streak, longest_losing_streak = calculate_streaks(win_conditions, lose_conditions)
 
-
-
-
+    # Prepare results
     info = {
         "sharpe_ratio": sharpe_ratio,
         "max_drawdown": max_drawdown,
@@ -169,52 +195,46 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
         "total_winning_ratio": total_winning_ratio,
     }
 
-    table_columns = ['Metric Value']
-    table_data = [
-        ['Sharpe Ratio', sharpe_ratio],
-        ['Max Drawdown', max_drawdown],
-        ['Profit Factor', profit_factor],
-        ['Long Trades Count', long_trades_count],
-        ['Short Trades Count', short_trades_count],
-        ['Total Trades Count', total_trades_count],
-        ['Long Trades Returns', long_trades_returns],
-        ['Short Trades Returns', short_trades_returns],
-        ['Total Trades Returns', total_trades_returns],
-        ['Long Winning Trades', long_winning_trades],
-        ['Long Winning Ratio', long_winning_ratio],
-        ['Short Winning Trades', short_winning_trades],
-        ['Short Winning Ratio', short_winning_ratio],
-        ['Total Winning Trades', total_winning_trades],
-        ['Total Winning Ratio', total_winning_ratio],
-        ['Longest Winning Streak', longest_winning_streak],
-        ['Longest Losing Streak', longest_losing_streak]
+    # Create results table
+    metrics = [
+        ('Sharpe Ratio', sharpe_ratio),
+        ('Max Drawdown', max_drawdown),
+        ('Profit Factor', profit_factor),
+        ('Long Trades Count', long_trades_count),
+        ('Short Trades Count', short_trades_count),
+        ('Total Trades Count', total_trades_count),
+        ('Long Trades Returns', long_trades_returns),
+        ('Short Trades Returns', short_trades_returns),
+        ('Total Trades Returns', total_trades_returns),
+        ('Long Winning Trades', long_winning_trades),
+        ('Long Winning Ratio', long_winning_ratio),
+        ('Short Winning Trades', short_winning_trades),
+        ('Short Winning Ratio', short_winning_ratio),
+        ('Total Winning Trades', total_winning_trades),
+        ('Total Winning Ratio', total_winning_ratio),
+        ('Longest Winning Streak', longest_winning_streak),
+        ('Longest Losing Streak', longest_losing_streak)
     ]
-    row_labels = [table_data[i][0] for i in range(len(table_data))]
-    table_data = [[table_data[i][1]] for i in range(len(table_data))]
+    row_labels, table_data = zip(*metrics)
+    table_data = [[val] for val in table_data]
 
-
-    # output table to file
+    # Create and save table
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.axis('tight')
     ax.axis('off')
-    table = ax.table(cellText=table_data, colLabels=table_columns, rowLabels=row_labels, cellLoc='center', loc='center', colWidths=[0.5])
+    table = ax.table(cellText=table_data, colLabels=['Metric Value'],
+                    rowLabels=row_labels, cellLoc='center', loc='center',
+                    colWidths=[0.5])
     table.scale(1.2, 1.2)
 
-    cells = table.get_celld() # Get all cell objects
+    cells = table.get_celld()
     for (row_idx, col_idx), cell in cells.items():
-        # cell.set_height(0.15) # Set cell height for padding
-
-        # --- Styling for Column Labels (Headers) ---
-        if row_idx == 0 and col_idx >= 0:  # Targets the column header cells
-            cell.set_text_props(weight='bold', color='white') # Makes text bold
+        if row_idx == 0 and col_idx >= 0:
+            cell.set_text_props(weight='bold', color='white')
             cell.set_facecolor('skyblue')
-
-        # --- Styling for Row Labels (Leftmost Column) ---
-        elif col_idx == -1 and row_idx >= 0: # Targets the row label cells
-                                            # (matplotlib uses col_idx == -1 for row headers)
-            cell.set_text_props(weight='bold', color='black') # Makes text bold
+        elif col_idx == -1 and row_idx >= 0:
+            cell.set_text_props(weight='bold', color='black')
             cell.set_facecolor('lightgrey')
-
 
     plt.title(f"Analysis Results for {name}", fontsize=12, y=1.05, weight='bold')
     plt.subplots_adjust(top=0.8)  # Adjust top margin to fit title
@@ -252,12 +272,18 @@ def analyse_finals(final_metrics: List[Dict[str, Any]], results_path: Path, name
     plt.close()
 
     # make a plot of the profit factors
+    baseline = 1
     profit_factors = [metrics['profit_factor'] for metrics in final_metrics]
+    profit_factors = [pf - baseline for pf in profit_factors]
     plt.figure(figsize=(12, 6))
-    plt.bar(range(len(profit_factors)), profit_factors, tick_label=[f"{i + 1}" for i in range(len(profit_factors))])
+    plt.bar(range(len(profit_factors)),
+            profit_factors,
+            tick_label=[f"{i + 1}" for i in range(len(profit_factors))])
     plt.title(f"Profit Factors for {name}")
     plt.xlabel('Model')
     plt.ylabel('Profit Factor')
+    yticks = plt.yticks()[0] # Adjust y ticks back
+    plt.yticks(yticks, [f"{y + baseline:.2f}" for y in yticks])
     plt.savefig(results_path / f"profit_factors.png")
     plt.close()
 
