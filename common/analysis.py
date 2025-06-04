@@ -134,6 +134,17 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
     plt.savefig(results_path / f"drawdown.png")
     plt.close()
 
+    # plot histogram of actions taken, dynamic to the actual values in the dataset
+    unique_actions, counts = np.unique(actions, return_counts=True)
+    plt.figure(figsize=(12, 6))
+    plt.bar(unique_actions, counts, width=0.1)
+    plt.title(f"Actions Histogram for {name}")
+    plt.xlabel('Action Value')
+    plt.ylabel('Count')
+    plt.xticks(unique_actions)
+    plt.savefig(results_path / f"actions_histogram.png")
+    plt.close()
+
     # profit factor. Calulate the gross profit (all positive returns) and gross loss (all negative returns)
     positive_returns = equity_returns[equity_returns > 0]
     negative_returns = equity_returns[equity_returns < 0]
@@ -141,61 +152,72 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
     gross_loss = -np.sum(negative_returns)
     profit_factor = gross_profit / gross_loss if gross_loss != 0 else float('inf')
 
-    # Vectorized trade detection
-    actions_prev = np.roll(actions, 1)
-    actions_prev[0] = 0  # Handle first element
 
-    # Trade opening/closing conditions
-    open_long = (actions > 0) & (actions_prev <= 0)
-    close_long = (actions <= 0) & (actions_prev > 0)
-    open_short = (actions < 0) & (actions_prev >= 0)
-    close_short = (actions >= 0) & (actions_prev < 0)
+    trades_df = df[['info.agent_data.action', 'info.market_data.date_gmt', 'info.agent_data.equity_open','info.agent_data.equity_close']].copy()
+    trades_df['actions_prev'] = trades_df['info.agent_data.action'].shift(1).fillna(0)
+    trades_df['trade_type'] = np.where(trades_df['info.agent_data.action'] > 0, 'long',
+                                       np.where(trades_df['info.agent_data.action'] < 0, 'short', 'none'))
+    # remove none trades
+    trades_df = trades_df[trades_df['trade_type'] != 'none'].reset_index(drop=True)
 
-    # Count trades
-    long_trades_count = np.sum(open_long)
-    short_trades_count = np.sum(open_short)
-    total_trades_count = long_trades_count + short_trades_count
+    # group adjacent trades of the same type, and calculate beginning data, end data, begin equity, end equity
+    trades_df['group'] = (trades_df['trade_type'] != trades_df['trade_type'].shift()).cumsum()
+    trades_df = trades_df.groupby(['group', 'trade_type']).agg({
+        'info.market_data.date_gmt': ['first', 'last'],
+        'info.agent_data.equity_open': 'first',
+        'info.agent_data.equity_close': 'last',
+        'info.agent_data.action': ['first', 'last']
+    }).reset_index()
+    
+    new_column_names = []
+    for col in trades_df.columns.values:
+        if isinstance(col, tuple):
+            new_column_names.append('_'.join(col).strip('_'))
+        else:
+            new_column_names.append(str(col)) # Keep original name for non-tuple columns
+    trades_df.columns = new_column_names
 
-    # for close_long, determine the returns since the last open_long
-    long_returns = calculate_trade_returns(open_long, close_long, equity_close, 'long')
-    short_returns = calculate_trade_returns(open_short, close_short, equity_close, 'short')
+    trades_df.rename(columns={
+        'info.market_data.date_gmt_first': 'trade_start_date',
+        'info.market_data.date_gmt_last': 'trade_end_date',
+        'info.agent_data.equity_open_first': 'trade_begin_equity',
+        'info.agent_data.equity_close_last': 'trade_end_equity',
+        'info.agent_data.action_first': 'trade_begin_action',
+        'info.agent_data.action_last': 'trade_end_action'
+    }, inplace=True)
 
-    long_trades_returns = np.sum(long_returns)
-    short_trades_returns = np.sum(short_returns)
-    total_trades_returns = long_trades_returns + short_trades_returns
+    # Calculate trade returns
+    trades_df['trade_return'] = trades_df['trade_end_equity'] - trades_df['trade_begin_equity']
+    trades_df['trade_return_pct'] = trades_df['trade_return'] / trades_df['trade_begin_equity']
+    trades_df['trade_duration_hours'] = (
+        pd.to_datetime(trades_df['trade_end_date']) - pd.to_datetime(trades_df['trade_start_date'])
+    ).dt.total_seconds() / 3600  # Convert to hours
 
-    # Winning trades calculation
-    long_winning_trades = np.sum(close_long & (long_returns > 0))
-    short_winning_trades = np.sum(close_short & (short_returns > 0))
-    total_winning_trades = long_winning_trades + short_winning_trades
 
-    long_winning_ratio = long_winning_trades / long_trades_count if long_trades_count > 0 else 0.0
-    short_winning_ratio = short_winning_trades / short_trades_count if short_trades_count > 0 else 0.0
-    total_winning_ratio = total_winning_trades / total_trades_count if total_trades_count > 0 else 0.0
+    # calculate streaks of winning and losing trades
+    trades_df['trade_winning'] = trades_df['trade_return'] > 0
+    trades_df['trade_losing'] = trades_df['trade_return'] < 0
+    trades_df['trade_winning_streak'] = trades_df['trade_winning'].astype(int).groupby((trades_df['trade_winning'] != trades_df['trade_winning'].shift()).cumsum()).cumsum()
+    trades_df['trade_losing_streak'] = trades_df['trade_losing'].astype(int).groupby((trades_df['trade_losing'] != trades_df['trade_losing'].shift()).cumsum()).cumsum()    
 
-    # Streaks
-    win_conditions = (close_long & (long_returns > 0)) | (close_short & (short_returns > 0))
-    lose_conditions = (close_long & (long_returns < 0)) | (close_short & (short_returns < 0))
-
-    longest_winning_streak, longest_losing_streak = calculate_streaks(win_conditions, lose_conditions)
 
     # Prepare results
     info = {
         "sharpe_ratio": sharpe_ratio,
         "max_drawdown": max_drawdown,
         "profit_factor": profit_factor,
-        "long_trades_count": long_trades_count,
-        "short_trades_count": short_trades_count,
-        "total_trades_count": total_trades_count,
-        "long_trades_returns": long_trades_returns,
-        "short_trades_returns": short_trades_returns,
-        "total_trades_returns": total_trades_returns,
-        "long_winning_trades": long_winning_trades,
-        "long_winning_ratio": long_winning_ratio,
-        "short_winning_trades": short_winning_trades,
-        "short_winning_ratio": short_winning_ratio,
-        "total_winning_trades": total_winning_trades,
-        "total_winning_ratio": total_winning_ratio,
+
+        # Trades Summary
+        "total_trades": trades_df.shape[0],
+        "long_trades_count": trades_df[trades_df['trade_type'] == 'long'].shape[0],
+        "short_trades_count": trades_df[trades_df['trade_type'] == 'short'].shape[0],
+        "total_trades_returns": trades_df['trade_return'].sum(),
+        "average_trade_return": trades_df['trade_return'].mean(),
+        "average_trade_return_pct": trades_df['trade_return_pct'].mean(),
+        "average_trade_duration_hours": trades_df['trade_duration_hours'].mean(),
+        "max_winning_streak": trades_df['trade_winning_streak'].max(),
+        "max_losing_streak": trades_df['trade_losing_streak'].max(),
+        "total_winning_rate":  trades_df[trades_df['trade_winning']].shape[0] / trades_df.shape[0] if trades_df.shape[0] > 0 else 0,
     }
 
     # Create results table
@@ -203,20 +225,17 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
         ('Sharpe Ratio', sharpe_ratio),
         ('Max Drawdown', max_drawdown),
         ('Profit Factor', profit_factor),
-        ('Long Trades Count', long_trades_count),
-        ('Short Trades Count', short_trades_count),
-        ('Total Trades Count', total_trades_count),
-        ('Long Trades Returns', long_trades_returns),
-        ('Short Trades Returns', short_trades_returns),
-        ('Total Trades Returns', total_trades_returns),
-        ('Long Winning Trades', long_winning_trades),
-        ('Long Winning Ratio', long_winning_ratio),
-        ('Short Winning Trades', short_winning_trades),
-        ('Short Winning Ratio', short_winning_ratio),
-        ('Total Winning Trades', total_winning_trades),
-        ('Total Winning Ratio', total_winning_ratio),
-        ('Longest Winning Streak', longest_winning_streak),
-        ('Longest Losing Streak', longest_losing_streak)
+
+        ('Total Trades', info['total_trades']),
+        ('Long Trades Count', info['long_trades_count']),
+        ('Short Trades Count', info['short_trades_count']),
+        ('Total Trades Returns', info['total_trades_returns']),
+        ('Average Trade Return', info['average_trade_return']),
+        ('Average Trade Return (%)', info['average_trade_return_pct']),
+        ('Average Trade Duration (hours)', info['average_trade_duration_hours']),
+        ('Max Winning Streak', info['max_winning_streak']),
+        ('Max Losing Streak', info['max_losing_streak']),
+        ('Total Winning Rate (%)', info['total_winning_rate'] * 100),
     ]
     row_labels, table_data = zip(*metrics)
     table_data = [[val] for val in table_data]

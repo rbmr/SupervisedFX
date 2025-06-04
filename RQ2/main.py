@@ -7,6 +7,7 @@ from torch.nn import ReLU, LeakyReLU
 from common.scripts import set_seed
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
+from sb3_contrib import RecurrentPPO
 
 from common.envs.forex_env import ForexEnv
 from common.data.feature_engineer import *
@@ -27,6 +28,8 @@ def get_feature_engineer() -> FeatureEngineer:
     Create a feature engineer object with the required features.
     """
     feature_engineer = FeatureEngineer()
+
+    feature_engineer.add(sinusoidal_wave_24hr)
     
     # Add basic features
     # FEATURE 0 - CLOSE_PCT_CHANGE - 12 features
@@ -114,7 +117,7 @@ def get_feature_engineer() -> FeatureEngineer:
 
     return feature_engineer
 
-if __name__ == '__main__':
+def main():
     
     set_seed(42)
    
@@ -153,7 +156,7 @@ if __name__ == '__main__':
         custom_reward_function=risk_adjusted_return)
     logging.info("Environments created.")
 
-    policy_kwargs = dict(net_arch=[140,100,50], optimizer_class=optim.Adam, activation_fn=LeakyReLU)
+    policy_kwargs = dict(net_arch=[128,64], optimizer_class=optim.Adam, activation_fn=LeakyReLU)
     temp_env = DummyVecEnv([lambda: train_env])
     model = DQN(
         policy="MlpPolicy",
@@ -174,10 +177,80 @@ if __name__ == '__main__':
         seed=42,
     )
 
-    q_net = model.policy.q_net
-    # print layer names and shapes
-    for name, param in q_net.named_parameters():
-        logging.info(f"Layer: {name}, Shape: {param.shape}")
+    logging.info("Model created.")
+    logging.info("Model architecture:" + str(model.policy))
+
+
+    # q_net = model.policy.q_net
+    # # print layer names and shapes
+    # for name, param in q_net.named_parameters():
+    #     logging.info(f"Layer: {name}, Shape: {param.shape}")
+
+    # policy_kwargs = dict(
+    #     # LSTM specific arguments
+    #     lstm_hidden_size=128,        # Number of units in the LSTM layer
+    #     n_lstm_layers=2,             # Number of LSTM layers
+    #     shared_lstm=False,            # Actor and Critic share the same LSTM
+    #     enable_critic_lstm=True,     # Critic network will use an LSTM
+    #     # Network architecture for MLP parts (before/after LSTM)
+    #     # This defines layers *other than* the LSTM layers themselves.
+    #     # The structure is [feature_extraction_part, dict(pi=[actor_head_layers], vf=[value_head_layers])]
+    #     # If only a list like [64, 64] is given, these are layers shared by actor and critic *after* the LSTM
+    #     # If you want MLP layers *before* the LSTM (as a feature extractor for each time step),
+    #     # you'd typically create a custom feature extractor or ensure your observation space is already processed.
+    #     # MlpLstmPolicy has its own internal MLP feature extractor before the LSTM.
+    #     # `net_arch` here usually refers to layers *after* the LSTM.
+    #     net_arch=dict(pi=[64, 32], vf=[64, 32]), # Layers for policy and value function heads AFTER LSTM output
+    #     # Activation function for the MLP layers
+    #     activation_fn=LeakyReLU, # Other options: torch.nn.Tanh, torch.nn.LeakyReLU etc.
+    #     # Orthogonal initialization can sometimes help
+    #     ortho_init=True
+    # )
+
+    # # --- 3. Instantiate the RecurrentPPO Model ---
+    # # You need to install sb3-contrib: pip install sb3-contrib
+    # model = RecurrentPPO(
+    #     "MlpLstmPolicy",             # Policy type: Multi-layer Perceptron with LSTM
+    #     temp_env,                         # Your vectorized Forex environment
+    #     policy_kwargs=policy_kwargs, # Custom network architecture and LSTM settings
+
+    #     # --- PPO Hyperparameters ---
+    #     learning_rate=0.0003,        # Learning rate for the optimizer (Adam by default)
+    #                                 # Can be a schedule: `lambda f: f * 2.5e-4`
+    #     n_steps=128,                 # Number of steps to run for each environment per update
+    #                                 # This is the unroll length for the LSTM for each update.
+    #                                 # For RecurrentPPO this is n_steps per environment before update.
+    #     batch_size=128,              # Minibatch size for PPO updates.
+    #                                 # Must be <= n_steps * n_envs.
+    #                                 # For RecurrentPPO, this is the number of trajectories (sequences)
+    #                                 # sampled from the rollout buffer for each gradient step.
+    #                                 # So if n_steps=128, n_envs=1, batch_size=128 means 1 sequence.
+    #                                 # If n_steps=128, n_envs=4, batch_size=256 means 2 sequences of length 128.
+    #                                 # Make sure n_steps * n_envs is a multiple of batch_size.
+    #     n_epochs=10,                 # Number of epochs when optimizing the surrogate loss
+    #     gamma=0.7,                  # Discount factor for future rewards
+    #     gae_lambda=0.95,             # Factor for trade-off of bias vs variance for Generalized Advantage Estimator
+    #     clip_range=0.2,              # Clipping parameter for PPO, can be a schedule
+    #     clip_range_vf=None,          # Clipping parameter for the value function, can be a schedule (None = no clipping)
+    #     normalize_advantage=True,    # Whether to normalize the advantages
+    #     ent_coef=0.0,                # Entropy coefficient for the loss calculation (encourages exploration)
+    #     vf_coef=0.5,                 # Value function coefficient for the loss calculation
+    #     max_grad_norm=0.5,           # Maximum value for gradient clipping
+    #     use_sde=False,               # Whether to use State Dependent Exploration (SDE)
+    #                                 # SDE usually for continuous actions, not typically used with LSTM directly.
+    #     sde_sample_freq=-1,          # Sample a new noise matrix every `sde_sample_freq` steps when using SDE
+    #                                 # (Set to -1 to sample at each step)
+    #     target_kl=None,              # Limit the KL divergence between updates, (e.g., 0.01 or 0.05). If None, no KL constraint.
+
+    #     # --- Other Parameters ---
+    #     verbose=0,                   # Verbosity level: 0 for no output, 1 for info messages, 2 for debug messages
+    #     seed=None,                   # Seed for the random number generator
+    #     device="auto",               # Device (cpu, cuda, ...) on which the code should run
+    #     _init_setup_model=True       # Whether to build the network at creation
+    # )
+
+    # print("\nRecurrentPPO Model Architecture:")
+    # print(model.policy)
 
     logging.info("Running train test analyze...")
     train_test_analyse(
@@ -186,10 +259,13 @@ if __name__ == '__main__':
         model=model,
         base_folder_path=RQ2_DIR,
         experiment_group_name="hyperparameters",
-        experiment_name="experiment_test",
-        train_episodes=1,
+        experiment_name="experiment_with_time_sinus",
+        train_episodes=30,
         eval_episodes=1,
         checkpoints=True,
         tensorboard_logging=True
     )
     
+
+if __name__ == '__main__':
+    main()

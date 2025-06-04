@@ -37,6 +37,20 @@ class FeatureEngineer:
             df.drop(columns=original_columns, inplace=True, errors='ignore')
         
         return df
+    
+
+# TIME Indicators
+def sinusoidal_wave_24hr(df: pd.DataFrame):
+    # check if 'date_gmt' column exists and is pd.Timestamp
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    if not pd.api.types.is_datetime64_any_dtype(df['date_gmt']):
+        raise ValueError("'date_gmt' column must be of datetime type.")
+    
+    # Calculate the time in seconds since the start of the day
+    seconds_since_midnight = (df['date_gmt'] - df['date_gmt'].dt.normalize()).dt.total_seconds()
+    # Calculate the sinusoidal wave values
+    df['sinusoidal_wave_24hr'] = np.sin(2 * np.pi * seconds_since_midnight / (24 * 3600))
 
 # TREND Indicators
 
