@@ -186,8 +186,8 @@ if __name__ == '__main__':
         model=model,
         base_folder_path=RQ2_DIR,
         experiment_group_name="hyperparameters",
-        experiment_name="experiment_only_positive_actions",
-        train_episodes=100,
+        experiment_name="experiment_test",
+        train_episodes=1,
         eval_episodes=1,
         checkpoints=True,
         tensorboard_logging=True

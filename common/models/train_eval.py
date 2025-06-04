@@ -49,6 +49,7 @@ def train_test_analyse(train_env: ForexEnv,
     # set tensorboard logging if enabled
     if tensorboard_logging:
         model.tensorboard_log = str(experiment_path / "tensorboard_logs")
+        
 
     callbacks = []
     if checkpoints:
@@ -215,11 +216,11 @@ def analyse_evaluation_results(models_dir: Path,
                 logging.warning(f"Results file {env_results_file} is empty, skipping.")
                 continue
             logging.info(f"Analyzing results for model: {model_name} on environment: {eval_env_name}")
-            metrics = analyse_individual_run(df, env_results_dir, name=model_name + model_name_suffix)
+            metrics = analyse_individual_run(df, env_results_dir, name=model_name + model_name_suffix + f"[{eval_env_name}]")
             eval_envs_model_metrics[eval_env_name].append(metrics)
     
     for eval_env_name, metrics in eval_envs_model_metrics.items():
-        analyse_finals(metrics, results_dir / eval_env_name, name="eval_results_" + eval_env_name)
+        analyse_finals(metrics, results_dir / eval_env_name, name="episodic_results" + model_name_suffix + f"[{eval_env_name}]")
 
     logging.info("Analysis complete.")
 
