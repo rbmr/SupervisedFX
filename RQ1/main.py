@@ -2,13 +2,27 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+import torch as th
+from stable_baselines3 import A2C
+from stable_baselines3.common.policies import ActorCriticPolicy
+from torch import nn
+
+from common.data.data import ForexCandleData, Timeframe
+from common.data.stepwise_feature_engineer import (StepwiseFeatureEngineer,
+                                                   calculate_current_exposure)
+from common.envs.callbacks import (ActionHistogramCallback, CoolStatsCallback,
+                                   SaveOnEpisodeEndCallback)
+from common.envs.forex_env import ForexEnv, log_equity_diff
+from common.models.train_eval import (analyse_results, evaluate_models,
+                                      train_model)
+from common.models.utils import save_model_with_metadata
+from common.scripts import has_nonempty_subdir, n_children, picker
+from RQ1.constants import EXPERIMENT_NAME_FORMAT, EXPERIMENTS_DIR
+from RQ1.some_feature_engineers import get_feature_engineer_chatgpt
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def get_environments():
-    from common.data.data import ForexCandleData, Timeframe
-    from RQ1.some_feature_engineers import get_feature_engineer_chatgpt
-    from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_current_exposure
-    from common.envs.forex_env import ForexEnv, log_equity_diff
+def get_environments(shuffled = False):
 
     logging.info("Loading market data...")
     forex_candle_data = ForexCandleData.load(
@@ -36,43 +50,56 @@ def get_environments():
         transaction_cost_pct=0.0,
         n_actions=1,
         custom_reward_function=log_equity_diff,
+        shuffled=shuffled,
     )
     logging.info("Environments created.")
 
     return train_env, eval_env
 
-def train():
-    from stable_baselines3 import PPO
-    from RQ1.constants import EXPERIMENTS_DIR, EXPERIMENT_NAME_FORMAT
-    from common.constants import SEED, DEVICE
-    from common.envs.callbacks import SaveOnEpisodeEndCallback, ActionHistogramCallback, CoolStatsCallback
-    from common.models.train_eval import train_model
-    from common.models.utils import save_model_with_metadata
-    from torch.optim import AdamW
+class CustomLSTMActorCriticPolicy(ActorCriticPolicy):
+    def __init__(self, observation_space, action_space, lr_schedule, *args, **kwargs):
+        super(CustomLSTMActorCriticPolicy, self).__init__(
+            observation_space,
+            action_space,
+            lr_schedule,
+            *args,
+            **kwargs,
+        )
 
-    train_env, _ = get_environments()
+def get_model(env: ForexEnv):
+
+    learning_rate_actor = 0.0001
+    learning_rate_critic = 0.001
+    gamma = 0.3
+    batch_size = 128
+
+    policy_kwargs = dict(
+        net_arch=dict(pi=[64, 32], vf=[64, 32]),  # Actor (pi) and Critic (vf) networks
+        activation_fn=nn.LeakyReLU,
+        optimizer_class=th.optim.Adam,
+    )
+
+    model = A2C(
+        policy=CustomLSTMActorCriticPolicy,
+        env=env,  # Use the actual train_env you have
+        learning_rate=learning_rate_critic,
+        n_steps=batch_size,
+        gamma=gamma,
+        verbose=1,
+        policy_kwargs=policy_kwargs,
+        use_rms_prop=False,
+        device="cpu"
+    )
+
+    return model
+
+def train():
+
+    train_env, _ = get_environments(shuffled=True)
 
     logging.info("Creating model...")
 
-    model = PPO(
-        policy="MlpPolicy",
-        env=train_env,
-        learning_rate=3e-4,
-        n_steps=2048,
-        batch_size=64,
-        n_epochs=10,
-        gamma=0.99,
-        gae_lambda=0.95,
-        ent_coef=0.05,
-        vf_coef=0.5,
-        max_grad_norm=0.5,
-        policy_kwargs=dict(
-            net_arch=[dict(pi=[64, 64], vf=[64, 64])],
-        ),
-        seed=SEED,
-        verbose=1,
-        device=DEVICE
-    )
+    model = get_model(train_env)
 
     logging.info("Model created.")
 
@@ -88,8 +115,6 @@ def train():
     save_model_with_metadata(model, models_dir / "model_final.zip")
 
 def evaluate(experiments_dir, limit = 10):
-    from common.models.train_eval import evaluate_models
-    from common.scripts import picker, has_nonempty_subdir, n_children
 
     experiment_dirs: list[Path] = list(experiments_dir.iterdir())
     experiment_dirs = list(f for f in experiment_dirs if has_nonempty_subdir(f, "models"))
@@ -102,7 +127,7 @@ def evaluate(experiments_dir, limit = 10):
     results_dir = experiment_dir / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    train_env, eval_env = get_environments()
+    train_env, eval_env = get_environments(shuffled=False)
     eval_envs = {
         "train": train_env,
         "eval": eval_env,
@@ -111,8 +136,6 @@ def evaluate(experiments_dir, limit = 10):
     evaluate_models(models_dir, results_dir, eval_envs, eval_episodes=1)
 
 def analyze(experiments_dir, limit = 10):
-    from common.scripts import picker, has_nonempty_subdir, n_children
-    from common.models.train_eval import analyse_results
 
     experiment_dirs: list[Path] = list(experiments_dir.iterdir())
     experiment_dirs = list(f for f in experiment_dirs if has_nonempty_subdir(f, "results"))
@@ -126,8 +149,6 @@ def analyze(experiments_dir, limit = 10):
     analyse_results(results_dir)
 
 if __name__ == "__main__":
-    from RQ1.constants import EXPERIMENTS_DIR
-    from common.scripts import picker
 
     options = [
         ("train", train),

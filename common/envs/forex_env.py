@@ -10,6 +10,7 @@ from common.constants import *
 from common.data.data import ForexCandleData
 from common.data.feature_engineer import FeatureEngineer
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
+from common.data.utils import shuffle
 from common.scripts import find_first_row_with_nan, find_first_row_without_nan, calculate_ohlc_equity, calculate_equity
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -23,7 +24,8 @@ class ForexEnv(gym.Env):
                  initial_capital: float = 10000.0,
                  transaction_cost_pct: float = 0.0,
                  n_actions: int = 1,
-                 custom_reward_function: Callable[['ForexEnv'], float] | None = None
+                 custom_reward_function: Callable[['ForexEnv'], float] | None = None,
+                 shuffled: bool = False,
                  ):
         super(ForexEnv, self).__init__()
 
@@ -94,6 +96,10 @@ class ForexEnv(gym.Env):
         assert self.market_features.shape == (self.total_steps, len(self.market_feature_names))
         assert self.agent_data.shape == (self.total_steps, len(AgentDataCol))
 
+        # Shuffle data if required
+        if shuffled:
+            self.market_data, self.market_features = shuffle(self.market_data, self.market_features)
+
         # Action space
         self.n_actions = n_actions
         if self.n_actions == 0:
@@ -119,6 +125,7 @@ class ForexEnv(gym.Env):
         transaction_cost_pct: float = 0.0,
         n_actions: int = 1,
         custom_reward_function: Optional[Callable[['ForexEnv'], float]] = None,
+        shuffled = False,
     ) -> tuple['ForexEnv', 'ForexEnv']:
         """
         Creates training and evaluation environments from ForexCandleData and FeatureEngineers.
@@ -155,7 +162,8 @@ class ForexEnv(gym.Env):
             initial_capital=initial_capital,
             transaction_cost_pct=transaction_cost_pct,
             n_actions=n_actions,
-            custom_reward_function=custom_reward_function
+            custom_reward_function=custom_reward_function,
+            shuffled=shuffled,
         )
 
         # Create evaluation environment
@@ -166,7 +174,8 @@ class ForexEnv(gym.Env):
             initial_capital=initial_capital,
             transaction_cost_pct=transaction_cost_pct,
             n_actions=n_actions,
-            custom_reward_function=custom_reward_function
+            custom_reward_function=custom_reward_function,
+            shuffled=shuffled,
         )
 
         return train_env, eval_env
