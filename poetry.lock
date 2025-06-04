@@ -733,18 +733,6 @@ testing = ["covdefaults (>=2.3)", "coverage (>=7.6.10)", "diff-cover (>=9.2.1)",
 typing = ["typing-extensions (>=4.12.2) ; python_version < \"3.11\""]
 
 [[package]]
-name = "finrl"
-version = "0.3.7"
-description = "FinRL: Financial Reinforcement Learning Framework."
-optional = false
-python-versions = ">=3.7"
-groups = ["main"]
-files = [
-    {file = "FinRL-0.3.7-py3-none-any.whl", hash = "sha256:ef16a51e2fc7d71fa73efdf565c6e91ace5b9a391ff1bdda4ccd82de2e11d8fa"},
-    {file = "FinRL-0.3.7.tar.gz", hash = "sha256:46c12ed377e484beb7617e33db1ced6e2486df73d197c7f1a2833a1c00d9169f"},
-]
-
-[[package]]
 name = "flatbuffers"
 version = "25.2.10"
 description = "The FlatBuffers serialization format for Python"
@@ -4498,4 +4486,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "4af46034c8f2094116f77858c120b3cf113f5e724f80c82e924eb7fffa0d3f09"
+content-hash = "305b340464fa1574cb4e571e6f0f1f5018e5b44c4e1894691ca6b245a311262a"
