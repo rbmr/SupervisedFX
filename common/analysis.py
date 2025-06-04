@@ -104,7 +104,10 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
     equity_returns = np.diff(equity_close) / equity_close[:-1]
     mean_return = np.mean(equity_returns)
     std_return = np.std(equity_returns, ddof=1)
-    sharpe_ratio = mean_return / std_return
+    if std_return > 0:
+        sharpe_ratio = mean_return / std_return
+    else:
+        sharpe_ratio = 0.0
 
     # Annualize the Sharpe ratio assuming 252 trading days in a year
     min_date = df['info.market_data.date_gmt'].min()
