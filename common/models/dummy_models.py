@@ -1,4 +1,4 @@
-from typing import Any, Callable
+from typing import Any, Callable, Union
 
 import numpy as np
 import torch as th
@@ -6,21 +6,25 @@ from gymnasium import spaces, Space
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.policies import BasePolicy
 
+def constant_fn(x: Any) -> Callable[[Any], Any]:
+    """Creates a single argument function that returns a constant value."""
+    return lambda _: x
+
 class DummyModel(BaseAlgorithm):
     """
     Algorithm that is only capable of providing predictions.
-    Predictions are made by returning a constant value, or calling a function without arguments.
+    Predictions are made by passing the observation to a function.
     """
 
-    def __init__(self, prediction: Any | Callable[[], Any]):
+    def __init__(self, pred_fn: Callable[[np.ndarray], Any]):
         # Just passing standard parameters, these are not actually used.
         super().__init__(policy="MlpPolicy", env=None, learning_rate=lambda _: 0)
         # Set function used to generate predictions
-        self._pred = prediction if callable(prediction) else lambda: prediction
+        self._pred_fn = pred_fn
 
     # Overrides
-    def predict(self, *args, **kwargs) -> tuple[np.ndarray, None]:
-        return np.array([self._pred()]), None
+    def predict(self, obs: Union[np.ndarray, dict[str, np.ndarray]], *args, **kwargs) -> tuple[np.ndarray, None]:
+        return np.array([self._pred_fn(obs)]), None
 
     def _setup_model(self, *args, **kwargs) -> None:
         pass
@@ -46,28 +50,29 @@ class DummyModel(BaseAlgorithm):
     def set_parameters(self, *args, **kwargs):
         raise NotImplementedError("DummyModel has no parameters.")
 
-def get_short_model(action_space: Space) -> DummyModel:
+def short_model(action_space: Space) -> DummyModel:
     if isinstance(action_space, spaces.Discrete):
-        return DummyModel(0)
+        return DummyModel(constant_fn(0))
     if isinstance(action_space, spaces.Box):
-        return DummyModel(action_space.low)
+        return DummyModel(constant_fn(action_space.low))
     raise TypeError("Invalid action space.")
 
-def get_long_model(action_space: Space) -> DummyModel:
+def long_model(action_space: Space) -> DummyModel:
     if isinstance(action_space, spaces.Discrete):
-        return DummyModel(action_space.n - 1)
+        return DummyModel(constant_fn(action_space.n - 1))
     if isinstance(action_space, spaces.Box):
-        return DummyModel(action_space.high)
+        return DummyModel(constant_fn(action_space.high))
     raise TypeError("Invalid action space.")
 
-def get_hold_model(action_space: Space) -> DummyModel:
+def hold_model(action_space: Space) -> DummyModel:
     if isinstance(action_space, spaces.Discrete):
-        return DummyModel(action_space.n // 2)
+        return DummyModel(constant_fn(action_space.n // 2))
     if isinstance(action_space, spaces.Box):
         middle = (action_space.high - action_space.low) / 2
-        return DummyModel(middle)
+        return DummyModel(constant_fn(middle))
     raise TypeError("Invalid action space.")
 
-def get_random_model(action_space: Space) -> DummyModel:
-    return DummyModel(lambda: action_space.sample())
+def random_model(action_space: Space) -> DummyModel:
+    return DummyModel(lambda _: action_space.sample())
 
+DUMMY_MODELS: list[Callable[[Space], DummyModel]] = [short_model, long_model, hold_model, random_model]
