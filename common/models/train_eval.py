@@ -1,6 +1,8 @@
 import logging
+from functools import partial
+from multiprocessing import Pool, current_process, Manager, Process, Lock
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 from stable_baselines3.common.base_class import BaseAlgorithm
@@ -11,7 +13,7 @@ from tqdm import tqdm
 from common.envs.callbacks import SaveOnEpisodeEndCallback
 from common.envs.forex_env import ForexEnv
 from common.scripts import set_seed
-from common.models.utils import load_models, save_model_with_metadata
+from common.models.utils import load_models, save_model_with_metadata, load_model_with_metadata
 from common.analysis import analyse_individual_run, analyse_finals
 
 
@@ -97,40 +99,103 @@ def train_model(model: BaseAlgorithm,
 
     logging.info("Training complete.")
 
+def evaluate_model(model_zip: Path,
+                   results_dir: Path,
+                   eval_envs: dict[str, ForexEnv],
+                   eval_episodes: int = 1,
+                   force_eval: bool = False,
+                   progress_bar: bool = False) -> None:
+    """
+    Evaluates a model on a set of ForexEnvs for a given number of episodes.
+    Saves results in results_dir.
+    """
+    if not model_zip.is_file():
+        raise ValueError("model_zip doesnt exist.")
+    if not model_zip.suffix == ".zip":
+        raise ValueError("model_zip is not a zip file.")
+
+    model_name = model_zip.stem
+    model = load_model_with_metadata(model_zip)
+    model_results_dir = results_dir / model_name
+    if not force_eval and model_results_dir.exists():
+        logging.info(f"{model_name} has already been evaluated, skipping...")
+        return
+
+    for eval_env_name, eval_env in eval_envs.items():
+        env_results_dir = model_results_dir / eval_env_name
+        env_results_file = env_results_dir / "data.csv"
+        eval_episode_length = eval_env.total_steps
+
+        logging.info(f"Running model ({model_name}) on environment ({eval_env_name}) for {eval_episodes} episodes...")
+
+        run_model(model=model,
+                  env=eval_env,
+                  data_path=env_results_file,
+                  total_steps=eval_episodes * eval_episode_length,
+                  deterministic=True,
+                  progress_bar=progress_bar)
+
+class ModelQueue:
+    def __init__(self, models_dir: Path, seen, lock: Lock):
+        if not models_dir.is_dir():
+            raise ValueError(f"{models_dir} is not a directory")
+        self.models_dir = models_dir
+        self.seen = seen # Shared list
+        self.lock = lock # Shared lock
+
+    def get(self) -> Path | None:
+        with self.lock:
+            models = sorted(self.models_dir.glob("*.zip"), key=lambda p: p.stat().st_mtime)
+            for model_zip in models:
+                if not model_zip.is_file():
+                    continue
+                if model_zip in self.seen:
+                    continue
+                self.seen.append(model_zip)
+                return model_zip
+        return None
+
+def evaluate_worker(queue: ModelQueue, func: Callable):
+    while True:
+        model_path = queue.get()
+        if model_path is None:
+            break
+        func(model_path)
+
 def evaluate_models(models_dir: Path,
                     results_dir: Path,
                     eval_envs: dict[str, ForexEnv],
                     eval_episodes: int = 1,
-                    force_eval: bool = False
-                    ) -> None:
+                    force_eval: bool = False,
+                    num_workers: int = 1) -> None:
     """
     Evaluates each model in a directory on a set of ForexEnvs for a given number of episodes.
     Saves results in results_dir.
     """
     logging.info("Starting evaluation...")
 
-    for model_name, model in load_models(models_dir):
+    progress_bar = num_workers == 1
+    func = partial(
+        evaluate_model,
+        results_dir=results_dir,
+        eval_envs=eval_envs,
+        eval_episodes=eval_episodes,
+        force_eval=force_eval,
+        progress_bar=progress_bar,
+    )
+    manager = Manager()
+    shared_lock = manager.Lock()
+    shared_seen = manager.list()
+    queue = ModelQueue(models_dir, shared_seen, shared_lock)
 
-        model_results_dir = results_dir / model_name
-        if not force_eval and model_results_dir.exists():
-            logging.info(f"{model_name} has already been evaluated, skipping...")
-            continue
+    workers = []
+    for i in range(num_workers):
+        p = Process(target=evaluate_worker, args=(queue, func), name=f"Worker-{i+1}" )
+        p.start()
+        workers.append(p)
 
-        for eval_env_name, eval_env in eval_envs.items():
-
-            env_results_dir = model_results_dir / eval_env_name
-            env_results_file = env_results_dir / "data.csv"
-            eval_episode_length = eval_env.total_steps
-
-            logging.info(f"Running model ({model_name}) on environment ({eval_env_name}) for {eval_episodes} episodes...")
-
-            run_model(model=model,
-                      env=eval_env,
-                      data_path=env_results_file,
-                      total_steps=eval_episodes * eval_episode_length,
-                      deterministic=True,
-                      progress_bar=True
-                      )
+    for p in workers:
+        p.join()
 
     logging.info("Finished evaluation.")
 
