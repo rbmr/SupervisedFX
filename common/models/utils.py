@@ -68,7 +68,7 @@ def load_model_with_metadata(path: Path) -> BaseAlgorithm:
 
     algorithm = metadata.get("algorithm", None)
     if algorithm is None:
-        raise ValueError(f"{metadata} does not contain algorithm metadata")
+        raise ValueError(f"{path} is missing algorithm metadata")
 
     algorithm_class = ALGORITHM_MAP.get(algorithm.upper(), None)
     if algorithm_class is None:
