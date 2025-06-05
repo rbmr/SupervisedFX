@@ -52,6 +52,65 @@ def sinusoidal_wave_24hr(df: pd.DataFrame):
     # Calculate the sinusoidal wave values
     df['sinusoidal_wave_24hr'] = np.sin(2 * np.pi * seconds_since_midnight / (24 * 3600))
 
+def _norm_time_of_day(dt_series: pd.Series):
+    """Converts a time column to a [0,1] range of time of day."""
+    if not pd.api.types.is_datetime64_any_dtype(dt_series):
+        raise ValueError("series must be of datetime type.")
+    return (
+        dt_series.dt.hour * (60 * 60) +
+        dt_series.dt.minute * 60 +
+        dt_series.dt.second +
+        dt_series.dt.microsecond / 1_000_000
+    ) / (60 * 60 * 24)
+
+def _norm_time_of_week(dt_series: pd.Series):
+    """Converts a time column to a [0,1] range of time of week."""
+    if not pd.api.types.is_datetime64_any_dtype(dt_series):
+        raise ValueError("series must be of datetime type.")
+    return (
+        dt_series.dt.weekday * (60 * 60 * 24) +  # days since Monday
+        dt_series.dt.hour * (60 * 60) +
+        dt_series.dt.minute * 60 +
+        dt_series.dt.second +
+        dt_series.dt.microsecond / 1_000_000
+    ) / (7 * 60 * 60 * 24)
+
+def lin_24h(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    df['lin_24h'] = _norm_time_of_day(df['date_gmt'])
+
+def lin_7d(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    df['lin_7d'] = _norm_time_of_week(df['date_gmt'])
+
+def complex_7d(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    ntow = _norm_time_of_week(df['date_gmt'])
+    df['sin_7d'] = np.sin(ntow * np.pi * 2)
+    df['cos_7d'] = np.cos(ntow * np.pi * 2)
+
+def complex_24h(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    ntod = _norm_time_of_day(df['date_gmt'])
+    df['sin_24h'] = np.sin(ntod * np.pi * 2)
+    df['cos_24h'] = np.cos(ntod * np.pi * 2)
+
+def sin_7d(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    ntow = _norm_time_of_week(df['date_gmt'])
+    df['sin_7d'] = np.sin(ntow * np.pi * 2)
+
+def sin_24h(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    ntod = _norm_time_of_day(df['date_gmt'])
+    df['sin_24h'] = np.sin(ntod * np.pi * 2)
+
 # TREND Indicators
 
 def sma(df: pd.DataFrame, window: int, column: str = 'close_bid'):
