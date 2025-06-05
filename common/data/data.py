@@ -33,6 +33,8 @@ class DukascopyDataDownloader:
         Returns:
             pd.DataFrame: A DataFrame containing the tick data, or None if an error occurs.
         """
+        if not data_bytes:
+            return None
         chunk_size = struct.calcsize(fmt)
         data = []
         try:
@@ -242,7 +244,7 @@ class DukascopyDataDownloader:
             print(f"No data retrieved for {symbol} in {year}.")
             return None
 
-        file_path = DATA_DIR / "TICK" / "DUKASCOPY" / "EURUSD" / f"{year}.csv"
+        file_path = DATA_DIR / "TICK" / "DUKASCOPY" / symbol / f"{year}.csv"
         file_path.parent.mkdir(parents=True, exist_ok=True)
         final_df.to_csv(file_path, index=False)
 

@@ -7,6 +7,7 @@ from typing import Generator
 import logging
 from stable_baselines3 import PPO, DQN, SAC, TD3, DDPG, A2C
 from stable_baselines3.common.base_class import BaseAlgorithm
+from sb3_contrib import RecurrentPPO
 
 ALGORITHM_MAP = {
     'PPO': PPO,
@@ -15,6 +16,7 @@ ALGORITHM_MAP = {
     'TD3': TD3,
     'DQN': DQN,
     'DDPG': DDPG,
+    'RECURRENTPPO': RecurrentPPO
 }
 METADATA_FILE = "custom_metadata.json"
 

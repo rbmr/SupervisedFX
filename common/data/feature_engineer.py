@@ -37,6 +37,20 @@ class FeatureEngineer:
             df.drop(columns=original_columns, inplace=True, errors='ignore')
         
         return df
+    
+
+# TIME Indicators
+def sinusoidal_wave_24hr(df: pd.DataFrame):
+    # check if 'date_gmt' column exists and is pd.Timestamp
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    if not pd.api.types.is_datetime64_any_dtype(df['date_gmt']):
+        raise ValueError("'date_gmt' column must be of datetime type.")
+    
+    # Calculate the time in seconds since the start of the day
+    seconds_since_midnight = (df['date_gmt'] - df['date_gmt'].dt.normalize()).dt.total_seconds()
+    # Calculate the sinusoidal wave values
+    df['sinusoidal_wave_24hr'] = np.sin(2 * np.pi * seconds_since_midnight / (24 * 3600))
 
 # TREND Indicators
 
@@ -51,6 +65,19 @@ def ema(df: pd.DataFrame, window: int, column: str = 'close_bid'):
     Calculate the Exponential Moving Average (EMA) for a given column.
     """
     df[f'ema_{window}_{column}'] = df[column].ewm(span=window, adjust=False).mean()
+
+def kama(df: pd.DataFrame, window: int = 10, column: str = 'close_bid'):
+    """
+    Calculate the Kaufman's Adaptive Moving Average (KAMA) for a given column.
+    KAMA adjusts its sensitivity based on the volatility of the price.
+    """
+    change = df[column].diff()
+    volatility = df[column].rolling(window=window).apply(lambda x: np.std(x), raw=True)
+    
+    efficiency_ratio = change.abs() / volatility
+    smoothing_constant = (efficiency_ratio.rolling(window=window).mean() * (2 / (window + 1))).fillna(0)
+    
+    df[f'kama_{window}_{column}'] = df[column].ewm(span=window, adjust=False).mean() * smoothing_constant
 
 def bollinger_bands(df: pd.DataFrame, window: int = 20, num_std_dev: float = 2.0):
     """
@@ -305,6 +332,15 @@ def as_min_max_fixed(df: pd.DataFrame, column: str, min: int = 0, max: int = 100
     df[f'{column}'] = (df[column] - min) / (max - min)
     df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
     df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
+
+def as_below_above_column(df: pd.DataFrame, column: str, other_column: str):
+    """
+    Normalize a column as below/above another column.
+    This will create a new column with 1 if the value is above the other column, -1 if below, and 0 if equal.
+    """
+    df[f'{column}'] = np.where(df[column] > df[other_column], 1, 
+                                                           np.where(df[column] < df[other_column], -1, 0))
+    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
 
 ## other
 def remove_columns(df: pd.DataFrame, columns: List[str]):
