@@ -48,7 +48,7 @@ def get_environments(shuffled = False):
         agent_feature_engineer=agent_feature_engineer,
         initial_capital=10_000.0,
         transaction_cost_pct=0.0,
-        n_actions=1,
+        n_actions=0,
         custom_reward_function=log_equity_diff,
         shuffled=shuffled,
     )
