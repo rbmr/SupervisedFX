@@ -1,7 +1,7 @@
 import json
 import zipfile
 from pathlib import Path
-from typing import Generator
+from typing import Generator, Type
 
 import logging
 from stable_baselines3 import PPO, DQN, SAC, TD3, DDPG, A2C
@@ -26,6 +26,11 @@ def get_device(model: BaseAlgorithm) -> str:
         return str(model.policy.device)
     return "auto"
 
+def get_algorithm_class(algorithm: str | None) -> Type[BaseAlgorithm] | None:
+    if algorithm is None:
+        return None
+    return ALGORITHM_MAP.get(algorithm.upper(), None)
+
 def save_model_with_metadata(model: BaseAlgorithm, path: Path, **metadata) -> None:
     """
     Save model with additional metadata that can be used to dynamically load the model.
@@ -49,7 +54,7 @@ def save_model_with_metadata(model: BaseAlgorithm, path: Path, **metadata) -> No
     with zipfile.ZipFile(f"{path}", 'a') as zip_file:
         zip_file.writestr(METADATA_FILE, json.dumps(custom_metadata, indent=4))
 
-def load_model_with_metadata(path: Path) -> BaseAlgorithm:
+def load_model_with_metadata(path: Path, default_algorithm_class: Type[BaseAlgorithm] | None = None) -> BaseAlgorithm:
     """
     Dynamically load any model using additional metadata.
     """
@@ -66,14 +71,15 @@ def load_model_with_metadata(path: Path) -> BaseAlgorithm:
         with zip_file.open(METADATA_FILE) as f:
             metadata = json.load(f)
 
+    # Get algorithm class
     algorithm = metadata.get("algorithm", None)
-    if algorithm is None:
-        raise ValueError(f"{path} is missing algorithm metadata")
-
-    algorithm_class = ALGORITHM_MAP.get(algorithm.upper(), None)
+    algorithm_class = get_algorithm_class(algorithm)
     if algorithm_class is None:
-        raise ValueError(f"{algorithm} is not a recognized algorithm")
+        if default_algorithm_class is None:
+            raise ValueError(f"{algorithm} in {path} is not a recognized algorithm")
+        algorithm_class = default_algorithm_class
 
+    # Load model
     device = metadata.get("device", "auto")
     model = algorithm_class.load(path, device=device)
     return model
