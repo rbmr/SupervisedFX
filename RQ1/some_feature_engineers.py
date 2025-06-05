@@ -72,7 +72,7 @@ def get_feature_engineer_chatgpt():
         """
         high = df[column_high]
         low = df[column_low]
-        close_shifted = df[column_close].shift(1).fillna(method="bfill")
+        close_shifted = df[column_close].shift(1).bfill()
 
         # Compute True Range using np.maximum, then convert to Series
         true_range_array = np.maximum.reduce([
