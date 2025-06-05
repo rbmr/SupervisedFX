@@ -30,6 +30,7 @@ logging = ">=0.4.9.6,<0.5.0.0"
 torch = { version = ">=2.0.0,<3.0.0", source = "torch" }
 torchvision = { version = ">=0.15.0,<0.23.0", source = "torch" }
 torchaudio = { version = ">=2.0.0,<3.0.0", source = "torch" }
+aiohttp = "^3.12.9"
 sb3-contrib = "^2.6.0"
 
 [tool.poetry.group.dev.dependencies]

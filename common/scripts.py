@@ -1,17 +1,67 @@
 """
 This file contains some simple scripts that can be useful anywhere during the project.
 """
-
 import random
 from datetime import datetime, timedelta
-from typing import Any, Dict
-
+from multiprocessing import cpu_count, Pool
+from pathlib import Path
+from typing import Any, Dict, Generator, Callable
+import time
 import numpy as np
 import pandas as pd
+import requests
 from numpy.typing import NDArray
-from pathlib import Path
 
 from common.constants import MarketDataCol
+
+def parallel_run(func, inputs, num_workers = None):
+    if num_workers is None:
+        num_workers = cpu_count() // 2
+    with Pool(processes=num_workers) as pool:
+        return pool.map(func, inputs)
+
+def fetch(session, url, retries: int = 16, raise_on_fail: bool = True) -> bytes | None:
+    delay = 1
+    for _ in range(retries):
+        try:
+            response = session.get(url)
+            response.raise_for_status()
+            return response.content
+        except Exception as e:
+            print(f"Error fetching {url}: {e}")
+            time.sleep(delay)
+            delay *= 2
+    if not raise_on_fail:
+        print(f"Failed to fetch {url} after {retries} retries")
+        return None
+    raise RuntimeError(f"Failed to fetch {url} after {retries} retries")
+
+def fetch_all(urls: list[str], raise_on_fail: bool = True) -> list:
+    results = []
+    with requests.Session() as session:
+        for url in urls:
+            result = fetch(session, url, raise_on_fail)
+            results.append(result)
+    return results
+
+def raise_value_error(msg):
+    raise ValueError(msg)
+
+def map_input(input_str: str, fns: list[Callable]):
+    while True:
+        try:
+            inp = input(input_str)
+            for fn in fns:
+                inp = fn(inp)
+            return inp
+        except BaseException as e:
+            print(f"Invalid input: {e}")
+
+def date_range(start: datetime, end: datetime, step: timedelta) -> Generator[datetime, None, None]:
+    current = start
+    while current < end:
+        yield current
+        current += step
 
 def has_nonempty_subdir(path: Path, subdir_name: str) -> bool:
     return has_subdir(path, subdir_name) and not is_empty(path / subdir_name)

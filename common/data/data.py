@@ -1,253 +1,153 @@
-import calendar
 import io
 import lzma
 import struct
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
+from functools import partial
 from pathlib import Path
 from typing import Optional
 
-import matplotlib.pyplot as plt  # Duplicate import, but keeping as in original
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import requests
 
 from common.constants import DATA_DIR
+from common.scripts import date_range, map_input, raise_value_error, fetch_all
 
 # Mock DATA_DIR for standalone execution
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 class DukascopyDataDownloader:
-    def __init__(self):
-        pass
 
-
-    def _bi5_to_df_from_bytes(self, data_bytes, fmt):
+    @staticmethod
+    def _decompress_lzma_bytes(data_bytes):
         """
-        Converts bi5 formatted byte data (after LZMA decompression) into a Pandas DataFrame.
-
-        Args:
-            data_bytes (bytes): The byte content of the bi5 data (must be LZMA compressed).
-            fmt (str): The struct format string for unpacking the binary data.
-
-        Returns:
-            pd.DataFrame: A DataFrame containing the tick data, or None if an error occurs.
+        Decompresses LZMA-compressed bytes and returns the raw decompressed bytes.
         """
-        if not data_bytes:
-            return None
+        with lzma.open(io.BytesIO(data_bytes)) as f:
+            return f.read()
+
+    @staticmethod
+    def _bi5_to_df_from_bytes(raw_bytes, fmt):
+        """
+        Converts bi5 formatted byte data into a Pandas DataFrame.
+        """
         chunk_size = struct.calcsize(fmt)
         data = []
-        try:
-            # Wrap the byte data in an io.BytesIO object to make it file-like
-            # Then open it with lzma to decompress
-            with lzma.open(io.BytesIO(data_bytes)) as f:
-                while True:
-                    chunk = f.read(chunk_size)
-                    if chunk:
-                        if len(chunk) == chunk_size: # Ensure the chunk is complete
-                            data.append(struct.unpack(fmt, chunk))
-                        else:
-                            # Handle potential incomplete chunk at the end of the stream if necessary
-                            # For tick data, usually, an incomplete chunk means corrupted data or end of a non-aligned stream
-                            print(f"Warning: Incomplete chunk of size {len(chunk)} read, expected {chunk_size}. Skipping.")
-                            break
-                    else:
-                        break
-            df = pd.DataFrame(data)
-            return df
-        except lzma.LZMAError as e:
-            print(f"Error decompressing data: {e}")
-            return None
-        except Exception as e:
-            print(f"Error processing bi5 data: {e}")
-            return None
 
-    def _request_tick_data(self, symbol, year, month, day, hour, tick_format='>IIIff'): # Added tick_format
-        """
-        Downloads tick data for a given symbol and time, then converts it to a DataFrame.
+        for i in range(0, len(raw_bytes), chunk_size):
+            chunk = raw_bytes[i:i+chunk_size]
+            if len(chunk) != chunk_size:
+                raise ValueError(f"Incomplete chunk found in bi5 data: {raw_bytes}")
+            data.append(struct.unpack(fmt, chunk))
 
-        Args:
-            symbol (str): The trading symbol (e.g., "EURUSD").
-            year (int): The year.
-            month (int): The month (1-12).
-            day (int): The day.
-            hour (int): The hour (0-23).
-            tick_format (str): The struct format for unpacking tick data.
-                            Default is '>iIIii' for Dukascopy (time, ask, bid, ask_vol, bid_vol).
+        return pd.DataFrame(data)
 
-        Returns:
-            pd.DataFrame: A DataFrame containing the tick data, or None if an error occurs.
-        """
-        # Dukascopy month is 0-indexed for the URL, but we accept 1-12 for convenience
-        req_month = month - 1
-
-        symbol_upper = symbol.upper()
-
-        # year as string of 4 digits, month and day as string of 2 digits for URL
-        year_str = str(year).zfill(4)
-        month_str = str(req_month).zfill(2) # Use req_month for URL
-        day_str = str(day).zfill(2)
-        hour_str = str(hour).zfill(2)
-
-        # Construct the URL (example was hardcoded to EURUSD and 2025, making it dynamic)
-        # url = f"https://datafeed.dukascopy.com/datafeed/EURUSD/2025/{month_str}/{day_str}/{hour_str}h_ticks.bi5" # Original
-        url = f"https://datafeed.dukascopy.com/datafeed/{symbol_upper}/{year_str}/{month_str}/{day_str}/{hour_str}h_ticks.bi5"
-        print(f"Requesting data from {url}")
-
-        try:
-            response = requests.get(url, timeout=10) # Added timeout
-            response.raise_for_status() # Raises an HTTPError for bad responses (4XX or 5XX)
-            file_content = response.content
-
-            # --- Optional: Save the file if you still need it ---
-            # filename = f"{symbol_upper}_{year_str}{str(month).zfill(2)}{day_str}_{hour_str}h_ticks.bi5" # Use original month for filename
-            # folder = "data"
-            # filepath = f"{folder}/{filename}"
-            # import os
-            # if not os.path.exists(folder):
-            #     os.makedirs(folder)
-            # with open(filepath, 'wb') as f:
-            #     f.write(file_content)
-            # print(f"File saved to {filepath}")
-            # --- End Optional Save ---
-
-            # Directly process the downloaded content
-            df = self._bi5_to_df_from_bytes(file_content, tick_format)
-
-            if df is not None and not df.empty:
-                # Assuming the standard Dukascopy format: timestamp, ask, bid, ask_volume, bid_volume
-                df.columns = ['ms_offset', 'ask', 'bid', 'ask_vol', 'bid_vol']
-
-                # Convert timestamp (milliseconds offset from the hour) to a proper datetime
-                base_datetime = pd.Timestamp(f'{year}-{month}-{day} {hour}:00:00')
-                df['time'] = base_datetime + pd.to_timedelta(df['ms_offset'], unit='ms')
-
-                # Convert prices (Dukascopy stores prices as integers, e.g., EURUSD 1.23456 is 123456)
-                # The divisor depends on the symbol's pip definition.
-                # For EURUSD, it's usually 10^5. For JPY pairs, it might be 10^3.
-                # This needs to be adjusted based on the symbol.
-                divisor = 100000.0 if 'JPY' not in symbol_upper else 1000.0 # Simplified logic
-                df['ask'] = df['ask'] / divisor
-                df['bid'] = df['bid'] / divisor
-                # Volumes are typically floats representing millions
-                df['ask_vol'] = df['ask_vol'] / 1000000.0
-                df['bid_vol'] = df['bid_vol'] / 1000000.0
-
-                df = df[['time', 'ask', 'bid', 'ask_vol', 'bid_vol']] # Reorder and select columns
-
-            return df
-
-        except requests.exceptions.HTTPError as e:
-            print(f"HTTP error downloading file: {e}")
-            return None
-        except requests.exceptions.RequestException as e:
-            print(f"Error downloading file: {e}")
-            return None
-        except Exception as e:
-            print(f"An unexpected error occurred in request_tick_data: {e}")
-            return None
-
-    def _request_ticks_for_day(self, symbol, year, month, day, tick_format='>IIIff'):
-        """
-        Requests tick data for a specific day and symbol for each hour of that day.
-
-        Args:
-            symbol (str): The trading symbol (e.g., "EURUSD").
-            year (int): The year.
-            month (int): The month (1-12).
-            day (int): The day.
-            tick_format (str): The struct format for unpacking tick data.
-
-        Returns:
-            pd.DataFrame: A DataFrame containing the tick data for the entire day,
-                        or None if no data is successfully retrieved.
-        """
-        # Create a list to hold DataFrames for each hour
-        hourly_data = []
-
-        # Get the number of hours in the day (24 for most days, 23 for DST changes)
-        num_hours = 24
-
-        # Loop through each hour of the day
-        for hour in range(num_hours):
-            print(f"Requesting data for {symbol} on {year}-{month:02d}-{day:02d} at hour {hour:02d}")
-            df = self._request_tick_data(symbol, year, month, day, hour, tick_format)
-            if df is not None and not df.empty:
-                hourly_data.append(df)
-
-        # Concatenate all hourly DataFrames into one
-        if hourly_data:
-            full_day_df = pd.concat(hourly_data, ignore_index=True)
-            return full_day_df
-        else:
-            print(f"No data retrieved for {symbol} on {year}-{month:02d}-{day:02d}")
-            return None
-
-    def _request_ticks_for_month(self, symbol, year, month, tick_format='>IIIff'):
-        """
-        Requests tick data for a specific month and symbol.
-
-        Args:
-            symbol (str): The trading symbol (e.g., "EURUSD").
-            year (int): The year.
-            month (int): The month (1-12).
-            tick_format (str): The struct format for unpacking tick data.
-
-        Returns:
-            pd.DataFrame: A DataFrame containing the tick data for the entire month.
-        """
-        # Get the number of days in the month
-        num_days = calendar.monthrange(year, month)[1]
-
-        # Initialize an empty list to store DataFrames
-        dfs = []
-
-        # Loop through each day of the month
-        for day in range(1, num_days + 1):
-            df = self._request_ticks_for_day(symbol, year, month, day, tick_format)
-            if df is not None and not df.empty:
-                dfs.append(df)
-
-        # Concatenate all DataFrames into one
-        if dfs:
-            return pd.concat(dfs, ignore_index=True)
-        else:
-            print("No data available for the specified month.")
-        return None
-
-    def request_ticks_for_year(self, symbol, year, tick_format='>IIIff') -> 'ForexTickData':
-        """
-        Downloads tick data for a given symbol and year, then converts it to a DataFrame.
-
-        Args:
-            symbol (str): The trading symbol (e.g., "EURUSD").
-            year (int): The year.
-            tick_format (str): The struct format for unpacking tick data.
-
-        Returns:
-            pd.DataFrame: A DataFrame containing the tick data for the entire year, or None if an error occurs.
-        """
+    @staticmethod
+    def _get_url(symbol: str, dt: datetime):
 
         symbol = symbol.upper()
+        year_str = str(dt.year).zfill(4)
+        month_str = str(dt.month - 1).zfill(2) # duka months are 0-indexed
+        day_str = str(dt.day).zfill(2) # duka days are 1-indexed
+        hour_str = str(dt.hour).zfill(2) # duka hours are 1-indexed
+        return f"https://datafeed.dukascopy.com/datafeed/{symbol}/{year_str}/{month_str}/{day_str}/{hour_str}h_ticks.bi5"
 
-        all_data = []
-        for month in range(1, 13):
-            for day in range(1, 32):
-                for hour in range(0, 24):
-                    df = self._request_tick_data(symbol, year, month, day, hour, tick_format)
-                    if df is not None and not df.empty:
-                        all_data.append(df)
+    @staticmethod
+    def _process_tick_df(df: pd.DataFrame, symbol: str, dt: datetime):
+        """
+        Converts tick data to the right format.
+        """
+        # Standardize input
+        assert df is not None
+        assert not df.empty
+        assert len(df.columns) == 5
+        df = df.copy()
+        df.columns = ['ms_offset', 'ask', 'bid', 'ask_vol', 'bid_vol']
 
-        final_df = pd.concat(all_data, ignore_index=True) if all_data else None
+        # Convert timestamp (milliseconds offset from the hour) to a proper datetime
+        base_datetime = pd.Timestamp(dt)
+        df['time'] = base_datetime + pd.to_timedelta(df['ms_offset'], unit='ms')
+        df.drop('ms_offset', axis=1, inplace=True)
 
-        if final_df is None or final_df.empty:
-            print(f"No data retrieved for {symbol} in {year}.")
-            return None
+        # Convert prices (Dukascopy stores prices as integers, e.g., EURUSD 1.23456 is 123456)
+        # The divisor depends on the symbol's pip definition.
+        # For EURUSD, it's usually 10^5. For JPY pairs, it might be 10^3.
+        # This needs to be adjusted based on the symbol.
+        divisor = 100000.0 if 'JPY' not in symbol else 1000.0 # Simplified logic
+        df['ask'] = df['ask'] / divisor
+        df['bid'] = df['bid'] / divisor
 
-        file_path = DATA_DIR / "TICK" / "DUKASCOPY" / symbol / f"{year}.csv"
+        # Volumes are typically floats representing millions
+        df['ask_vol'] = df['ask_vol'] / 1000000.0
+        df['bid_vol'] = df['bid_vol'] / 1000000.0
+
+        # Reorder columns
+        df = df[['time', 'ask', 'bid', 'ask_vol', 'bid_vol']]
+        return df
+
+    @classmethod
+    def _fetch_tick_day(cls, d: datetime, symbol, tick_format='>IIIff'):
+        """Fetches day tick data, either from cache or from dukascopy."""
+        date_str = d.strftime("%Y%m%d")
+        file_path = DATA_DIR / "TICK" / "DUKASCOPY" / symbol / f"{date_str}.csv"
+        if file_path.exists():
+            return file_path
+
+        print(f"[{date_str}] Fetching data...")
+        hours_of_the_day = [d.replace(hour=h) for h in range(24)]
+        urls = [cls._get_url(symbol, dt) for dt in hours_of_the_day]
+        results = fetch_all(urls)
+
+        print(f"[{date_str}] Processing data... ")
+        hour_dfs = []
+        for res, dt in zip(results, hours_of_the_day):
+            if res == None:
+                raise ValueError("One hour of data couldn't be fetched.")
+            if res == b'':
+                continue
+            raw_bytes = cls._decompress_lzma_bytes(res)
+            hour_df = cls._bi5_to_df_from_bytes(raw_bytes, tick_format)
+            hour_df = cls._process_tick_df(hour_df, symbol, dt)
+            hour_dfs.append(hour_df)
+
+        if not hour_dfs:
+            # For free days, just create an empty csv.
+            dtypes = (('time', 'datetime64[ns]'), ('ask', 'float64'), ('bid', 'float64'), ('ask_vol', 'float64'),
+                      ('bid_vol', 'float64'))
+            empty_df = pd.DataFrame({col: pd.Series(dtype=dt) for col, dt in dtypes})
+            hour_dfs.append(empty_df)
+
+        day_df = pd.concat(hour_dfs, ignore_index=True)
+        assert pd.api.types.is_datetime64_any_dtype(day_df['time'])
+        day_df.sort_values(by="time", ascending=True, inplace=True)
+
+        print(f"[{date_str}] Saving data... ")
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        final_df.to_csv(file_path, index=False)
+        day_df.to_csv(file_path, index=False)
 
+        print(f"[{date_str}] Finished.")
+        return file_path
+
+    @classmethod
+    def request_tick_range(cls, symbol, start: datetime, end: datetime, tick_format='>IIIff'):
+
+        # Standardize input
+        start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = end.replace(hour=0, minute=0, second=0, microsecond=0)
+        symbol = symbol.upper()
+
+        # Go day by day, and cache results.
+
+        days = list(date_range(start, end, timedelta(days=1)))
+        fetch_tick_day = partial(cls._fetch_tick_day, symbol=symbol, tick_format=tick_format)
+        data_files = parallel_run(fetch_tick_day, days, num_workers=4)
+
+        # Load and combine all day files
+        day_dfs = parallel_run(pd.read_csv, data_files, num_workers=2)
+        final_df = pd.concat(day_dfs, ignore_index=True)
+
+        # Return ForexTickData Object.
         forex_tick_data = ForexTickData(
             source='DUKASCOPY',
             instrument=symbol,
@@ -255,11 +155,10 @@ class DukascopyDataDownloader:
             bid_column='bid',
             time_column='time',
             volume_column=None,
-            df=final_df)
+            df=final_df
+        )
 
         return forex_tick_data
-
-
 
 
 class Timeframe(Enum):
@@ -306,20 +205,6 @@ class Timeframe(Enum):
 class ForexTickData:
     """
     Class to handle Forex tick data, ensuring the DataFrame has the required structure.
-
-    Attributes
-    ----------
-    source : str
-        The source of the Forex data.
-    instrument : str
-        The instrument for which the data is being handled.
-    df : pd.DataFrame
-        The DataFrame containing Forex tick data.
-
-    Methods
-    -------
-    validate_dataframe()
-        Validates that the DataFrame contains all required columns.
     """
 
     def __init__(self, source: str, instrument: str, df: pd.DataFrame,
@@ -350,10 +235,6 @@ class ForexTickData:
     def validate_dataframe(self):
         """
         Validates that the DataFrame contains all required columns.
-        Raises
-        -------
-        ValueError
-            If the DataFrame does not contain the required columns.
         """
         required_columns = [self.bid_column, self.ask_column] # Time column will be index or checked separately
         if self.time_column not in self.df.columns and self.df.index.name != self.time_column :
@@ -392,18 +273,6 @@ class ForexTickData:
     def to_candles(self, granularity: Timeframe) -> 'ForexCandleData':
         """
         Converts the tick data to OHLCV format for both bid and ask prices.
-
-        Parameters
-        ----------
-        pandas_freq : str
-            The pandas frequency string for resampling (e.g., '1Min', '5Min', 'H').
-
-        Returns
-        -------
-        pd.DataFrame
-            A DataFrame with the converted OHLCV data, including bid OHLC, ask OHLC,
-            and volume. Volume is calculated as the sum of the specified volume_column
-            if present, otherwise as the count of ticks.
         """
 
         pandas_freq = granularity.to_pandas_freq()
@@ -578,11 +447,6 @@ class ForexCandleData:
     def analyse_save(self):
         """
         Analyzes the Forex data and saves it to a CSV file.
-
-        Parameters
-        ----------
-        folder_path : Path
-            The path where the CSV file will be saved.
         """
 
         if self.df.empty:
@@ -607,7 +471,7 @@ class ForexCandleData:
         granularity_in_minutes = self.granularity.as_minutes()
 
         self.df['time_diff'] = self.df['date_gmt'].diff().dt.total_seconds() / 60
-        self.df['time_diff'].fillna(0, inplace=True)
+        self.df.fillna({ 'time_diff' : 0 }, inplace=True)
 
         tolerance = 0.1 * granularity_in_minutes # Allow 10% deviation for the base granularity
         weekend_base_duration_minutes = 2 * 24 * 60 # Approx 48 hours
@@ -684,177 +548,6 @@ class ForexCandleData:
             print("Volume column not available or empty for histogram.")
 
 
-
-
-
-
-
-def load_tick_data():
-    """
-    Main function to get user inputs, load data, and process Forex tick data.
-    """
-    print("Forex Tick Data Processor")
-    print("=" * 30)
-
-    # Get data source and instrument
-    source_name = input("Enter the data source name (e.g., Dukascopy, FXCM): ").strip()
-    instrument_name = input("Enter the instrument name (e.g., EURUSD, GBPJPY): ").strip()
-
-    # Get file path
-    while True:
-        file_path_str = input("Enter the full path to your tick data CSV file: ").strip()
-        tick_data_file = Path(file_path_str)
-        if tick_data_file.is_file() and tick_data_file.suffix.lower() == '.csv':
-            break
-        else:
-            print("Invalid file path or not a CSV file. Please try again.")
-
-    # Get column names
-    print("\nPlease specify the column names in your CSV file:")
-    time_col = input("Name of the time/datetime column (e.g., 'Timestamp', 'date_gmt'): ").strip()
-    bid_col = input("Name of the bid price column (e.g., 'Bid', 'bid_price'): ").strip()
-    ask_col = input("Name of the ask price column (e.g., 'Ask', 'ask_price'): ").strip()
-
-    volume_col_input = input("Name of the volume column (optional, press Enter if none): ").strip()
-    volume_col = volume_col_input if volume_col_input else None
-
-    # Get granularity
-    print("\nAvailable granularities:")
-    for tf in Timeframe:
-        print(f"- {tf.name} ({tf.value})")
-
-    while True:
-        try:
-            granularity_input = input("Choose a granularity (e.g., M15, H1, D1): ").strip().upper()
-            selected_granularity = Timeframe[granularity_input]
-            break
-        except KeyError:
-            print("Invalid granularity. Please choose from the list (e.g., M1, M5, H1).")
-
-    # Load data
-    try:
-        print(f"\nLoading data from {tick_data_file}...")
-        # Determine if header is present by peeking at the first few lines
-        # A simple heuristic: if first line contains typical header names (like the ones user provided)
-        # This is not foolproof but better than always assuming header=0
-        try:
-            preview_df = pd.read_csv(tick_data_file, nrows=5)
-            has_header = any(col_name in preview_df.columns for col_name in [time_col, bid_col, ask_col])
-            header_option = 0 if has_header else None
-            if has_header:
-                print("Detected header row in CSV.")
-            else:
-                print("Assuming no header row in CSV, or specified columns not in the first line as column names.")
-        except Exception:
-            print("Could not preview CSV for header detection, assuming header row is present.")
-            header_option = 0
-
-
-        raw_df = pd.read_csv(tick_data_file, header=header_option)
-
-        # If no header was read, assign column names based on user input if counts match
-        if header_option is None:
-            expected_cols = [time_col, bid_col, ask_col]
-            if volume_col:
-                expected_cols.append(volume_col)
-
-            if len(raw_df.columns) == len(expected_cols):
-                 # Check if user provided names are just indices
-                if all(c.isdigit() for c in expected_cols):
-                    print("Warning: Column names provided are all digits. This might lead to issues if they are meant to be actual names.")
-                    # If user provided indices as names, it's tricky.
-                    # Let's assume for now if no header, and names are provided, they are the intended names.
-                    # This part requires careful handling of user input.
-                    # For now, if header=None, pandas assigns 0,1,2... We need to map.
-                    # Let's assume user provided actual names, and we need to ensure they are used.
-                    # The ForexTickData class expects these names to exist.
-
-                    # Simplest for now: if no header, and user provides names,
-                    # we assume the CSV was truly headerless and columns are in the order of input.
-                    # This is a big assumption. A better way is to ask user for column *positions* if no header.
-                    print(f"CSV loaded without headers. Attempting to use provided column names for the first {len(expected_cols)} columns.")
-                    # This is risky, user must be sure about the column order.
-                    # A safer approach would be to rename based on position *after* loading,
-                    # but then we need to know which position corresponds to which name.
-
-                    # For now, let's rename based on a naive assumption if header_option is None
-                    # and user provided names. ForexTickData will validate.
-                    # The read_csv with header=None results in numbered columns.
-                    # We need to rename these.
-                    rename_map = {}
-                    current_cols = list(raw_df.columns) # These will be 0, 1, 2...
-                    user_cols_map = {
-                        time_col: None,
-                        bid_col: None,
-                        ask_col: None,
-                    }
-                    if volume_col:
-                        user_cols_map[volume_col] = None
-
-                    print(f"Please map your provided column names to the loaded column indices (0 to {len(current_cols)-1}):")
-                    for i, u_col_name in enumerate([time_col, bid_col, ask_col] + ([volume_col] if volume_col else [])):
-                        while True:
-                            try:
-                                col_idx = int(input(f"Which column index (0-{len(current_cols)-1}) corresponds to '{u_col_name}'? "))
-                                if 0 <= col_idx < len(current_cols):
-                                    rename_map[current_cols[col_idx]] = u_col_name
-                                    break
-                                else:
-                                    print("Index out of bounds.")
-                            except ValueError:
-                                print("Invalid input. Please enter a number.")
-                    raw_df.rename(columns=rename_map, inplace=True)
-                    print("Columns renamed based on your mapping.")
-
-            elif not has_header: # No header detected and column count mismatch
-                 print(f"Warning: CSV loaded without headers, but number of columns in CSV ({len(raw_df.columns)}) "
-                       f"does not match number of critical columns provided ({len(expected_cols)}). "
-                       "Please ensure your column name inputs are correct.")
-
-
-        print(f"Successfully loaded {len(raw_df)} rows.")
-
-    except FileNotFoundError:
-        print(f"Error: File not found at {tick_data_file}")
-        return
-    except pd.errors.EmptyDataError:
-        print(f"Error: The file {tick_data_file} is empty.")
-        return
-    except Exception as e:
-        print(f"An error occurred while loading the CSV file: {e}")
-        return
-
-    # Instantiate ForexTickData and process
-    try:
-        print("\nInitializing ForexTickData object...")
-        forex_tick_data = ForexTickData(
-            source=source_name,
-            instrument=instrument_name,
-            df=raw_df,
-            time_column=time_col,
-            bid_column=bid_col,
-            ask_column=ask_col,
-            volume_column=volume_col
-        )
-        print("ForexTickData object initialized successfully.")
-
-        print(f"\nConverting data to {selected_granularity.name} granularity...")
-        forex_data = forex_tick_data.to_candles(granularity=selected_granularity)
-        forex_data.analyse_save()
-
-        if not forex_data.df.empty:
-            print(f"\nProcessing complete. Output files are in subdirectories of: {DATA_DIR}")
-            print(f"Processed OHLCV data has {len(forex_data.df)} rows.")
-        else:
-            print("\nProcessing complete, but no OHLCV data was generated (e.g., due to empty input or filtering).")
-
-    except ValueError as e:
-        print(f"ValueError during processing: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred during processing: {e}")
-        import traceback
-        traceback.print_exc()
-
 def combine_and_analyze_multiple_files():
     # ask user for all source, instrument, and granularity
     print("Forex Data Combination and Analysis")
@@ -923,30 +616,32 @@ def combine_and_analyze_multiple_files():
     else:
         print("No valid data was combined. Please check your input files and try again.")
 
+
 def download_convert_save_dukascopy_data():
     print("Dukascopy Data Downloader and Converter")
     print("=" * 30)
-    downloader = DukascopyDataDownloader()
-    # Get user inputs for download
-    pair = input("Enter the currency pair (e.g., EURUSD): ").strip().upper()
-    year = input("Enter the year to download (e.g., 2023): ").strip()
 
-    # get user input for granularity
+    # Get user inputs for download
+    default_pair = lambda x: "EURUSD" if x == "" else x
+    normalize = lambda x: x.strip().upper()
+    len_filter = lambda x: x if len(x) == 6 else raise_value_error(f"Expected pair length is 6, was {len(x)}")
+    pair = map_input("Enter the currency pair (default: EURUSD): ", [normalize, default_pair, len_filter])
+
+    convert_dtime = lambda x: datetime.strptime(x.strip(), "%Y%m%d")
+    start = map_input("Enter the start time to download (format: yyyymmdd): ", [convert_dtime])
+    end = map_input("Enter the end time (excl) to download (format: yyyymmdd): ", [convert_dtime])
+
     print("\nAvailable granularities:")
     for tf in Timeframe:
         print(f"- {tf.name} ({tf.value})")
-    while True:
-        try:
-            granularity_input = input("Choose a granularity (e.g., M15, H1, D1): ").strip().upper()
-            selected_granularity = Timeframe[granularity_input]
-            break
-        except KeyError:
-            print("Invalid granularity. Please choose from the list (e.g., M1, M5, H1).")
+
+    get_gran = lambda x: Timeframe[x.strip().upper()]
+    selected_granularity: Timeframe = map_input("Choose a granularity (e.g., M15, H1, D1): ", [get_gran])
 
     # Download data
     try:
-        print(f"\nDownloading {pair} data for {year} at {selected_granularity.name} granularity...")
-        forex_tick_data = downloader.request_ticks_for_year(pair, year)
+        print(f"\nDownloading {pair} data from {start} to {end} at {selected_granularity.name} granularity...")
+        forex_tick_data = DukascopyDataDownloader.request_tick_range(pair, start, end)
         print("Download complete.")
         if forex_tick_data is not None:
             print(f"\nConverting tick data to {selected_granularity.name} granularity...")
@@ -980,7 +675,7 @@ if __name__ == '__main__':
         if choice == '0':
             download_convert_save_dukascopy_data()
         elif choice == '1':
-            load_tick_data()
+            print("Your choice sucks, just pick 0.")
         elif choice == '2':
             combine_and_analyze_multiple_files()
         elif choice == '3':
