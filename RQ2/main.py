@@ -29,7 +29,7 @@ def get_feature_engineer() -> FeatureEngineer:
     """
     feature_engineer = FeatureEngineer()
 
-    feature_engineer.add(sinusoidal_wave_24hr)
+    feature_engineer.add(percent_of_day)
     
     # Add basic features
     # FEATURE 0 - CLOSE_PCT_CHANGE - 12 features

@@ -52,6 +52,37 @@ def sinusoidal_wave_24hr(df: pd.DataFrame):
     # Calculate the sinusoidal wave values
     df['sinusoidal_wave_24hr'] = np.sin(2 * np.pi * seconds_since_midnight / (24 * 3600))
 
+def percent_of_day(df: pd.DataFrame):
+    """
+    Calculate the percentage of the day that has passed based on the 'date_gmt' column.
+    This will create a new column 'percent_of_day' with values between 0 and 1.
+    """
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    if not pd.api.types.is_datetime64_any_dtype(df['date_gmt']):
+        raise ValueError("'date_gmt' column must be of datetime type.")
+    
+    seconds_since_midnight = (df['date_gmt'] - df['date_gmt'].dt.normalize()).dt.total_seconds()
+    df['percent_of_day'] = seconds_since_midnight / (24 * 3600)
+
+def circle_coordinate_of_day(df: pd.DataFrame):
+    """
+    Calculate the circular coordinates of the day based on the 'date_gmt' column.
+    This will create two new columns 'circle_x' and 'circle_y' representing the x and y coordinates
+    on a unit circle, where 0 is midnight and 1 is the end of the day.
+    """
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    if not pd.api.types.is_datetime64_any_dtype(df['date_gmt']):
+        raise ValueError("'date_gmt' column must be of datetime type.")
+    
+    seconds_since_midnight = (df['date_gmt'] - df['date_gmt'].dt.normalize()).dt.total_seconds()
+    angle = 2 * np.pi * seconds_since_midnight / (24 * 3600)
+    
+    df['hour_of_day_x'] = np.cos(angle)
+    df['hour_of_day_y'] = np.sin(angle)
+
+
 # TREND Indicators
 
 def sma(df: pd.DataFrame, window: int, column: str = 'close_bid'):

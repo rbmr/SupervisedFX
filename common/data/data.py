@@ -12,7 +12,8 @@ import numpy as np
 import pandas as pd
 
 from common.constants import DATA_DIR
-from common.scripts import date_range, map_input, raise_value_error, fetch_all
+from common.scripts import date_range, map_input, raise_value_error, fetch_all, parallel_run
+
 
 # Mock DATA_DIR for standalone execution
 DATA_DIR.mkdir(parents=True, exist_ok=True)
