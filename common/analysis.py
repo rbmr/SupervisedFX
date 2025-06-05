@@ -65,6 +65,18 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
     # Ensure results_path exists
     results_path.mkdir(parents=True, exist_ok=True)
 
+    # calculate correlation matrix of the dataframe
+    correlation_matrix = df.corr()
+    plt.figure(figsize=(12, 8))
+    plt.imshow(correlation_matrix, cmap='coolwarm', interpolation='nearest')
+    plt.colorbar()
+    plt.title(f"Correlation Matrix for {name}")
+    plt.xticks(ticks=np.arange(len(correlation_matrix.columns)), labels=correlation_matrix.columns, rotation=45)
+    plt.yticks(ticks=np.arange(len(correlation_matrix.columns)), labels=correlation_matrix.columns)
+    plt.tight_layout()
+    plt.savefig(results_path / f"correlation_matrix.png")
+    plt.close()
+
     # Pre-compute commonly used arrays (avoid repeated DataFrame access)
     data = df[['info.market_data.close_bid', 'info.market_data.close_ask',
                'info.agent_data.equity_open', 'info.agent_data.equity_high',

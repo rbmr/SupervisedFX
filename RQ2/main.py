@@ -36,7 +36,7 @@ def get_feature_engineer() -> FeatureEngineer:
     def feature_0(df):
         copy_column(df, "close_bid", "close_pct_change")
         as_pct_change(df, "close_pct_change")
-        history_lookback(df, 11, ["close_pct_change"])
+        #history_lookback(df, 11, ["close_pct_change"])
     feature_engineer.add(feature_0)
 
     # -- TREND FEATURES --
@@ -45,7 +45,7 @@ def get_feature_engineer() -> FeatureEngineer:
     def feature_1(df):
         ema(df, window=20)
         as_ratio_of_other_column(df, "ema_20_close_bid", "close_bid")
-        history_lookback(df, 11, ["ema_20_close_bid"])
+        #history_lookback(df, 11, ["ema_20_close_bid"])
     feature_engineer.add(feature_1)
 
     # FEATURE 2 - BOLLINGER_BANDS - 24 features
@@ -53,14 +53,15 @@ def get_feature_engineer() -> FeatureEngineer:
         bollinger_bands(df, window=20, num_std_dev=2)
         as_ratio_of_other_column(df, "bb_upper_20", "close_bid")
         as_ratio_of_other_column(df, "bb_lower_20", "close_bid")
-        history_lookback(df, 11, ["bb_upper_20"])
-        history_lookback(df, 11, ["bb_lower_20"])
+        #history_lookback(df, 11, ["bb_upper_20"])
+        #history_lookback(df, 11, ["bb_lower_20"])
     feature_engineer.add(feature_2)
 
     # FEATURE 3 - MACD - 12 features
     def feature_3(df):
         macd(df, short_window=12, long_window=26, signal_window=9)
-        history_lookback(df, 11, ["macd"])
+        remove_columns(df, ["macd_signal", "macd"])
+        #history_lookback(df, 11, ["macd_hist"])
     feature_engineer.add(feature_3)
 
     # -- TREND FEATURES END --
@@ -70,7 +71,7 @@ def get_feature_engineer() -> FeatureEngineer:
     def feature_4(df):
         rsi(df, window=14)
         as_min_max_fixed(df, "rsi_14", 0, 100)
-        history_lookback(df, 11, ["rsi_14"])
+        #history_lookback(df, 11, ["rsi_14"])
     feature_engineer.add(feature_4)
 
     # FEATURE 5 - STOCHASTIC_OSCILLATOR - 12 features
@@ -78,15 +79,15 @@ def get_feature_engineer() -> FeatureEngineer:
         stochastic_oscillator(df, window=3)
         as_min_max_fixed(df, "stoch_k", 0, 100)
         as_min_max_fixed(df, "stoch_d", 0, 100)
-        history_lookback(df, 11, ["stoch_k"])
-        history_lookback(df, 11, ["stoch_d"])
+        #history_lookback(df, 11, ["stoch_k"])
+        #history_lookback(df, 11, ["stoch_d"])
     feature_engineer.add(feature_5)
 
     # FEATURE 6 - CCI - 12 features
     def feature_6(df):
         cci(df, window=20)
         as_min_max_fixed(df, "cci_20", -100, 100)
-        history_lookback(df, 11, ["cci_20"])
+        #history_lookback(df, 11, ["cci_20"])
     feature_engineer.add(feature_6)
 
     # -- MOMENTUM FEATURES END --=
@@ -96,24 +97,32 @@ def get_feature_engineer() -> FeatureEngineer:
     def feature_7(df):
         mfi(df, window=14)
         as_min_max_fixed(df, "mfi_14", 0, 100)
-        history_lookback(df, 11, ["mfi_14"])
+        #history_lookback(df, 11, ["mfi_14"])
     feature_engineer.add(feature_7)
 
     def feature_8(df):
         # FEATURE 8 - OBV - 12 features
         obv(df)
         as_ratio_of_other_column(df, "obv", "volume")
-        history_lookback(df, 11, ["obv"])
+        #history_lookback(df, 11, ["obv"])
     feature_engineer.add(feature_8)
     
     def feature_9(df):
         # FEATURE 9 - CMF - 12 features
         cmf(df, window=20)
         as_min_max_fixed(df, "cmf_20", -1, 1)
-        history_lookback(df, 11, ["cmf_20"])
+        #history_lookback(df, 11, ["cmf_20"])
     feature_engineer.add(feature_9)
 
     # -- VOLUME FEATURES END --
+
+    # -- EXTRA TEST FEATURES --
+    def feature_10(df):
+        # FEATURE 10 - KAMA
+        kama(df, window=10)
+        as_ratio_of_other_column(df, "kama_10_close_bid", "close_bid")
+        #history_lookback(df, 11, ["kama_10_close_bid"])
+    feature_engineer.add(feature_10)
 
     return feature_engineer
 
@@ -128,12 +137,19 @@ def main():
     INITIAL_CAPITAL = 10000.0
     TRANSACTION_COST_PCT = 0.0
 
+    # forex_data = ForexCandleData.load(source="dukascopy",
+    #                                   instrument="EURUSD",
+    #                                   granularity=Timeframe.M15,
+    #                                   start_time=RQ2_HYPERPARAMETERS_START_DATE,
+    #                                   end_time= RQ2_HYPERPARAMETERS_END_DATE,
+    #                                 )
+
     forex_data = ForexCandleData.load(source="dukascopy",
-                                      instrument="EURUSD",
+                                      instrument="XAUUSD",
                                       granularity=Timeframe.M15,
-                                      start_time=RQ2_HYPERPARAMETERS_START_DATE,
-                                      end_time= RQ2_HYPERPARAMETERS_END_DATE,
-                                    )
+                                      start_time=datetime(2022,1,2,23),
+                                      end_time= datetime(2022,12,30,21,45),
+                                      )
     
     # --- Feature Engineering ---
     # Create a feature engineer object
@@ -156,7 +172,7 @@ def main():
         custom_reward_function=risk_adjusted_return)
     logging.info("Environments created.")
 
-    policy_kwargs = dict(net_arch=[128,64], optimizer_class=optim.Adam, activation_fn=LeakyReLU)
+    policy_kwargs = dict(net_arch=[12,8], optimizer_class=optim.Adam, activation_fn=LeakyReLU)
     temp_env = DummyVecEnv([lambda: train_env])
     model = DQN(
         policy="MlpPolicy",
@@ -180,78 +196,6 @@ def main():
     logging.info("Model created.")
     logging.info("Model architecture:" + str(model.policy))
 
-
-    # q_net = model.policy.q_net
-    # # print layer names and shapes
-    # for name, param in q_net.named_parameters():
-    #     logging.info(f"Layer: {name}, Shape: {param.shape}")
-
-    # policy_kwargs = dict(
-    #     # LSTM specific arguments
-    #     lstm_hidden_size=128,        # Number of units in the LSTM layer
-    #     n_lstm_layers=2,             # Number of LSTM layers
-    #     shared_lstm=False,            # Actor and Critic share the same LSTM
-    #     enable_critic_lstm=True,     # Critic network will use an LSTM
-    #     # Network architecture for MLP parts (before/after LSTM)
-    #     # This defines layers *other than* the LSTM layers themselves.
-    #     # The structure is [feature_extraction_part, dict(pi=[actor_head_layers], vf=[value_head_layers])]
-    #     # If only a list like [64, 64] is given, these are layers shared by actor and critic *after* the LSTM
-    #     # If you want MLP layers *before* the LSTM (as a feature extractor for each time step),
-    #     # you'd typically create a custom feature extractor or ensure your observation space is already processed.
-    #     # MlpLstmPolicy has its own internal MLP feature extractor before the LSTM.
-    #     # `net_arch` here usually refers to layers *after* the LSTM.
-    #     net_arch=dict(pi=[64, 32], vf=[64, 32]), # Layers for policy and value function heads AFTER LSTM output
-    #     # Activation function for the MLP layers
-    #     activation_fn=LeakyReLU, # Other options: torch.nn.Tanh, torch.nn.LeakyReLU etc.
-    #     # Orthogonal initialization can sometimes help
-    #     ortho_init=True
-    # )
-
-    # # --- 3. Instantiate the RecurrentPPO Model ---
-    # # You need to install sb3-contrib: pip install sb3-contrib
-    # model = RecurrentPPO(
-    #     "MlpLstmPolicy",             # Policy type: Multi-layer Perceptron with LSTM
-    #     temp_env,                         # Your vectorized Forex environment
-    #     policy_kwargs=policy_kwargs, # Custom network architecture and LSTM settings
-
-    #     # --- PPO Hyperparameters ---
-    #     learning_rate=0.0003,        # Learning rate for the optimizer (Adam by default)
-    #                                 # Can be a schedule: `lambda f: f * 2.5e-4`
-    #     n_steps=128,                 # Number of steps to run for each environment per update
-    #                                 # This is the unroll length for the LSTM for each update.
-    #                                 # For RecurrentPPO this is n_steps per environment before update.
-    #     batch_size=128,              # Minibatch size for PPO updates.
-    #                                 # Must be <= n_steps * n_envs.
-    #                                 # For RecurrentPPO, this is the number of trajectories (sequences)
-    #                                 # sampled from the rollout buffer for each gradient step.
-    #                                 # So if n_steps=128, n_envs=1, batch_size=128 means 1 sequence.
-    #                                 # If n_steps=128, n_envs=4, batch_size=256 means 2 sequences of length 128.
-    #                                 # Make sure n_steps * n_envs is a multiple of batch_size.
-    #     n_epochs=10,                 # Number of epochs when optimizing the surrogate loss
-    #     gamma=0.7,                  # Discount factor for future rewards
-    #     gae_lambda=0.95,             # Factor for trade-off of bias vs variance for Generalized Advantage Estimator
-    #     clip_range=0.2,              # Clipping parameter for PPO, can be a schedule
-    #     clip_range_vf=None,          # Clipping parameter for the value function, can be a schedule (None = no clipping)
-    #     normalize_advantage=True,    # Whether to normalize the advantages
-    #     ent_coef=0.0,                # Entropy coefficient for the loss calculation (encourages exploration)
-    #     vf_coef=0.5,                 # Value function coefficient for the loss calculation
-    #     max_grad_norm=0.5,           # Maximum value for gradient clipping
-    #     use_sde=False,               # Whether to use State Dependent Exploration (SDE)
-    #                                 # SDE usually for continuous actions, not typically used with LSTM directly.
-    #     sde_sample_freq=-1,          # Sample a new noise matrix every `sde_sample_freq` steps when using SDE
-    #                                 # (Set to -1 to sample at each step)
-    #     target_kl=None,              # Limit the KL divergence between updates, (e.g., 0.01 or 0.05). If None, no KL constraint.
-
-    #     # --- Other Parameters ---
-    #     verbose=0,                   # Verbosity level: 0 for no output, 1 for info messages, 2 for debug messages
-    #     seed=None,                   # Seed for the random number generator
-    #     device="auto",               # Device (cpu, cuda, ...) on which the code should run
-    #     _init_setup_model=True       # Whether to build the network at creation
-    # )
-
-    # print("\nRecurrentPPO Model Architecture:")
-    # print(model.policy)
-
     logging.info("Running train test analyze...")
     train_test_analyse(
         train_env=train_env,
@@ -259,7 +203,7 @@ def main():
         model=model,
         base_folder_path=RQ2_DIR,
         experiment_group_name="hyperparameters",
-        experiment_name="experiment_with_time_sinus",
+        experiment_name="xauusd",
         train_episodes=30,
         eval_episodes=1,
         checkpoints=True,

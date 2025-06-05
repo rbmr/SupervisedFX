@@ -66,6 +66,19 @@ def ema(df: pd.DataFrame, window: int, column: str = 'close_bid'):
     """
     df[f'ema_{window}_{column}'] = df[column].ewm(span=window, adjust=False).mean()
 
+def kama(df: pd.DataFrame, window: int = 10, column: str = 'close_bid'):
+    """
+    Calculate the Kaufman's Adaptive Moving Average (KAMA) for a given column.
+    KAMA adjusts its sensitivity based on the volatility of the price.
+    """
+    change = df[column].diff()
+    volatility = df[column].rolling(window=window).apply(lambda x: np.std(x), raw=True)
+    
+    efficiency_ratio = change.abs() / volatility
+    smoothing_constant = (efficiency_ratio.rolling(window=window).mean() * (2 / (window + 1))).fillna(0)
+    
+    df[f'kama_{window}_{column}'] = df[column].ewm(span=window, adjust=False).mean() * smoothing_constant
+
 def bollinger_bands(df: pd.DataFrame, window: int = 20, num_std_dev: float = 2.0):
     """
     Calculate Bollinger Bands for a given column.
@@ -319,6 +332,15 @@ def as_min_max_fixed(df: pd.DataFrame, column: str, min: int = 0, max: int = 100
     df[f'{column}'] = (df[column] - min) / (max - min)
     df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
     df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
+
+def as_below_above_column(df: pd.DataFrame, column: str, other_column: str):
+    """
+    Normalize a column as below/above another column.
+    This will create a new column with 1 if the value is above the other column, -1 if below, and 0 if equal.
+    """
+    df[f'{column}'] = np.where(df[column] > df[other_column], 1, 
+                                                           np.where(df[column] < df[other_column], -1, 0))
+    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
 
 ## other
 def remove_columns(df: pd.DataFrame, columns: List[str]):
