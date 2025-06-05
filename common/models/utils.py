@@ -53,9 +53,7 @@ def load_model_with_metadata(path: Path) -> BaseAlgorithm:
     """
     Dynamically load any model using additional metadata.
     """
-    # Validat input
-    if not path.exists():
-        raise ValueError(f"{path} does not exist")
+    # Validate input
     if not path.is_file():
         raise ValueError(f"{path} is not a file")
     if path.suffix != ".zip":
