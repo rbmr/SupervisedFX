@@ -15,8 +15,9 @@ from numpy.typing import NDArray
 from common.constants import MarketDataCol
 
 def parallel_run(func, inputs, num_workers = None):
+    """Applies a function to a list in parallel, returning results in proper order."""
     if num_workers is None:
-        num_workers = cpu_count() // 2
+        num_workers = cpu_count()
     with Pool(processes=num_workers) as pool:
         return pool.map(func, inputs)
 
