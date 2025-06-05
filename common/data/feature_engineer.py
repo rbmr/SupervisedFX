@@ -93,6 +93,27 @@ def _norm_time_of_day(dt_series: pd.Series):
         dt_series.dt.microsecond / 1_000_000
     ) / (60 * 60 * 24)
 
+def atr(df: pd.DataFrame, window: int = 14, column_high: str = "high_bid", column_low: str = "low_bid", column_close: str = "close_bid"):
+    """
+    Adds an 'atr_{window}' column to df containing the rolling ATR.
+    ATR = rolling mean of True Range over `window` bars.
+    True Range = max(high - low, |high - prev_close|, |low - prev_close|).
+    """
+    high = df[column_high]
+    low = df[column_low]
+    close_shifted = df[column_close].shift(1).bfill()
+
+    # Compute True Range using np.maximum, then convert to Series
+    true_range_array = np.maximum.reduce([
+        high - low,
+        (high - close_shifted).abs(),
+        (low - close_shifted).abs()
+    ])
+
+    true_range = pd.Series(true_range_array, index=df.index)
+
+    df[f"atr_{window}"] = true_range.rolling(window=window, min_periods=1).mean().fillna(0)
+
 def _norm_time_of_week(dt_series: pd.Series):
     """Converts a time column to a [0,1] range of time of week."""
     if not pd.api.types.is_datetime64_any_dtype(dt_series):
@@ -458,6 +479,12 @@ def history_lookback(df: pd.DataFrame, lookback_window_size: int, columns: List[
     for col in columns:
         for i in range(1, lookback_window_size + 1):
             df[f'{col}_shift_{i}'] = df[col].shift(i)
+
+def copy_columns(df: pd.DataFrame, source_columns: List[str], target_columns: List[str]):
+    if len(source_columns) != len(target_columns):
+        raise ValueError("len columns and target_columns are not the same.")
+    for source_column, target_column in zip(source_columns, target_columns):
+        copy_column(df, source_column, target_column)
 
 def copy_column(df: pd.DataFrame, source_column: str, target_column: str):
     """
