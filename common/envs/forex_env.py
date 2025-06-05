@@ -24,6 +24,8 @@ class ForexEnv(gym.Env):
                  initial_capital: float = 10000.0,
                  transaction_cost_pct: float = 0.0,
                  n_actions: int = 1,
+                 allow_short: bool = True,
+                 allow_long: bool = True,
                  custom_reward_function: Callable[['ForexEnv'], float] | None = None,
                  shuffled: bool = False,
                  ):
@@ -102,12 +104,24 @@ class ForexEnv(gym.Env):
 
         # Action space
         self.n_actions = n_actions
+        self.allow_short = allow_short
+        self.allow_long = allow_long
         if self.n_actions == 0:
             logging.info(f"n_actions is zero, using continuous action space")
-            self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(), dtype=np.float32)
+
+            low = -1.0 if allow_short else 0.0
+            high = 1.0 if allow_long else 0.0
+
+            self.action_space = spaces.Box(low=low, high=high, shape=(), dtype=np.float32)
         else:
             logging.info(f"n_actions is larger than zero, using discrete action space with {n_actions} actions for buys, {n_actions} for sells, and 1 action for no_participation.")
-            self.action_space = spaces.Discrete(2 * n_actions + 1)
+
+            if not allow_short and not allow_long:
+                raise ValueError("If n_actions > 0, at least one of allow_short or allow_long must be True.")
+            if allow_short and allow_long:
+                self.action_space = spaces.Discrete(2 * self.n_actions + 1)
+            else:
+                self.action_space = spaces.Discrete(self.n_actions + 1)
 
         # Define observation space
         num_market_features = len(market_feature_df.columns)
@@ -124,6 +138,8 @@ class ForexEnv(gym.Env):
         initial_capital: float = 10000.0,
         transaction_cost_pct: float = 0.0,
         n_actions: int = 1,
+        allow_short: bool = True,
+        allow_long: bool = True,
         custom_reward_function: Optional[Callable[['ForexEnv'], float]] = None,
         shuffled = False,
     ) -> tuple['ForexEnv', 'ForexEnv']:
@@ -162,6 +178,8 @@ class ForexEnv(gym.Env):
             initial_capital=initial_capital,
             transaction_cost_pct=transaction_cost_pct,
             n_actions=n_actions,
+            allow_short=allow_short,
+            allow_long=allow_long,
             custom_reward_function=custom_reward_function,
             shuffled=shuffled,
         )
@@ -174,6 +192,8 @@ class ForexEnv(gym.Env):
             initial_capital=initial_capital,
             transaction_cost_pct=transaction_cost_pct,
             n_actions=n_actions,
+            allow_short=allow_short,
+            allow_long=allow_long,
             custom_reward_function=custom_reward_function,
             shuffled=shuffled,
         )
@@ -259,7 +279,13 @@ class ForexEnv(gym.Env):
         """
         action = action.item()
         if self.n_actions > 0:
-            action = (action - self.n_actions) / self.n_actions
+            if self.allow_long and self.allow_short:
+                action = (action - self.n_actions) / self.n_actions
+            elif self.allow_long:
+                action = action / self.n_actions
+            else: # self.allow_short
+                action = -action / self.n_actions
+                
         return action
 
     def _execute_action(self, target_exposure, current_data, current_cash, current_shares) -> tuple[float, float]:

@@ -137,19 +137,19 @@ def main():
     INITIAL_CAPITAL = 10000.0
     TRANSACTION_COST_PCT = 0.0
 
-    # forex_data = ForexCandleData.load(source="dukascopy",
-    #                                   instrument="EURUSD",
-    #                                   granularity=Timeframe.M15,
-    #                                   start_time=RQ2_HYPERPARAMETERS_START_DATE,
-    #                                   end_time= RQ2_HYPERPARAMETERS_END_DATE,
-    #                                 )
-
     forex_data = ForexCandleData.load(source="dukascopy",
-                                      instrument="XAUUSD",
+                                      instrument="EURUSD",
                                       granularity=Timeframe.M15,
-                                      start_time=datetime(2022,1,2,23),
-                                      end_time= datetime(2022,12,30,21,45),
-                                      )
+                                      start_time=RQ2_HYPERPARAMETERS_START_DATE,
+                                      end_time= RQ2_HYPERPARAMETERS_END_DATE,
+                                    )
+
+    # forex_data = ForexCandleData.load(source="dukascopy",
+    #                                   instrument="XAUUSD",
+    #                                   granularity=Timeframe.M15,
+    #                                   start_time=datetime(2022,1,2,23),
+    #                                   end_time= datetime(2022,12,30,21,45),
+    #                                   )
     
     # --- Feature Engineering ---
     # Create a feature engineer object
@@ -169,6 +169,7 @@ def main():
         initial_capital=INITIAL_CAPITAL,
         transaction_cost_pct=TRANSACTION_COST_PCT,
         n_actions=1,
+        allow_short=False,
         custom_reward_function=risk_adjusted_return)
     logging.info("Environments created.")
 
@@ -203,7 +204,7 @@ def main():
         model=model,
         base_folder_path=RQ2_DIR,
         experiment_group_name="hyperparameters",
-        experiment_name="xauusd",
+        experiment_name="only_long_eurusd",
         train_episodes=30,
         eval_episodes=1,
         checkpoints=True,
