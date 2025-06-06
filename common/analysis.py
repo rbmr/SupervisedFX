@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -7,7 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from common.scripts import clean_numpy
+from common.scripts import clean_numpy, write_atomic_json
+
 
 def get_max_streak(seq, target_value):
     if len(seq) == 0:
@@ -54,8 +57,14 @@ def analyse_individual_run(results_file: Path, model_name: str):
         raise ValueError(f"results_file must have .csv extension, was {results_file.suffix}")
     output_dir = results_file.parent
     info_file = output_dir / "info.json"
+    # Skip if the final info file already exists and the contents are readable.
     if info_file.exists():
-        return
+        try:
+            with open(info_file, "r") as f:
+                data = json.load(f)
+            return
+        except Exception:
+            pass
 
     # Load results
     all_columns = pd.read_csv(results_file, nrows=0).columns.tolist()
@@ -282,8 +291,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
     plt.close()
 
     # log results
-    with open(info_file, 'w') as f:
-        json.dump(clean_numpy(info), f)
+    write_atomic_json(clean_numpy(info), info_file)
 
 def analyse_finals(final_metrics: List[Dict[str, Any]], output_dir: Path, env_name: str) -> None:
     """

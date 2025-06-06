@@ -1,8 +1,11 @@
 """
 This file contains some simple scripts that can be useful anywhere during the project.
 """
+import json
+import os
 import random
 import signal
+import tempfile
 from datetime import datetime, timedelta
 from functools import partial
 from multiprocessing import cpu_count, Pool, get_context
@@ -270,6 +273,18 @@ def set_seed(seed_value: int):
         torch.backends.cudnn.benchmark = False
 
     print(f"Seeds set to {seed_value} for Python, NumPy, TensorFlow, and PyTorch.")
+
+def write_atomic_json(data, path: Path):
+    """
+    Writes a JSON file guaranteeing atomicity.
+    """
+    dir_name = path.parent
+    with tempfile.NamedTemporaryFile("w", dir=dir_name, delete=False) as tf:
+        json.dump(data, tf)
+        tf.flush() # write python buffer to os buffer
+        os.fsync(tf.fileno()) # write os buffer to disk
+        temp_path = tf.name
+    os.replace(temp_path, path)
 
 def flatten_dict(d: Dict[str, Any], sep=".") -> Dict[str, Any]:
     """
