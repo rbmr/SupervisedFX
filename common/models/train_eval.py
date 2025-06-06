@@ -331,7 +331,7 @@ def run_model(model: BaseAlgorithm,
     next(steps) # skip one value
 
     # Start the loop
-    for step in steps: # skip the first step
+    for step in steps:
 
         # Take action
         action, _ = model.predict(obs, deterministic=deterministic)
