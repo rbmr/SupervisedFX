@@ -1,9 +1,9 @@
-from pathlib import Path
-
 import logging
+from pathlib import Path
 
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
+
 from common.constants import AgentDataCol
 from common.envs.forex_env import ForexEnv
 from common.models.utils import save_model_with_metadata
