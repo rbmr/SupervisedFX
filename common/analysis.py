@@ -1,6 +1,8 @@
+import json
 from pathlib import Path
 from typing import List, Dict, Any
 
+import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -58,23 +60,38 @@ def calculate_trade_returns(open_signals: np.ndarray, close_signals: np.ndarray,
 
     return returns
 
-def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> Dict[str, Any]:
+def analyse_individual_run(results_file: Path, model_name: str):
     """
-    Analyze the results DataFrame and save the analysis to the results_path.
+    Analyzes a data.csv file and outputs resulting files in the same directory.
     """
-    # Ensure results_path exists
-    results_path.mkdir(parents=True, exist_ok=True)
+    if not results_file.is_file():
+        raise FileNotFoundError(results_file)
+    if results_file.suffix != ".csv":
+        raise ValueError(f"results_file must have .csv extension, was {results_file.suffix}")
+    output_dir = results_file.parent
+    info_file = output_dir / "info.json"
+    if info_file.exists():
+        return
+
+    # Load results
+    df = pd.read_csv(results_file, low_memory=False)
+
+    # Analyze results
+    logging.info(f"Analyzing {results_file}")
+
+    # Ensure output_dir exists
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # calculate correlation matrix of the dataframe
     correlation_matrix = df.corr()
     plt.figure(figsize=(12, 8))
     plt.imshow(correlation_matrix, cmap='coolwarm', interpolation='nearest')
     plt.colorbar()
-    plt.title(f"Correlation Matrix for {name}")
+    plt.title(f"Correlation Matrix for {model_name}")
     plt.xticks(ticks=np.arange(len(correlation_matrix.columns)), labels=correlation_matrix.columns, rotation=45)
     plt.yticks(ticks=np.arange(len(correlation_matrix.columns)), labels=correlation_matrix.columns)
     plt.tight_layout()
-    plt.savefig(results_path / f"correlation_matrix.png")
+    plt.savefig(output_dir / f"correlation_matrix.png")
     plt.close()
 
     # Pre-compute commonly used arrays (avoid repeated DataFrame access)
@@ -89,11 +106,11 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
     plt.figure(figsize=(12, 6))
     plt.plot(close_bid, label='Close Bid Prices')
     plt.plot(close_ask, label='Close Ask Prices')
-    plt.title(f"Close Prices for {name}")
+    plt.title(f"Close Prices for {model_name}")
     plt.xlabel('Time Step')
     plt.ylabel('Price')
     plt.legend()
-    plt.savefig(results_path / f"market_data.png")
+    plt.savefig(output_dir / f"market_data.png")
     plt.close()
 
     # Plot equity OHLC
@@ -102,11 +119,11 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
     plt.plot(equity_high, label='Equity High', color='green')
     plt.plot(equity_low, label='Equity Low', color='red')
     plt.plot(equity_close, label='Equity Close', color='orange')
-    plt.title(f"Equity OHLC for {name}")
+    plt.title(f"Equity OHLC for {model_name}")
     plt.xlabel('Time Step')
     plt.ylabel('Price')
     plt.legend()
-    plt.savefig(results_path / f"equity_ohlc.png")
+    plt.savefig(output_dir / f"equity_ohlc.png")
     plt.close()
 
     # calculate sharpe ratio on the close prices of equity.
@@ -139,22 +156,22 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
     # Plot drawdown
     plt.figure(figsize=(12, 6))
     plt.plot(drawdown, label='Drawdown', color='purple')
-    plt.title(f"Drawdown for {name}")
+    plt.title(f"Drawdown for {model_name}")
     plt.xlabel('Time Step')
     plt.ylabel('Drawdown')
     plt.legend()
-    plt.savefig(results_path / f"drawdown.png")
+    plt.savefig(output_dir / f"drawdown.png")
     plt.close()
 
     # plot histogram of actions taken, dynamic to the actual values in the dataset
     unique_actions, counts = np.unique(actions, return_counts=True)
     plt.figure(figsize=(12, 6))
     plt.bar(unique_actions, counts, width=0.1)
-    plt.title(f"Actions Histogram for {name}")
+    plt.title(f"Actions Histogram for {model_name}")
     plt.xlabel('Action Value')
     plt.ylabel('Count')
     plt.xticks(unique_actions)
-    plt.savefig(results_path / f"actions_histogram.png")
+    plt.savefig(output_dir / f"actions_histogram.png")
     plt.close()
 
     # profit factor. Calulate the gross profit (all positive returns) and gross loss (all negative returns)
@@ -270,39 +287,40 @@ def analyse_individual_run(df: pd.DataFrame, results_path: Path, name: str) -> D
             cell.set_text_props(weight='bold', color='black')
             cell.set_facecolor('lightgrey')
 
-    plt.title(f"Analysis Results for {name}", fontsize=12, y=1.05, weight='bold')
+    plt.title(f"Analysis Results for {model_name}", fontsize=12, y=1.05, weight='bold')
     plt.subplots_adjust(top=0.8)  # Adjust top margin to fit title
-    plt.savefig(results_path / f"analysis_results_table.png")
+    plt.savefig(output_dir / f"analysis_results_table.png")
     plt.close()
 
-    return info
+    # log results
+    with open(info_file, 'w') as f:
+        json.dump(info, f)
 
-
-def analyse_finals(final_metrics: List[Dict[str, Any]], results_path: Path, name: str) -> None:
+def analyse_finals(final_metrics: List[Dict[str, Any]], output_dir: Path, env_name: str) -> None:
     """
-    Analyze the final results DataFrame and save the analysis to the results_path.
+    Analyze the final results DataFrame and save the analysis to the output_dir.
     """
     # Ensure results_path exists
-    results_path.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # make a plot of the sharpe ratios
     sharpe_ratios = [metrics['sharpe_ratio'] for metrics in final_metrics]
     plt.figure(figsize=(12, 6))
     plt.bar(range(len(sharpe_ratios)), sharpe_ratios, tick_label=[f"{i + 1}" for i in range(len(sharpe_ratios))])
-    plt.title(f"Sharpe Ratios for {name}")
+    plt.title(f"Sharpe Ratios for {env_name}")
     plt.xlabel('Model')
     plt.ylabel('Sharpe Ratio')
-    plt.savefig(results_path / f"sharpe_ratios.png")
+    plt.savefig(output_dir / f"sharpe_ratios.png")
     plt.close()
 
     # make a plot of the max drawdowns
     max_drawdowns = [metrics['max_drawdown'] for metrics in final_metrics]
     plt.figure(figsize=(12, 6))
     plt.bar(range(len(max_drawdowns)), max_drawdowns, tick_label=[f"{i + 1}" for i in range(len(max_drawdowns))])
-    plt.title(f"Max Drawdowns for {name}")
+    plt.title(f"Max Drawdowns for {env_name}")
     plt.xlabel('Model')
     plt.ylabel('Max Drawdown')
-    plt.savefig(results_path / f"max_drawdowns.png")
+    plt.savefig(output_dir / f"max_drawdowns.png")
     plt.close()
 
     # make a plot of the profit factors
@@ -313,20 +331,20 @@ def analyse_finals(final_metrics: List[Dict[str, Any]], results_path: Path, name
     plt.bar(range(len(profit_factors)),
             profit_factors,
             tick_label=[f"{i + 1}" for i in range(len(profit_factors))])
-    plt.title(f"Profit Factors for {name}")
+    plt.title(f"Profit Factors for {env_name}")
     plt.xlabel('Model')
     plt.ylabel('Profit Factor')
     yticks = plt.yticks()[0] # Adjust y ticks back
     plt.yticks(yticks, [f"{y + baseline:.2f}" for y in yticks])
-    plt.savefig(results_path / f"profit_factors.png")
+    plt.savefig(output_dir / f"profit_factors.png")
     plt.close()
 
     # make a plot of the total pnl
     total_trades_returns = [metrics['total_trades_returns'] for metrics in final_metrics]
     plt.figure(figsize=(12, 6))
     plt.bar(range(len(total_trades_returns)), total_trades_returns, tick_label=[f"{i + 1}" for i in range(len(total_trades_returns))])
-    plt.title(f"Total Trades Returns for {name}")
+    plt.title(f"Total Trades Returns for {env_name}")
     plt.xlabel('Model')
     plt.ylabel('Total Trades Returns')
-    plt.savefig(results_path / f"total_trades_returns.png")
+    plt.savefig(output_dir / f"total_trades_returns.png")
     plt.close()

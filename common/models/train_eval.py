@@ -1,3 +1,4 @@
+import json
 import logging
 from functools import partial
 from multiprocessing import Pool, current_process, Manager, Process, Lock
@@ -17,7 +18,7 @@ from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
 from common.envs.callbacks import SaveOnEpisodeEndCallback
 from common.envs.forex_env import ForexEnv
 from common.models.dummy_models import DUMMY_MODELS
-from common.scripts import set_seed
+from common.scripts import set_seed, parallel_run
 from common.models.utils import load_models, save_model_with_metadata, load_model_with_metadata
 from common.analysis import analyse_individual_run, analyse_finals
 
@@ -78,10 +79,8 @@ def train_test_analyse(train_env: ForexEnv,
 
     # ANALYZING RESULTS
 
-    analyse_evaluation_results(
-        models_dir=models_path,
+    analyse_results(
         results_dir=results_path,
-        eval_envs_names= ["train", "eval"],
         model_name_suffix=f"[{experiment_group_name}::{experiment_name}]"
     )
 
@@ -254,14 +253,17 @@ def evaluate_models(models_dir: Path,
 
     logging.info("Finished evaluation.")
 
-def analyse_results(results_dir: Path) -> None:
+def analyze_result(data_csv: Path, model_name_suffix: str = ""):
     """
-    Recursively searches a directory for data.csv files, and performs analysis.
+    Extracts the environment name from a data.csv file.
+    """
+    logging.info(f"Analyzing {data_csv}...")
+    analyse_individual_run(data_csv, f"{data_csv.parent.parent.name}{model_name_suffix}")
 
-    Directory structure assumption:
-    - Each immediate subdirectory of 'results_dir' corresponds to a different model.
-    - Each model directory contains one or more subdirectories, each representing a different environment.
-    - Each environment directory contains exactly one 'data.csv' file.
+def analyse_results(results_dir: Path, model_name_suffix: str = "") -> None:
+    """
+    Searches a directory for data.csv files, and performs analysis.
+    Expected directory structure: /{model_name}/{env_name}/data.csv
     """
     logging.info("Analysing results...")
 
@@ -271,79 +273,30 @@ def analyse_results(results_dir: Path) -> None:
     if not results_dir.is_dir():
         raise ValueError(f"{results_dir} is not a directory.")
 
-    # Setup
-    eval_envs_metrics = {}
+    # Evaluate runs
+    func = partial(analyze_result, model_name_suffix=model_name_suffix)
     result_files = list(results_dir.rglob("data.csv"))
     result_files.sort(key=lambda x: x.stat().st_mtime) # Old to new
-    for results_file in result_files:
-
-        # Extract names (shady business)
-        env_dir = results_file.parent
-        env_name = env_dir.name
-        if eval_envs_metrics.get(env_name, None) is None:
-            eval_envs_metrics[env_name] = []
-        model_dir = env_dir.parent
-        model_name = model_dir.name
-        assert model_dir.parent == results_dir, f"{results_file} is not a great-grandchild of {results_dir}"
-
-        # Load results
-        df = pd.read_csv(results_file, low_memory=False)
-        if df.empty:
-            logging.warning(f"Results file {results_file} is empty, skipping.")
-            continue
-
-        # Analyze results
-        logging.info(f"Analyzing results of {model_name} on {env_name} from {results_file}...")
-        metrics = analyse_individual_run(df, env_dir, name=model_name)
-        eval_envs_metrics[env_name].append(metrics) # save results
+    parallel_run(func, result_files, num_workers=6)
 
     # Aggregate environment results
-    for eval_env_name, metrics in eval_envs_metrics.items():
-        analyse_finals(metrics, results_dir / eval_env_name, name=eval_env_name)
+    logging.info("Aggregating analysis results...")
+    metrics = {}
+    for result_file in result_files:
+        env_dir = result_file.parent
+        env_name = env_dir.name
+        if env_name not in metrics:
+            metrics[env_name] = []
+        info_file = env_dir / "info.json"
+        with open(info_file, "r") as f:
+            info = json.load(f)
+        metrics[env_name].append(info)
+
+    logging.info("Analyzing aggregates...")
+    for env_name, metrics in metrics.items():
+        analyse_finals(metrics, output_dir=results_dir / f"final_{env_name}", env_name=env_name)
 
     logging.info("Analysis complete.")
-
-def analyse_evaluation_results(models_dir: Path,
-                               results_dir: Path,
-                               eval_envs_names: list[str],
-                               model_name_suffix: str = "",
-                               ) -> None:
-    """
-    Analyze evaluation results from multiple models and environments.
-    This function reads the results from the specified models and environments,
-    and generates a summary of the performance metrics.
-    """
-
-    logging.info("Analyzing results...")
-    logging.warning("This method (analyze_evaluation_results) is a little wonky, please use analyse_results instead.")
-
-    eval_envs_model_metrics: dict[str, list[dict[str, Any]]] = {name: [] for name in eval_envs_names}
-
-    for model_name, model in load_models(models_dir):
-        model_results_dir = results_dir / model_name
-
-        for eval_env_name in eval_envs_names:
-            env_results_dir = model_results_dir / eval_env_name
-            env_results_file = env_results_dir / "data.csv"
-
-            if not env_results_file.exists():
-                logging.warning(f"Results file {env_results_file} does not exist, skipping.")
-                continue
-
-            # Load results
-            df = pd.read_csv(env_results_file)
-            if df.empty:
-                logging.warning(f"Results file {env_results_file} is empty, skipping.")
-                continue
-            logging.info(f"Analyzing results for model: {model_name} on environment: {eval_env_name}")
-            metrics = analyse_individual_run(df, env_results_dir, name=model_name + model_name_suffix + f"[{eval_env_name}]")
-            eval_envs_model_metrics[eval_env_name].append(metrics)
-    
-    for eval_env_name, metrics in eval_envs_model_metrics.items():
-        analyse_finals(metrics, results_dir / eval_env_name, name="episodic_results" + model_name_suffix + f"[{eval_env_name}]")
-
-    logging.info("Analysis complete.")
-
 
 def run_model(model: BaseAlgorithm,
               env: ForexEnv,

@@ -2,9 +2,10 @@
 This file contains some simple scripts that can be useful anywhere during the project.
 """
 import random
+import signal
 from datetime import datetime, timedelta
 from functools import partial
-from multiprocessing import cpu_count, Pool
+from multiprocessing import cpu_count, Pool, get_context
 from pathlib import Path
 from typing import Any, Dict, Generator, Callable, TypeVar
 import time
@@ -18,29 +19,33 @@ from common.constants import MarketDataCol
 K = TypeVar("K")
 V = TypeVar("V")
 
-def index_wrapper(func: Callable[[K], V], indexed_inp: tuple[int, K]) -> tuple[int, V]:
-    index, inp = indexed_inp
-    result = func(inp)
-    return index, result
+def index_wrapper(func: Callable[[K], V], pair: tuple[int, K]) -> tuple[int, V]:
+    i, x = pair
+    return i, func(x)
 
-def parallel_run(func: Callable[[K], V], inputs: list[K], num_workers = None) -> list[V]:
+def parallel_run(func: Callable[[K], V], inputs: list[K], num_workers: int) -> list[V]:
     """
     Applies a function to a list in parallel, returning results in proper order.
     """
-    if num_workers is None:
-        num_workers = cpu_count()
-    results = [None] * len(inputs)
+    num_workers = max(min(cpu_count()-1, num_workers), 1)
+    results: list[V | None] = [None] * len(inputs)
+    ctx = get_context("spawn")
     indexed_inps = enumerate(inputs)
-    indexed_fn = partial(index_wrapper, func=func)
-    with Pool(processes=num_workers) as pool:
+    indexed_fn = partial(index_wrapper, func)
+    original_sigint_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    with ctx.Pool(processes=num_workers) as pool:
+        signal.signal(signal.SIGINT, original_sigint_handler)
         try:
             for i, res in pool.imap_unordered(indexed_fn, indexed_inps):
                 results[i] = res
-            return results
         except KeyboardInterrupt as e:
             pool.terminate()
             pool.join()
             raise e
+        else:
+            pool.close()
+            pool.join()
+    return results
 
 def fetch(session, url, retries: int = 16, raise_on_fail: bool = True) -> bytes | None:
     delay = 1
