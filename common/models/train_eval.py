@@ -103,35 +103,7 @@ def train_model(model: BaseAlgorithm,
 
     logging.info("Training complete.")
 
-def evaluate_dummies(results_dir: Path,
-                     split_ratio: float,
-                     forex_candle_data: ForexCandleData):
-
-    if results_dir.exists() and not results_dir.is_dir():
-        raise ValueError(f"{results_dir} is not a directory")
-    results_dir.mkdir(parents=True, exist_ok=True)
-
-    market_feature_engineer = FeatureEngineer()
-    copy_ohlcv = lambda df: copy_columns(
-        df=df,
-        source_columns=list(df.columns),
-        target_columns=[f"{src}_copy" for src in df.columns]
-    )
-    market_feature_engineer.add(copy_ohlcv)
-
-    agent_feature_engineer = StepwiseFeatureEngineer()
-
-    train_env, eval_env = ForexEnv.create_train_eval_envs(
-        split_ratio=split_ratio,
-        forex_candle_data=forex_candle_data,
-        market_feature_engineer=market_feature_engineer,
-        agent_feature_engineer=agent_feature_engineer,
-    )
-
-    eval_envs = {
-        "train": train_env,
-        "eval": eval_env,
-    }
+def evaluate_dummies(results_dir: Path, eval_envs: dict[str, ForexEnv]):
 
     for model_fn in DUMMY_MODELS:
         for eval_env_name, eval_env in eval_envs.items():
@@ -149,7 +121,7 @@ def evaluate_dummies(results_dir: Path,
             run_model(model=model,
                       env=eval_env,
                       data_path=env_results_file,
-                      total_steps=1 * eval_episode_length,
+                      total_steps=eval_episode_length,
                       deterministic=True,
                       progress_bar=True)
 
@@ -221,12 +193,16 @@ def evaluate_models(models_dir: Path,
                     eval_envs: dict[str, ForexEnv],
                     eval_episodes: int = 1,
                     force_eval: bool = False,
-                    num_workers: int = 1) -> None:
+                    num_workers: int = 1,
+                    eval_dummies: bool = False) -> None:
     """
     Evaluates each model in a directory on a set of ForexEnvs for a given number of episodes.
     Saves results in results_dir.
     """
     logging.info("Starting evaluation...")
+
+    if eval_dummies:
+        evaluate_dummies(results_dir, eval_envs)
 
     progress_bar = num_workers == 1
     func = partial(

@@ -18,7 +18,8 @@ class DummyModel(BaseAlgorithm):
 
     def __init__(self, pred_fn: Callable[[np.ndarray], Any]):
         # Just passing standard parameters, these are not actually used.
-        super().__init__(policy="MlpPolicy", env=None, learning_rate=lambda _: 0)
+        self.policy_aliases["NoPolicy"] = BasePolicy
+        super().__init__(policy="NoPolicy", env=None, learning_rate=lambda _: 0)
         # Set function used to generate predictions
         self._pred_fn = pred_fn
 
