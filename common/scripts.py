@@ -181,8 +181,6 @@ def exact_divide(a: int, b: int) -> int:
         return a // b
     raise ValueError(f"{a} is not divisible by {b}")
 
-    blocks = []
-
 def render_horz_bar(height: float) -> str:
     """Renders a horizontal bar using fractional Unicode block characters"""
     full_blocks = int(height)
