@@ -3,9 +3,10 @@ This file contains some simple scripts that can be useful anywhere during the pr
 """
 import random
 from datetime import datetime, timedelta
+from functools import partial
 from multiprocessing import cpu_count, Pool
 from pathlib import Path
-from typing import Any, Dict, Generator, Callable
+from typing import Any, Dict, Generator, Callable, TypeVar
 import time
 import numpy as np
 import pandas as pd
@@ -14,12 +15,32 @@ from numpy.typing import NDArray
 
 from common.constants import MarketDataCol
 
-def parallel_run(func, inputs, num_workers = None):
-    """Applies a function to a list in parallel, returning results in proper order."""
+K = TypeVar("K")
+V = TypeVar("V")
+
+def index_wrapper(func: Callable[[K], V], indexed_inp: tuple[int, K]) -> tuple[int, V]:
+    index, inp = indexed_inp
+    result = func(inp)
+    return index, result
+
+def parallel_run(func: Callable[[K], V], inputs: list[K], num_workers = None) -> list[V]:
+    """
+    Applies a function to a list in parallel, returning results in proper order.
+    """
     if num_workers is None:
         num_workers = cpu_count()
+    results = [None] * len(inputs)
+    indexed_inps = enumerate(inputs)
+    indexed_fn = partial(index_wrapper, func=func)
     with Pool(processes=num_workers) as pool:
-        return pool.map(func, inputs)
+        try:
+            for i, res in pool.imap_unordered(indexed_fn, indexed_inps):
+                results[i] = res
+            return results
+        except KeyboardInterrupt as e:
+            pool.terminate()
+            pool.join()
+            raise e
 
 def fetch(session, url, retries: int = 16, raise_on_fail: bool = True) -> bytes | None:
     delay = 1
