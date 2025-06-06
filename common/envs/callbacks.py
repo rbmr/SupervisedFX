@@ -9,6 +9,24 @@ from common.envs.forex_env import ForexEnv
 from common.models.utils import save_model_with_metadata
 from common.scripts import circ_slice, render_horz_bar
 
+class SaveCallback(BaseCallback):
+    def __init__(self, models_dir: Path, save_freq: int, verbose=0):
+        super().__init__(verbose)
+        if models_dir.exists() and not models_dir.is_dir():
+            raise ValueError(f"{models_dir} is not a valid directory.")
+        self.models_dir = models_dir
+        self.models_dir.mkdir(parents=True, exist_ok=True)
+        self.save_freq = save_freq
+
+    def _on_step(self) -> bool:
+        if self.num_timesteps % self.save_freq != 0:
+            return True
+        filename = self.models_dir / f"model_{self.num_timesteps}_steps.zip"
+        save_model_with_metadata(self.model, filename)
+        if self.verbose > 0:
+            logging.info(f"Saved model at timestep {self.num_timesteps} to {filename}")
+        return True
+
 class SaveOnEpisodeEndCallback(BaseCallback):
     def __init__(self, models_dir: Path, verbose=0):
         super().__init__(verbose)
