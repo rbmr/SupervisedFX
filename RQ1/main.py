@@ -1,21 +1,20 @@
 import os
-
-from RQ1.parameters import get_environments, get_model
-
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.info("Loading imports...")
 from datetime import datetime
 from pathlib import Path
 
 from common.envs.callbacks import (ActionHistogramCallback, CoolStatsCallback,
-                                   SaveOnEpisodeEndCallback, SaveCallback)
+                                   SaveCallback, SaveOnEpisodeEndCallback)
 from common.models.train_eval import (analyse_results, evaluate_models,
                                       train_model)
 from common.models.utils import save_model_with_metadata
 from common.scripts import has_nonempty_subdir, n_children, picker
 from RQ1.constants import EXPERIMENT_NAME_FORMAT, EXPERIMENTS_DIR
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from RQ1.parameters import get_environments, get_model
+logging.info("Done.")
 
 def train():
 
