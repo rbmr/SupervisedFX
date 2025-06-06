@@ -257,7 +257,6 @@ def analyze_result(data_csv: Path, model_name_suffix: str = ""):
     """
     Extracts the environment name from a data.csv file.
     """
-    logging.info(f"Analyzing {data_csv}...")
     analyse_individual_run(data_csv, f"{data_csv.parent.parent.name}{model_name_suffix}")
 
 def analyse_results(results_dir: Path, model_name_suffix: str = "") -> None:
