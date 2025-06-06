@@ -47,6 +47,19 @@ def parallel_run(func: Callable[[K], V], inputs: list[K], num_workers: int) -> l
             pool.join()
     return results
 
+def clean_numpy(obj):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            obj[k] = clean_numpy(v)
+    if isinstance(obj, list):
+        for i, v in enumerate(obj):
+            obj[i] = clean_numpy(v)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    return obj
+
 def fetch(session, url, retries: int = 16, raise_on_fail: bool = True) -> bytes | None:
     delay = 1
     for _ in range(retries):

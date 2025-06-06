@@ -7,6 +7,23 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from common.scripts import clean_numpy
+
+def get_max_streak(seq, target_value):
+    if len(seq) == 0:
+        return 0
+
+    # Create groups of consecutive values
+    changes = np.diff(np.concatenate(([0], seq, [0])) != target_value)
+    start_indices = np.where(changes)[0][::2]
+    end_indices = np.where(changes)[0][1::2]
+
+    if len(start_indices) == 0:
+        return 0
+
+    streak_lengths = end_indices - start_indices
+    return np.max(streak_lengths) if len(streak_lengths) > 0 else 0
+
 def calculate_streaks(win_conditions: np.ndarray, lose_conditions: np.ndarray):
     """Calculate winning and losing streaks using vectorized operations"""
     assert win_conditions.shape == lose_conditions.shape
@@ -17,48 +34,15 @@ def calculate_streaks(win_conditions: np.ndarray, lose_conditions: np.ndarray):
     sequence[win_conditions] = 1
     sequence[lose_conditions] = -1
 
-    # Find streak lengths
-    def get_max_streak(seq, target_value):
-        if len(seq) == 0:
-            return 0
-
-        # Create groups of consecutive values
-        changes = np.diff(np.concatenate(([0], seq, [0])) != target_value)
-        start_indices = np.where(changes)[0][::2]
-        end_indices = np.where(changes)[0][1::2]
-
-        if len(start_indices) == 0:
-            return 0
-
-        streak_lengths = end_indices - start_indices
-        return np.max(streak_lengths) if len(streak_lengths) > 0 else 0
-
     return get_max_streak(sequence, 1), get_max_streak(sequence, -1)
 
-def calculate_trade_returns(open_signals: np.ndarray, close_signals: np.ndarray, prices: np.ndarray, trade_type: str='long'):
-    """Vectorized calculation of trade returns"""
-    assert trade_type in ('long', 'short')
-    assert open_signals.shape == close_signals.shape == prices.shape
-    assert open_signals.ndim == close_signals.ndim == prices.ndim == 1
-
-    returns = np.zeros(len(prices))
-
-    # Get indices where trades open and close
-    open_indices = np.where(open_signals)[0]
-    close_indices = np.where(close_signals)[0]
-
-    # Match open and close signals
-    for open_idx in open_indices:
-        # Find the next close after this open
-        future_closes = close_indices[close_indices > open_idx]
-        if len(future_closes) > 0:
-            close_idx = future_closes[0]
-            if trade_type == 'long':
-                returns[close_idx] = prices[close_idx] - prices[open_idx]
-            else:  # short
-                returns[close_idx] = prices[open_idx] - prices[close_idx]
-
-    return returns
+def drop_and_return_numpy(df: pd.DataFrame, cols: list[str]) -> list[np.ndarray]:
+    arrays = []
+    for col in cols:
+        arr = df[col].to_numpy(dtype=df[col].dtype)
+        arrays.append(arr)
+        df.drop(columns=col, inplace=True)
+    return arrays
 
 def analyse_individual_run(results_file: Path, model_name: str):
     """
@@ -74,7 +58,12 @@ def analyse_individual_run(results_file: Path, model_name: str):
         return
 
     # Load results
-    df = pd.read_csv(results_file, low_memory=False)
+    all_columns = pd.read_csv(results_file, nrows=0).columns.tolist()
+    dtypes = {col: 'float32' for col in all_columns}
+    dtypes["step"] = 'int32'
+    dtypes["done"] = 'boolean'
+    dtypes["info.market_data.date_gmt"] = 'float64'
+    df = pd.read_csv(results_file, dtype=dtypes)
 
     # Analyze results
     logging.info(f"Analyzing {results_file}")
@@ -94,13 +83,15 @@ def analyse_individual_run(results_file: Path, model_name: str):
     plt.savefig(output_dir / f"correlation_matrix.png")
     plt.close()
 
-    # Pre-compute commonly used arrays (avoid repeated DataFrame access)
-    data = df[['info.market_data.close_bid', 'info.market_data.close_ask',
-               'info.agent_data.equity_open', 'info.agent_data.equity_high',
-               'info.agent_data.equity_low', 'info.agent_data.equity_close',
-               'info.agent_data.action']].values
-
-    close_bid, close_ask, equity_open, equity_high, equity_low, equity_close, actions = data.T
+    # Extract arrays that will be used
+    np_columns = drop_and_return_numpy(df,[
+        'info.market_data.close_bid', 'info.market_data.close_ask',
+        'info.agent_data.equity_open', 'info.agent_data.equity_high',
+        'info.agent_data.equity_low', 'info.agent_data.equity_close',
+        'info.agent_data.action', 'info.market_data.date_gmt'
+    ])
+    close_bid, close_ask, equity_open, equity_high, equity_low, equity_close, actions, dates = np_columns
+    del df # df is no longer necessary
 
     # Plot market data
     plt.figure(figsize=(12, 6))
@@ -126,10 +117,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
     plt.savefig(output_dir / f"equity_ohlc.png")
     plt.close()
 
-    # calculate sharpe ratio on the close prices of equity.
-    # Then scale it to be annualized.
-    # Base this annualization factor based on the number of steps in a year.
-    # The timeframe can be anything, and no assumption is made about the time between steps.
+    # Calculate sharpe ratio on the close prices of equity.
     equity_returns = np.diff(equity_close) / equity_close[:-1]
     mean_return = np.mean(equity_returns)
     std_return = np.std(equity_returns, ddof=1)
@@ -138,11 +126,11 @@ def analyse_individual_run(results_file: Path, model_name: str):
     else:
         sharpe_ratio = 0.0
 
-    # Annualize the Sharpe ratio assuming 252 trading days in a year
-    min_date = df['info.market_data.date_gmt'].min()
-    max_date = df['info.market_data.date_gmt'].max()
-    date_range = pd.to_datetime(max_date) - pd.to_datetime(min_date)
-    amount_years = date_range.days / 365.25
+    # Annualize sharpe ratio
+    min_date = dates.min()
+    max_date = dates.max()
+    date_range_ns = max_date - min_date
+    amount_years = date_range_ns / (365.25 * 24 * 60 * 60 * 1e9)
 
     if amount_years > 0:
         N = equity_returns.shape[0] / amount_years
@@ -152,8 +140,6 @@ def analyse_individual_run(results_file: Path, model_name: str):
     cummax_equity = np.maximum.accumulate(equity_close)
     drawdown = equity_close - cummax_equity
     max_drawdown = np.min(drawdown)
-
-    # Plot drawdown
     plt.figure(figsize=(12, 6))
     plt.plot(drawdown, label='Drawdown', color='purple')
     plt.title(f"Drawdown for {model_name}")
@@ -163,72 +149,76 @@ def analyse_individual_run(results_file: Path, model_name: str):
     plt.savefig(output_dir / f"drawdown.png")
     plt.close()
 
-    # plot histogram of actions taken, dynamic to the actual values in the dataset
-    unique_actions, counts = np.unique(actions, return_counts=True)
+    # Plot histogram of actions taken, dynamic to the actual values in the dataset
     plt.figure(figsize=(12, 6))
-    plt.bar(unique_actions, counts, width=0.1)
+    plt.hist(actions, bins=16)
     plt.title(f"Actions Histogram for {model_name}")
     plt.xlabel('Action Value')
     plt.ylabel('Count')
-    plt.xticks(unique_actions)
     plt.savefig(output_dir / f"actions_histogram.png")
     plt.close()
 
-    # profit factor. Calulate the gross profit (all positive returns) and gross loss (all negative returns)
+    # profit factor. Calculate the gross profit (all positive returns) and gross loss (all negative returns)
     positive_returns = equity_returns[equity_returns > 0]
     negative_returns = equity_returns[equity_returns < 0]
     gross_profit = np.sum(positive_returns)
     gross_loss = -np.sum(negative_returns)
     profit_factor = gross_profit / gross_loss if gross_loss != 0 else float('inf')
 
+    # setup trades_df
+    trade_mask = actions != 0
 
-    trades_df = df[['info.agent_data.action', 'info.market_data.date_gmt', 'info.agent_data.equity_open','info.agent_data.equity_close']].copy()
-    trades_df['actions_prev'] = trades_df['info.agent_data.action'].shift(1).fillna(0)
-    trades_df['trade_type'] = np.where(trades_df['info.agent_data.action'] > 0, 'long',
-                                       np.where(trades_df['info.agent_data.action'] < 0, 'short', 'none'))
-    # remove none trades
-    trades_df = trades_df[trades_df['trade_type'] != 'none'].reset_index(drop=True)
+    if np.any(trade_mask):
+        # Extract trading rows
+        trade_actions = actions[trade_mask]
+        trade_dates = dates[trade_mask]
+        trade_equity_open = equity_open[trade_mask]
+        trade_equity_close = equity_close[trade_mask]
 
-    # group adjacent trades of the same type, and calculate beginning data, end data, begin equity, end equity
-    trades_df['group'] = (trades_df['trade_type'] != trades_df['trade_type'].shift()).cumsum()
-    trades_df = trades_df.groupby(['group', 'trade_type']).agg({
-        'info.market_data.date_gmt': ['first', 'last'],
-        'info.agent_data.equity_open': 'first',
-        'info.agent_data.equity_close': 'last',
-        'info.agent_data.action': ['first', 'last']
-    }).reset_index()
-    
-    new_column_names = []
-    for col in trades_df.columns.values:
-        if isinstance(col, tuple):
-            new_column_names.append('_'.join(col).strip('_'))
-        else:
-            new_column_names.append(str(col)) # Keep original name for non-tuple columns
-    trades_df.columns = new_column_names
+        # Determine trade types
+        trade_types = np.where(trade_actions > 0, 1, -1).astype(np.int8)
 
-    trades_df.rename(columns={
-        'info.market_data.date_gmt_first': 'trade_start_date',
-        'info.market_data.date_gmt_last': 'trade_end_date',
-        'info.agent_data.equity_open_first': 'trade_begin_equity',
-        'info.agent_data.equity_close_last': 'trade_end_equity',
-        'info.agent_data.action_first': 'trade_begin_action',
-        'info.agent_data.action_last': 'trade_end_action'
-    }, inplace=True)
+        # Group consecutive trades of same type
+        trade_changes = np.diff(np.concatenate(([0], trade_types)))
+        group_starts = np.where(trade_changes != 0)[0]
+        group_ends = np.concatenate([group_starts[1:], [len(trade_types)]])
 
-    # Calculate trade returns
-    trades_df['trade_return'] = trades_df['trade_end_equity'] - trades_df['trade_begin_equity']
-    trades_df['trade_return_pct'] = trades_df['trade_return'] / trades_df['trade_begin_equity']
-    trades_df['trade_duration_hours'] = (
-        pd.to_datetime(trades_df['trade_end_date']) - pd.to_datetime(trades_df['trade_start_date'])
-    ).dt.total_seconds() / 3600  # Convert to hours
+        num_trades = len(group_starts)
+        trade_returns = np.zeros(num_trades, dtype=np.float32)
+        trade_durations = np.zeros(num_trades, dtype=np.float32)
+        trade_types_grouped = np.zeros(num_trades, dtype=np.int8)
 
+        for i, (start, end) in enumerate(zip(group_starts, group_ends)):
+            trade_types_grouped[i] = trade_types[start]
+            trade_returns[i] = trade_equity_close[end-1] - trade_equity_open[start]
+            trade_durations[i] = (trade_dates[end-1] - trade_dates[start]) / (1e9 * 60 * 60)
 
-    # calculate streaks of winning and losing trades
-    trades_df['trade_winning'] = trades_df['trade_return'] > 0
-    trades_df['trade_losing'] = trades_df['trade_return'] < 0
-    trades_df['trade_winning_streak'] = trades_df['trade_winning'].astype(int).groupby((trades_df['trade_winning'] != trades_df['trade_winning'].shift()).cumsum()).cumsum()
-    trades_df['trade_losing_streak'] = trades_df['trade_losing'].astype(int).groupby((trades_df['trade_losing'] != trades_df['trade_losing'].shift()).cumsum()).cumsum()    
+        winning_trades = trade_returns > 0
+        losing_trades = trade_returns < 0
+        max_winning_streak, max_losing_streak = calculate_streaks(winning_trades, losing_trades)
 
+        # Trade statistics
+        total_trades = num_trades
+        long_trades_count = np.sum(trade_types_grouped == 1)
+        short_trades_count = np.sum(trade_types_grouped == -1)
+        total_trades_returns = np.sum(trade_returns)
+        average_trade_return = np.mean(trade_returns)
+        average_trade_return_pct = np.mean(trade_returns / trade_equity_open[group_starts])
+        average_trade_duration_hours = np.mean(trade_durations)
+        total_winning_rate = np.sum(winning_trades) / num_trades if num_trades > 0 else 0
+
+    else:
+        # No trades case
+        total_trades = 0
+        long_trades_count = 0
+        short_trades_count = 0
+        total_trades_returns = 0.0
+        average_trade_return = 0.0
+        average_trade_return_pct = 0.0
+        average_trade_duration_hours = 0.0
+        max_winning_streak = 0
+        max_losing_streak = 0
+        total_winning_rate = 0.0
 
     # Prepare results
     info = {
@@ -237,16 +227,16 @@ def analyse_individual_run(results_file: Path, model_name: str):
         "profit_factor": profit_factor,
 
         # Trades Summary
-        "total_trades": trades_df.shape[0],
-        "long_trades_count": trades_df[trades_df['trade_type'] == 'long'].shape[0],
-        "short_trades_count": trades_df[trades_df['trade_type'] == 'short'].shape[0],
-        "total_trades_returns": trades_df['trade_return'].sum(),
-        "average_trade_return": trades_df['trade_return'].mean(),
-        "average_trade_return_pct": trades_df['trade_return_pct'].mean(),
-        "average_trade_duration_hours": trades_df['trade_duration_hours'].mean(),
-        "max_winning_streak": trades_df['trade_winning_streak'].max(),
-        "max_losing_streak": trades_df['trade_losing_streak'].max(),
-        "total_winning_rate":  trades_df[trades_df['trade_winning']].shape[0] / trades_df.shape[0] if trades_df.shape[0] > 0 else 0,
+        "total_trades": total_trades,
+        "long_trades_count": long_trades_count,
+        "short_trades_count": short_trades_count,
+        "total_trades_returns": total_trades_returns,
+        "average_trade_return": average_trade_return,
+        "average_trade_return_pct": average_trade_return_pct,
+        "average_trade_duration_hours": average_trade_duration_hours,
+        "max_winning_streak": max_winning_streak,
+        "max_losing_streak": max_losing_streak,
+        "total_winning_rate": total_winning_rate,
     }
 
     # Create results table
@@ -269,7 +259,6 @@ def analyse_individual_run(results_file: Path, model_name: str):
     row_labels, table_data = zip(*metrics)
     table_data = [[val] for val in table_data]
 
-    # Create and save table
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.axis('tight')
     ax.axis('off')
@@ -294,7 +283,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
 
     # log results
     with open(info_file, 'w') as f:
-        json.dump(info, f)
+        json.dump(clean_numpy(info), f)
 
 def analyse_finals(final_metrics: List[Dict[str, Any]], output_dir: Path, env_name: str) -> None:
     """
