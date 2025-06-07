@@ -62,11 +62,13 @@ def get_optimal_action(dp_result: DPTable, timestep: int, current_exposure: floa
     action_idx = dp_result.policy_table[timestep, exposure_idx]
     return get_exposure_val(action_idx, dp_result.n_actions) # type: ignore
 
-def get_dp_table_from_env(env: ForexEnv, cache_dir):
+def get_dp_table_from_env(env: ForexEnv, cache_dir, n_actions: int | None = None) -> DPTable:
+    if n_actions is None:
+        n_actions = env.n_actions if env.n_actions > 0 else 7
     return get_dp_table(
         market_data = env.market_data,
         transaction_cost_pct = env.transaction_cost_pct,
-        n_actions = env.n_actions if env.n_actions > 0 else 7,
+        n_actions = n_actions,
         cache_dir = cache_dir
     )
 
