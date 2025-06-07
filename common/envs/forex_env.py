@@ -79,6 +79,8 @@ class ForexEnv(gym.Env):
         self.total_steps = len(market_data_df)
         self.step_map = np.random.permutation(self.total_steps) if shuffled else np.arange(self.total_steps)
         self.t = self.step_map[self.n_steps] # used for indexing market information
+        if shuffled:
+           logging.info("shuffled is True, going through market data in random order")
 
         # Use numpy arrays for speed
         self.market_data = market_data_df.to_numpy(dtype=np.float32)
