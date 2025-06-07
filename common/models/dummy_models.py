@@ -1,10 +1,10 @@
 from typing import Any, Callable, Union
 
 import numpy as np
-import torch as th
-from gymnasium import spaces, Space
+from gymnasium import Space, spaces
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.policies import BasePolicy
+
 
 def constant_fn(x: Any) -> Callable[[Any], Any]:
     """Creates a single argument function that returns a constant value."""

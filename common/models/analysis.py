@@ -1,10 +1,8 @@
 import json
-import os
-import tempfile
-from pathlib import Path
-from typing import List, Dict, Any
-
 import logging
+from pathlib import Path
+from typing import Any, Dict, List
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -61,7 +59,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
     if info_file.exists():
         try:
             with open(info_file, "r") as f:
-                data = json.load(f)
+                _ = json.load(f)
             return
         except Exception:
             pass

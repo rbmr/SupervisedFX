@@ -6,6 +6,7 @@ from numpy.typing import NDArray
 
 from common.constants import MarketDataCol
 
+
 def reverse_equity(bid_price: float, ask_price: float, equity: float, exposure: float) -> tuple[float, float]:
     """
     Given equity, bid/ask prices, and exposure in [-1, 1],

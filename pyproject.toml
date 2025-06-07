@@ -32,6 +32,7 @@ torchvision = { version = ">=0.15.0,<0.23.0", source = "torch" }
 torchaudio = { version = ">=2.0.0,<3.0.0", source = "torch" }
 aiohttp = "^3.12.9"
 sb3-contrib = "^2.6.0"
+autoflake = "^2.3.1"
 
 [tool.poetry.group.dev.dependencies]
 isort = "^6.0.1"
