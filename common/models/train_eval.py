@@ -37,9 +37,6 @@ def run_experiment(train_env: ForexEnv,
     """
     Train the model on the training DataFrame, test it on the test DataFrame, and export the results.
     """
-    # Set seeds
-    set_seed(42)
-
     # Set up folders
     experiment_path = base_folder_path / "experiments" / experiment_group_name / experiment_name
     results_path = experiment_path / "results"
@@ -99,7 +96,10 @@ def train_model(model: BaseAlgorithm,
     model.set_env(train_dummy_env)
     total_timesteps = int(train_env.total_steps * train_episodes)
 
-    model.learn(total_timesteps=total_timesteps, callback=callback, log_interval=1, progress_bar=True)
+    if total_timesteps > 0:
+        model.learn(total_timesteps=total_timesteps, callback=callback, log_interval=1, progress_bar=True)
+    else:
+        logging.warning("Total timesteps is 0, skipping training.")
 
     logging.info("Training complete.")
 

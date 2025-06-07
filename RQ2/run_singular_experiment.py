@@ -12,7 +12,7 @@ from sb3_contrib import RecurrentPPO
 from common.envs.forex_env import ForexEnv
 from common.data.feature_engineer import *
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
-from RQ2.constants import RQ2_DIR, RQ2_HYPERPARAMETERS_START_DATE, RQ2_HYPERPARAMETERS_END_DATE, RQ2_EXPERIMENTS_START_DATE, RQ2_EXPERIMENTS_END_DATE, RQ2_DATA_SPLIT_RATIO
+from RQ2.constants import *
 
 from common.data.data import ForexCandleData, Timeframe
 from common.models.train_eval import run_experiment, evaluate_models, analyse_results
@@ -130,13 +130,7 @@ def get_feature_engineer() -> FeatureEngineer:
 def main():
     
     set_seed(42)
-   
-
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-    # --- Configuration Parameters ---
-    INITIAL_CAPITAL = 10000.0
-    TRANSACTION_COST_PCT = 0.0
 
     forex_data = ForexCandleData.load(source="dukascopy",
                                       instrument="EURUSD",
@@ -206,4 +200,4 @@ def main():
     
 
 if __name__ == '__main__':
-    test()
+    main()
