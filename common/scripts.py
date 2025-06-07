@@ -166,24 +166,6 @@ def most_recent_modified(dir_path: Path):
         return None
     return max(entries, key=lambda p: p.stat().st_mtime)
 
-def calculate_equity(bid_price: float, ask_price: float, cash: float, shares: float) -> float:
-    """
-    Calculates the equity based on current cash, shares and prices.
-    """
-    return cash + shares * (bid_price if shares >= 0 else ask_price)
-
-def calculate_ohlc_equity(current_prices: NDArray[np.float32], cash: float, shares: float) -> tuple[float, float, float, float]:
-    """
-    Calculates the equity based on current cash, shares and prices.
-    """
-    assert current_prices.ndim == 1
-    assert current_prices.shape[0] == len(MarketDataCol)
-    equity_open = calculate_equity(current_prices[MarketDataCol.open_bid], current_prices[MarketDataCol.open_ask], cash, shares)
-    equity_high = calculate_equity(current_prices[MarketDataCol.high_bid], current_prices[MarketDataCol.high_ask], cash, shares)
-    equity_low = calculate_equity(current_prices[MarketDataCol.low_bid], current_prices[MarketDataCol.low_ask], cash, shares)
-    equity_close = calculate_equity(current_prices[MarketDataCol.close_bid], current_prices[MarketDataCol.close_ask], cash, shares)
-    return equity_open, equity_high, equity_low, equity_close
-
 def round_datetime(date_time: datetime, interval: int) -> datetime:
     """
     Rounds a datetime object to the nearest multiple of `interval` in seconds.
