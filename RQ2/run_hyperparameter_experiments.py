@@ -8,25 +8,19 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from common.envs.forex_env import ForexEnv
 from common.data.feature_engineer import FeatureEngineer, rsi, history_lookback, remove_ohlcv
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
-from RQ2.constants import RQ2_DIR, RQ2_HYPERPARAMETERS_START_DATE, RQ2_HYPERPARAMETERS_END_DATE, RQ2_EXPERIMENTS_START_DATE, RQ2_EXPERIMENTS_END_DATE, RQ2_DATA_SPLIT_RATIO
+from RQ2.constants import *
 
 from common.data.data import ForexCandleData, Timeframe
-from common.models.train_eval import train_test_analyse
+from common.models.train_eval import run_experiment
 from common.constants import *
 from common.scripts import *
 
 from typing import Callable, Dict, Any, List
 
-if __name__ == '__main__':
+def main():
     
     set_seed(42)
-   
-
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-    # --- Configuration Parameters ---
-    INITIAL_CAPITAL = 10000.0
-    TRANSACTION_COST_PCT = 0.0
 
     forex_data = ForexCandleData.load(source="dukascopy",
                                       instrument="EURUSD",
@@ -67,7 +61,7 @@ if __name__ == '__main__':
         logging.info(f"Running experiment: {experiment_func.__name__}")
         dqn_model = experiment_func(temp_env)
         logging.info("Running train test analyze...")
-        train_test_analyse(
+        run_experiment(
             train_env=train_env,
             eval_env=eval_env,
             model=dqn_model,
@@ -114,3 +108,7 @@ def experiment_1(temp_env: DummyVecEnv) -> DQN:
     dqn.buffer_size = 1000
 
     return dqn
+
+
+if __name__ == '__main__':
+    main()

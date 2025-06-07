@@ -286,7 +286,8 @@ class ForexEnv(gym.Env):
             elif self.allow_long:
                 action = action / self.n_actions
             else: # self.allow_short
-                action = -action / self.n_actions
+                action = action / self.n_actions
+                action -= 1.0  # Shift to [-1, 0] for shorting
                 
         return action
 

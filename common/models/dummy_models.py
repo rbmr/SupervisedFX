@@ -25,7 +25,7 @@ class DummyModel(BaseAlgorithm):
 
     # Overrides
     def predict(self, obs: Union[np.ndarray, dict[str, np.ndarray]], *args, **kwargs) -> tuple[np.ndarray, None]:
-        return np.array([self._pred_fn(obs)]), None
+        return np.array([self._pred_fn(obs[0])]), None
 
     def _setup_model(self, *args, **kwargs) -> None:
         pass
@@ -76,4 +76,37 @@ def hold_model(action_space: Space) -> DummyModel:
 def random_model(action_space: Space) -> DummyModel:
     return DummyModel(lambda _: action_space.sample())
 
-DUMMY_MODELS: list[Callable[[Space], DummyModel]] = [short_model, long_model, hold_model, random_model]
+def custom_comparison_model(action_space: Space) -> DummyModel:
+    """
+    Creates a DummyModel that predicts True if for every adjacent pair of values
+    in the observation, the left is strictly greater than the right (e.g., obs[0] > obs[1],
+    obs[2] > obs[3], etc.). The last element is ignored if the array has an odd length.
+    """
+    def prediction_logic(obs: np.ndarray) -> bool:
+        # Iterate through the observation array with a step of 2 to get adjacent pairs
+        for i in range(0, len(obs) - 1, 2):
+            # Check if the left element is strictly greater than the right one
+            if obs[i] <= obs[i+1]:
+                return False
+        # If the loop completes, all pairs satisfy the condition
+        return True
+    
+    def prediction_value(obs: np.ndarray) -> Any:
+        b = prediction_logic(obs)
+        if b:
+            if isinstance(action_space, spaces.Discrete):
+                return action_space.n - 1
+            if isinstance(action_space, spaces.Box):
+                return action_space.high
+        else:
+            if isinstance(action_space, spaces.Discrete):
+                return 0
+            if isinstance(action_space, spaces.Box):
+                return action_space.low
+        raise TypeError("Invalid action space.")
+            
+
+    return DummyModel(pred_fn=prediction_value)
+
+
+DUMMY_MODELS: list[Callable[[Space], DummyModel]] = [short_model, long_model, hold_model, random_model, custom_comparison_model]
