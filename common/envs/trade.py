@@ -6,6 +6,19 @@ from numpy.typing import NDArray
 
 from common.constants import MarketDataCol
 
+def reverse_equity(bid_price: float, ask_price: float, equity: float, exposure: float) -> tuple[float, float]:
+    """
+    Given equity, bid/ask prices, and exposure in [-1, 1],
+    Returns (cash, shares) such that:
+    - price == bid_price if shares >= 0 else ask_price
+    - equity == cash + shares * price
+    - exposure == shares * price / equity == (equity - cash) / equity
+    """
+    assert -1.0 <= exposure <= 1.0, "Exposure must be between -1 and 1"
+    price = bid_price if exposure >= 0 else ask_price
+    cash   = equity * (1 - exposure)
+    shares = (equity * exposure) / price
+    return cash, shares
 
 def calculate_equity(bid_price: float, ask_price: float, cash: float, shares: float) -> float:
     """
