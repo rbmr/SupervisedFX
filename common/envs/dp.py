@@ -8,6 +8,7 @@ at each state (timestep, exposure_level).
 import hashlib
 import json
 import logging
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -44,6 +45,19 @@ def get_exposure_idx(x: float, n: int) -> int:
     if the range were to be divided into (2n + 1) equally spaced steps including endpoints.
     """
     return int((x + 1) * n + 0.5)
+
+def get_low_high_exposure_idx(x: float, n: int) -> tuple[int, int]:
+    """
+    Given a value x in the range [-1, 1], returns the index of the closest two discrete steps
+    if the range were to be divided into (2n + 1) equally spaced steps including endpoints.
+    """
+    exact_idx = (x + 1) * n
+    low_idx = math.floor(exact_idx)
+    high_idx = math.ceil(exact_idx)
+    max_idx = 2 * n
+    low_idx = np.clip(low_idx, 0, max_idx)
+    high_idx = np.clip(high_idx, 0, max_idx)
+    return low_idx, high_idx
 
 def get_exposure_val(i: int, n: int) -> float:
     """
@@ -290,10 +304,7 @@ def create_dp_reward_function(table: DPTable,
         exposure = (equity - cash) / equity
 
         # bi-linear interpolation of V[t, exposure]
-        low_idx = np.searchsorted(actions, exposure, side="right") - 1
-        high_idx = min(low_idx + 1, len(actions) - 1) # type: ignore
-        if low_idx < 0:
-            low_idx = 0
+        low_idx, high_idx = get_low_high_exposure_idx(exposure, n_actions)
         low, high = actions[low_idx], actions[high_idx]
         alpha = 0 if high == low else (exposure - low) / (high - low)
         raw = (1 - alpha) * V[t, low_idx] + alpha * V[t, high_idx]
