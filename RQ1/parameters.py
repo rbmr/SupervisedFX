@@ -3,7 +3,6 @@ from datetime import datetime
 
 from stable_baselines3 import A2C
 
-from RQ1.constants import RQ1_DP_CACHE_DIR
 from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import (FeatureEngineer, adx,
                                           as_min_max_fixed, as_min_max_window,
@@ -15,8 +14,10 @@ from common.data.feature_engineer import (FeatureEngineer, adx,
                                           stochastic_oscillator)
 from common.data.stepwise_feature_engineer import (StepwiseFeatureEngineer,
                                                    calculate_current_exposure)
-from common.envs.dp import get_dp_table_from_env, create_norm_sliding_zscore, create_dp_reward_function
+from common.envs.dp import (SlidingZScore, create_dp_reward_function,
+                            get_dp_table_from_env)
 from common.envs.forex_env import ForexEnv
+from RQ1.constants import RQ1_DP_CACHE_DIR
 
 
 def get_environments(shuffled: bool = False):
@@ -54,8 +55,7 @@ def get_environments(shuffled: bool = False):
 
     # Create and set custom reward function.
     table = get_dp_table_from_env(train_env, RQ1_DP_CACHE_DIR, 7)
-    rnf = create_norm_sliding_zscore
-    custom_reward_function = create_dp_reward_function(table, rnf, window=30)
+    custom_reward_function = create_dp_reward_function(table, SlidingZScore, window=30)
     train_env.custom_reward_function = custom_reward_function # just train_env matters.
 
     logging.info("Environments created.")

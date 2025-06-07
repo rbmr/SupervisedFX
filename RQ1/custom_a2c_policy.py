@@ -1,10 +1,11 @@
 # custom_a2c_policy.py
 
+from typing import Callable, List, Type
+
 import torch as th
 import torch.nn as nn
-from typing import Callable, Dict, List, Optional, Type, Union
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.policies import ActorCriticPolicy
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 
 class TwoLayerLSTM(BaseFeaturesExtractor):
