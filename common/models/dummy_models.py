@@ -25,7 +25,7 @@ class DummyModel(BaseAlgorithm):
 
     # Overrides
     def predict(self, obs: Union[np.ndarray, dict[str, np.ndarray]], *args, **kwargs) -> tuple[np.ndarray, None]:
-        return np.array([self._pred_fn(obs)]), None
+        return np.array([self._pred_fn(obs[0])]), None
 
     def _setup_model(self, *args, **kwargs) -> None:
         pass
@@ -76,7 +76,7 @@ def hold_model(action_space: Space) -> DummyModel:
 def random_model(action_space: Space) -> DummyModel:
     return DummyModel(lambda _: action_space.sample())
 
-def custom_comparison_model() -> DummyModel:
+def custom_comparison_model(action_space: Space) -> DummyModel:
     """
     Creates a DummyModel that predicts True if for every adjacent pair of values
     in the observation, the left is strictly greater than the right (e.g., obs[0] > obs[1],
@@ -90,8 +90,23 @@ def custom_comparison_model() -> DummyModel:
                 return False
         # If the loop completes, all pairs satisfy the condition
         return True
+    
+    def prediction_value(obs: np.ndarray) -> Any:
+        b = prediction_logic(obs)
+        if b:
+            if isinstance(action_space, spaces.Discrete):
+                return action_space.n - 1
+            if isinstance(action_space, spaces.Box):
+                return action_space.high
+        else:
+            if isinstance(action_space, spaces.Discrete):
+                return 0
+            if isinstance(action_space, spaces.Box):
+                return action_space.low
+        raise TypeError("Invalid action space.")
+            
 
-    return DummyModel(pred_fn=prediction_logic)
+    return DummyModel(pred_fn=prediction_value)
 
 
 DUMMY_MODELS: list[Callable[[Space], DummyModel]] = [short_model, long_model, hold_model, random_model, custom_comparison_model]

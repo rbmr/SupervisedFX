@@ -176,18 +176,33 @@ def ema(df: pd.DataFrame, window: int, column: str = 'close_bid'):
     """
     df[f'ema_{window}_{column}'] = df[column].ewm(span=window, adjust=False).mean()
 
-def kama(df: pd.DataFrame, window: int = 10, column: str = 'close_bid'):
+def kama(df: pd.DataFrame, window: int = 10, fast: int = 2, slow: int = 30, column: str = 'close_bid'):
     """
     Calculate the Kaufman's Adaptive Moving Average (KAMA) for a given column.
     KAMA adjusts its sensitivity based on the volatility of the price.
     """
-    change = df[column].diff()
-    volatility = df[column].rolling(window=window).apply(lambda x: np.std(x), raw=True)
-    
-    efficiency_ratio = change.abs() / volatility
-    smoothing_constant = (efficiency_ratio.rolling(window=window).mean() * (2 / (window + 1))).fillna(0)
-    
-    df[f'kama_{window}_{column}'] = df[column].ewm(span=window, adjust=False).mean() * smoothing_constant
+    # Calculate Directional Movement
+    change = abs(df[column] - df[column].shift(window))
+
+    # Calculate Volatility
+    volatility = (abs(df[column] - df[column].shift(1))).rolling(window=window).sum()
+
+    # Calculate Efficiency Ratio
+    er = change / volatility
+
+    # Calculate Smoothing Constant
+    fastest = 2 / (fast + 1)
+    slowest = 2 / (slow + 1)
+    sc = (er * (fastest - slowest) + slowest) ** 2
+
+    # Calculate KAMA
+    kama = pd.Series(index=df.index, dtype=float)
+    kama.iloc[window-1] = df[column].iloc[window-1] # Start with the price at period n
+
+    for i in range(window, len(df)):
+        kama.iloc[i] = kama.iloc[i-1] + sc.iloc[i] * (df[column].iloc[i] - kama.iloc[i-1])
+
+    df[f'kama_{window}_{column}'] = kama
 
 def bollinger_bands(df: pd.DataFrame, window: int = 20, num_std_dev: float = 2.0):
     """
