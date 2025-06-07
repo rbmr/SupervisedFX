@@ -27,7 +27,6 @@ class ForexEnv(gym.Env):
                  allow_short: bool = True,
                  allow_long: bool = True,
                  custom_reward_function: Callable[['ForexEnv'], float] | None = None,
-                 shuffled: bool = False,
                  ):
         super(ForexEnv, self).__init__()
 
@@ -95,10 +94,6 @@ class ForexEnv(gym.Env):
         assert self.market_data.shape == (self.total_steps, len(MarketDataCol))
         assert self.market_features.shape == (self.total_steps, len(self.market_feature_names))
         assert self.agent_data.shape == (self.total_steps, len(AgentDataCol))
-
-        # Shuffle data if required
-        if shuffled:
-            self.market_data, self.market_features = shuffle(self.market_data, self.market_features)
 
         # Action space
         self.n_actions = n_actions
@@ -179,8 +174,9 @@ class ForexEnv(gym.Env):
             allow_short=allow_short,
             allow_long=allow_long,
             custom_reward_function=custom_reward_function,
-            shuffled=shuffled,
         )
+        if shuffled:
+            train_env.shuffle()
 
         # Create evaluation environment
         eval_env = ForexEnv(
@@ -193,10 +189,17 @@ class ForexEnv(gym.Env):
             allow_short=allow_short,
             allow_long=allow_long,
             custom_reward_function=custom_reward_function,
-            shuffled=shuffled,
         )
+        if shuffled:
+            eval_env.shuffle()
 
         return train_env, eval_env
+
+    def shuffle(self) -> np.ndarray:
+        indices = np.random.permutation(self.market_data.shape[0])
+        self.market_data = self.market_data[indices]
+        self.market_features = self.market_features[indices]
+        return indices
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
