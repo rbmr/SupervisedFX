@@ -15,7 +15,7 @@ from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calcu
 from RQ2.constants import RQ2_DIR, RQ2_HYPERPARAMETERS_START_DATE, RQ2_HYPERPARAMETERS_END_DATE, RQ2_EXPERIMENTS_START_DATE, RQ2_EXPERIMENTS_END_DATE, RQ2_DATA_SPLIT_RATIO
 
 from common.data.data import ForexCandleData, Timeframe
-from common.models.train_eval import train_test_analyse, evaluate_models, analyse_results
+from common.models.train_eval import run_experiment, evaluate_models, analyse_results
 from common.constants import *
 from common.scripts import *
 from common.rewards import risk_adjusted_return
@@ -126,44 +126,6 @@ def get_feature_engineer() -> FeatureEngineer:
 
     return feature_engineer
 
-def test():
-
-    forex_data = ForexCandleData.load(source="dukascopy",
-                                      instrument="EURUSD",
-                                      granularity=Timeframe.M15,
-                                      start_time=RQ2_HYPERPARAMETERS_START_DATE,
-                                      end_time= RQ2_HYPERPARAMETERS_END_DATE,
-                                    )
-
-    INITIAL_CAPITAL = 100
-    TRANSACTION_COST_PCT = 0.0
-
-    feature_engineer = FeatureEngineer()
-    feature_engineer.add(lambda df: kama(df, window=10))
-    feature_engineer.add(lambda df: kama(df, window=25))
-
-    _, eval_env = ForexEnv.create_train_eval_envs(
-        split_ratio=RQ2_DATA_SPLIT_RATIO,
-        forex_candle_data=forex_data,
-        market_feature_engineer=feature_engineer,
-        agent_feature_engineer=StepwiseFeatureEngineer(),  # No agent feature engineer for this task
-        initial_capital=INITIAL_CAPITAL,
-        transaction_cost_pct=TRANSACTION_COST_PCT,
-        n_actions=1,
-        custom_reward_function=risk_adjusted_return)
-    
-    evaluate_models(
-        models_dir= RQ2_DIR / 'experiments' / 'dummies' / 'dummy_0' / 'models',
-        results_dir= RQ2_DIR / 'experiments' / 'dummies' / 'dummy_0' / 'results',
-        eval_dummies= True,
-        eval_envs= dict(eval=eval_env),
-        eval_episodes=1,
-    )
-
-    analyse_results(
-        results_dir=RQ2_DIR / 'experiments' / 'dummies' / 'dummy_0' / 'results'
-    )
-
 
 def main():
     
@@ -182,13 +144,6 @@ def main():
                                       start_time=RQ2_HYPERPARAMETERS_START_DATE,
                                       end_time= RQ2_HYPERPARAMETERS_END_DATE,
                                     )
-
-    # forex_data = ForexCandleData.load(source="dukascopy",
-    #                                   instrument="XAUUSD",
-    #                                   granularity=Timeframe.M15,
-    #                                   start_time=datetime(2022,1,2,23),
-    #                                   end_time= datetime(2022,12,30,21,45),
-    #                                   )
     
     # --- Feature Engineering ---
     # Create a feature engineer object
@@ -236,7 +191,7 @@ def main():
     logging.info("Model architecture:" + str(model.policy))
 
     logging.info("Running train test analyze...")
-    train_test_analyse(
+    run_experiment(
         train_env=train_env,
         eval_env=eval_env,
         model=model,

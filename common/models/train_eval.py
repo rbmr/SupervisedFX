@@ -23,7 +23,7 @@ from common.models.utils import load_models, save_model_with_metadata, load_mode
 from common.analysis import analyse_individual_run, analyse_finals
 
 
-def train_test_analyse(train_env: ForexEnv,
+def run_experiment(train_env: ForexEnv,
                        eval_env: ForexEnv,
                        model: BaseAlgorithm,
                        base_folder_path: Path,
