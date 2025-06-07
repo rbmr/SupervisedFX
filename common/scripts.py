@@ -54,7 +54,7 @@ def parallel_run(func: Callable[[K], V], inputs: list[K], num_workers: int) -> l
         try:
             for i, res in pool.imap_unordered(indexed_fn, indexed_inps):
                 results[i] = res
-        except KeyboardInterrupt as e:
+        except Exception as e:
             pool.terminate()
             pool.join()
             raise e
