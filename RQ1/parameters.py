@@ -1,10 +1,9 @@
 import logging
 from datetime import datetime
 
-from stable_baselines3 import DQN, A2C
-from torch import nn
+from stable_baselines3 import A2C
 
-from RQ1.custom_a2c_policy import A2C_LSTM_Policy
+from RQ1.constants import RQ1_DP_CACHE_DIR
 from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import (FeatureEngineer, adx,
                                           as_min_max_fixed, as_min_max_window,
@@ -16,18 +15,18 @@ from common.data.feature_engineer import (FeatureEngineer, adx,
                                           stochastic_oscillator)
 from common.data.stepwise_feature_engineer import (StepwiseFeatureEngineer,
                                                    calculate_current_exposure)
+from common.envs.dp import get_dp_table_from_env, create_norm_sliding_zscore, create_dp_reward_function
 from common.envs.forex_env import ForexEnv
-from common.rewards import log_equity_change, volatility_scaled_reward
 
 
-def get_environments(shuffled = False):
+def get_environments(shuffled: bool = False):
 
     logging.info("Loading market data...")
     forex_candle_data = ForexCandleData.load(
         source="dukascopy",
         instrument="EURUSD",
         granularity=Timeframe.M15,
-        start_time=datetime(2017, 1, 1, 22, 0, 0, 0),
+        start_time=datetime(2020, 1, 1, 22, 0, 0, 0),
         end_time=datetime(2024, 12, 31, 21, 45, 0, 0),
     )
 
@@ -47,9 +46,18 @@ def get_environments(shuffled = False):
         initial_capital=10_000.0,
         transaction_cost_pct=0.0,
         n_actions=0, # [-1, 1]
-        custom_reward_function=volatility_scaled_reward,
+        custom_reward_function=None, # None for now, set later
         shuffled=shuffled,
     )
+
+    logging.info("Setting reward function...")
+
+    # Create and set custom reward function.
+    table = get_dp_table_from_env(train_env, RQ1_DP_CACHE_DIR, 7)
+    rnf = create_norm_sliding_zscore
+    custom_reward_function = create_dp_reward_function(table, rnf, window=30)
+    train_env.custom_reward_function = custom_reward_function # just train_env matters.
+
     logging.info("Environments created.")
 
     return train_env, eval_env
@@ -151,7 +159,7 @@ def get_model(env: ForexEnv):
     logging.info("Creating model...")
 
     model = A2C(
-        policy=A2C_LSTM_Policy,
+        policy="MlpPolicy",
         env=env,
         learning_rate=1e-4,
         n_steps=128,
@@ -159,6 +167,7 @@ def get_model(env: ForexEnv):
         vf_coef=0.1,
         ent_coef=0.0,
         verbose=1,
+        device="cpu"
     )
 
     logging.info("Model created.")

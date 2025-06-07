@@ -6,13 +6,12 @@ logging.info("Loading imports...")
 from datetime import datetime
 from pathlib import Path
 
-from common.envs.callbacks import (ActionHistogramCallback, CoolStatsCallback,
-                                   SaveCallback, SaveOnEpisodeEndCallback)
+from common.envs.callbacks import (ActionHistogramCallback, SaveCallback)
 from common.models.train_eval import (analyse_results, evaluate_models,
                                       train_model)
 from common.models.utils import save_model_with_metadata
 from common.scripts import has_nonempty_subdir, n_children, picker
-from RQ1.constants import EXPERIMENT_NAME_FORMAT, EXPERIMENTS_DIR
+from RQ1.constants import EXPERIMENT_NAME_FORMAT, RQ1_EXPERIMENTS_DIR
 from RQ1.parameters import get_environments, get_model
 logging.info("Done.")
 
@@ -24,13 +23,12 @@ def train():
     model = get_model(train_env)
 
     experiment_name = datetime.now().strftime(EXPERIMENT_NAME_FORMAT)
-    experiment_dir = EXPERIMENTS_DIR / experiment_name
+    experiment_dir = RQ1_EXPERIMENTS_DIR / experiment_name
     models_dir = experiment_dir / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
 
     callback = [SaveCallback(models_dir, save_freq=save_freq),
-                ActionHistogramCallback(train_env, log_freq=train_env.total_steps),
-                CoolStatsCallback(train_env, log_freq=train_env.total_steps)]
+                ActionHistogramCallback(train_env, log_freq=save_freq)]
     train_model(model, train_env, train_episodes=200, callback=callback)
     save_model_with_metadata(model, models_dir / "model_final.zip")
 
@@ -72,8 +70,8 @@ if __name__ == "__main__":
 
     options = [
         ("train", train),
-        ("eval", lambda: evaluate(EXPERIMENTS_DIR, 10)),
-        ("analyze", lambda: analyze(EXPERIMENTS_DIR, 10)),
+        ("eval", lambda: evaluate(RQ1_EXPERIMENTS_DIR, 10)),
+        ("analyze", lambda: analyze(RQ1_EXPERIMENTS_DIR, 10)),
     ]
     picker(options, default=None)()
 
