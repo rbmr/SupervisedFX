@@ -22,6 +22,19 @@ from common.constants import MarketDataCol
 K = TypeVar("K")
 V = TypeVar("V")
 
+def compute_sliding_window(arr: np.ndarray, window: int, fns: list[Callable[[np.ndarray], float]]):
+    """
+    Applies functions to a sliding window, caching the result.
+    """
+    T = arr.shape[0]
+    results = [np.zeros(T,dtype=np.float32) for _ in range(len(fns))]
+    for t in range(T):
+        start = max(0, t - window + 1)
+        window_slice = arr[start:t + 1]
+        for res, fn in zip(results, fns):
+            res[t] = fn(window_slice)
+    return results
+
 def index_wrapper(func: Callable[[K], V], pair: tuple[int, K]) -> tuple[int, V]:
     i, x = pair
     return i, func(x)
