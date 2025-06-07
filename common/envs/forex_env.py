@@ -215,12 +215,12 @@ class ForexEnv(gym.Env):
         self.current_step += 1
 
         # Perform action
+        prev_cash = self.agent_data[self.current_step - 1, AgentDataCol.cash]
+        prev_shares = self.agent_data[self.current_step - 1, AgentDataCol.shares]
         current_data = self.market_data[self.current_step, :]
-        current_cash = self.agent_data[self.current_step - 1, AgentDataCol.cash]
-        current_shares = self.agent_data[self.current_step - 1, AgentDataCol.shares]
-        new_cash, new_shares = execute_trade(target_exposure, current_data, current_cash, current_shares, self.transaction_cost_pct) # type: ignore
-        equity_open, equity_high, equity_low, equity_close = calculate_ohlc_equity(current_data, new_cash, new_shares)
-        self.agent_data[self.current_step, :] = (new_cash, new_shares, equity_open, equity_high, equity_low, equity_close, target_exposure)
+        current_cash, current_shares = execute_trade(target_exposure, current_data, prev_cash, prev_shares, self.transaction_cost_pct) # type: ignore
+        equity_open, equity_high, equity_low, equity_close = calculate_ohlc_equity(current_data, current_cash, current_shares)
+        self.agent_data[self.current_step, :] = (current_cash, current_shares, equity_open, equity_high, equity_low, equity_close, target_exposure)
 
         # calculate reward
         reward = self._get_reward()
