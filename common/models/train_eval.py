@@ -20,7 +20,7 @@ from common.envs.forex_env import ForexEnv
 from common.models.dummy_models import DUMMY_MODELS
 from common.scripts import set_seed, parallel_run
 from common.models.utils import load_models, save_model_with_metadata, load_model_with_metadata
-from common.analysis import analyse_individual_run, analyse_finals
+from common.models.analysis import analyse_individual_run, analyse_finals
 
 
 def run_experiment(train_env: ForexEnv,

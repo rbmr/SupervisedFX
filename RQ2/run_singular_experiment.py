@@ -18,7 +18,7 @@ from common.data.data import ForexCandleData, Timeframe
 from common.models.train_eval import run_experiment, evaluate_models, analyse_results
 from common.constants import *
 from common.scripts import *
-from common.rewards import risk_adjusted_return
+from common.envs.rewards import risk_adjusted_return
 
 
 

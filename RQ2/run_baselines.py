@@ -17,7 +17,7 @@ from common.models.train_eval import run_experiment, evaluate_models, analyse_re
 from common.models.dummy_models import DummyModel, long_model, short_model, custom_comparison_model
 from common.constants import *
 from common.scripts import *
-from common.rewards import risk_adjusted_return
+from common.envs.rewards import risk_adjusted_return
 
 from typing import Callable, Dict, Any, List, Tuple
 
