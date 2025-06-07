@@ -19,20 +19,22 @@ def log_equity_change(env: ForexEnv) -> float:
     current_time_step = env.current_step
     current_close_equity = env.agent_data[current_time_step, AgentDataCol.equity_close]
     previous_close_equity = env.agent_data[current_time_step - 1, AgentDataCol.equity_close]
-    
+
     if previous_close_equity <= 0:
         return 0.0  # Avoid log(0) or negative values
-    
+
     return (current_close_equity / previous_close_equity) - 1.0
+
 
 def risk_adjusted_return(env: ForexEnv) -> float:
     """
     Calculate the risk-adjusted return based on the Sharpe ratio.
     """
     current_time_step = env.current_step
-    
+
     current_equity_change = equity_change(env)
-    volatility = env.agent_data[current_time_step, AgentDataCol.equity_high] - env.agent_data[current_time_step, AgentDataCol.equity_low]
+    volatility = env.agent_data[current_time_step, AgentDataCol.equity_high] - env.agent_data[
+        current_time_step, AgentDataCol.equity_low]
     epsilon = 1e-5  # Small value to avoid division by zero
 
     return current_equity_change / (volatility + epsilon)
@@ -73,14 +75,14 @@ def volatility_scaled_reward(env,
     A_tm2 = float(env.agent_data[t - 2, AgentDataCol.action])
 
     # --- 2) Extract p_t and p_{t-1} from market_data (use close_bid) ---
-    close_bid_t   = float(env.market_data[t,     MarketDataCol.close_bid])
+    close_bid_t = float(env.market_data[t, MarketDataCol.close_bid])
     close_bid_tm1 = float(env.market_data[t - 1, MarketDataCol.close_bid])
     r_t = close_bid_t - close_bid_tm1
 
     # --- 3) Compute ex‐ante EWMA volatility σ_{t-1} using last `window` close_bid bars ---
     # We want returns over [t-window, …, t-1], so prices[i+1] - prices[i] for i = t-window .. t-2
     start_idx = t - window
-    end_idx   = t  # exclusive, so market_data[start_idx : end_idx] has length = window
+    end_idx = t  # exclusive, so market_data[start_idx : end_idx] has length = window
     recent_prices = env.market_data[start_idx:end_idx, MarketDataCol.close_bid]  # shape = (window,)
 
     # Compute simple arithmetic returns of length (window-1)
@@ -90,7 +92,7 @@ def volatility_scaled_reward(env,
     # We want weights such that the most recent return (i = window-2) gets the largest lam^0.
     # So build it reversed: index 0 corresponds to t-2 (most recent), index window-2 corresponds to t-window.
     L = len(recent_returns)  # = window - 1
-    raw_weights = np.array([ (1 - lam) * (lam ** i) for i in range(L) ])
+    raw_weights = np.array([(1 - lam) * (lam ** i) for i in range(L)])
     # raw_weights[0] = (1-lam)*lam^0 corresponds to oldest return, so reverse:
     ewma_weights = raw_weights[::-1]
     ewma_weights = ewma_weights / ewma_weights.sum()
