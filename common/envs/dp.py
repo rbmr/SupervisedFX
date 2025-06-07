@@ -294,22 +294,21 @@ def create_dp_reward_function(table: DPTable,
     actions = get_exposure_levels(table.n_actions)
 
     def dp_reward_function(env) -> float:
-        t = env.current_step
-        if t >= T:
+        if env.n_steps >= T:
             return 0.0
 
         # extract exposure as before
-        cash = env.agent_data[t, AgentDataCol.cash]
-        equity = env.agent_data[t, AgentDataCol.equity_close]
+        cash = env.agent_data[env.n_steps, AgentDataCol.cash]
+        equity = env.agent_data[env.n_steps, AgentDataCol.equity_close]
         exposure = (equity - cash) / equity
 
         # bi-linear interpolation of V[t, exposure]
         low_idx, high_idx = get_low_high_exposure_idx(exposure, n_actions)
         low, high = actions[low_idx], actions[high_idx]
         alpha = 0 if high == low else (exposure - low) / (high - low)
-        raw = (1 - alpha) * V[t, low_idx] + alpha * V[t, high_idx]
+        raw = (1 - alpha) * V[env.t, low_idx] + alpha * V[env.t, high_idx]
 
         # Normalize and return
-        return normalize(raw, t) # type: ignore
+        return normalize(raw, env.t) # type: ignore
 
     return dp_reward_function
