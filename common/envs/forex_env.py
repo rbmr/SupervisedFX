@@ -10,9 +10,8 @@ from common.constants import *
 from common.data.data import ForexCandleData
 from common.data.feature_engineer import FeatureEngineer
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
-from common.data.utils import shuffle
-from common.envs.trade import execute_trade, calculate_ohlc_equity, calculate_equity
-from common.scripts import find_first_row_with_nan, find_first_row_without_nan
+from common.envs.trade import execute_trade, calculate_ohlc_equity
+from common.scripts import find_first_row_with_nan, find_first_row_without_nan, shuffle
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 

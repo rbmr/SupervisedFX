@@ -166,6 +166,17 @@ def most_recent_modified(dir_path: Path):
         return None
     return max(entries, key=lambda p: p.stat().st_mtime)
 
+def shuffle(arr1: np.ndarray, arr2: np.ndarray, axis=0):
+    """
+    Shuffles two arrays along axis1 preserving row matching.
+    """
+    assert arr1.shape[axis] == arr2.shape[axis]
+
+    indices = np.random.permutation(arr1.shape[axis])
+    arr1_shuffled = arr1[indices]
+    arr2_shuffled = arr2[indices]
+    return arr1_shuffled, arr2_shuffled
+
 def round_datetime(date_time: datetime, interval: int) -> datetime:
     """
     Rounds a datetime object to the nearest multiple of `interval` in seconds.
