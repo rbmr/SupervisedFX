@@ -76,4 +76,22 @@ def hold_model(action_space: Space) -> DummyModel:
 def random_model(action_space: Space) -> DummyModel:
     return DummyModel(lambda _: action_space.sample())
 
-DUMMY_MODELS: list[Callable[[Space], DummyModel]] = [short_model, long_model, hold_model, random_model]
+def custom_comparison_model() -> DummyModel:
+    """
+    Creates a DummyModel that predicts True if for every adjacent pair of values
+    in the observation, the left is strictly greater than the right (e.g., obs[0] > obs[1],
+    obs[2] > obs[3], etc.). The last element is ignored if the array has an odd length.
+    """
+    def prediction_logic(obs: np.ndarray) -> bool:
+        # Iterate through the observation array with a step of 2 to get adjacent pairs
+        for i in range(0, len(obs) - 1, 2):
+            # Check if the left element is strictly greater than the right one
+            if obs[i] <= obs[i+1]:
+                return False
+        # If the loop completes, all pairs satisfy the condition
+        return True
+
+    return DummyModel(pred_fn=prediction_logic)
+
+
+DUMMY_MODELS: list[Callable[[Space], DummyModel]] = [short_model, long_model, hold_model, random_model, custom_comparison_model]
