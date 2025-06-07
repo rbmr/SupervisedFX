@@ -9,9 +9,11 @@ import hashlib
 import json
 import logging
 import math
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import Callable
+from typing import Type
 
 import numpy as np
 import pandas as pd
@@ -111,7 +113,7 @@ def calculate_dp_reward(prev_exposure, curr_exposure, prev_data, current_data, t
     # Retrieve previous state
     prev_bid = prev_data[MarketDataCol.close_bid]
     prev_ask = prev_data[MarketDataCol.close_ask]
-    prev_equity = 10_000.0 # Can be any value, just determines the scale of the output.
+    prev_equity = 100.0 # Can be any value, just determines the scale of the output.
     prev_cash, prev_shares = reverse_equity(prev_bid, prev_ask, prev_equity, prev_exposure)
 
     # Get next state
@@ -249,66 +251,87 @@ def load_dp_table(table_dir: Path, safe: bool = False) -> DPTable | None:
         data_hash=metadata["data_hash"],
     )
 
-RewardNormFactory = Callable[[np.ndarray, int | None], Callable[[float, int], float]]
+class RewardNormalizer(ABC):
 
-def create_norm_global_mmx(V: np.ndarray, _):
-    vmin = V.min()
-    vmax = V.max()
-    span = (vmax - vmin) or 1.0
-    return lambda raw, t: (raw - vmin) / span
+    @abstractmethod
+    def __init__(self, V: np.ndarray, window: int | None): ...
 
-def create_norm_global_zscore(V: np.ndarray, _):
-    mu = V.mean()
-    sigma = V.std() or 1.0
-    return lambda raw, t: (raw - mu) / sigma
+    @abstractmethod
+    def __call__(self, raw: float, t: int): ...
 
-def create_norm_sliding_mmx(V: np.ndarray, window: int | None):
-    if window is None or window < 1:
-        raise ValueError("Sliding minmax normalization requires a valid window >= 1")
-    mins, maxs = compute_sliding_window(V, window, [np.min, np.max])
-    spans = maxs - mins
-    spans[spans == 0] = 1.0
-    return lambda raw, t: (raw - mins[t]) / spans[t]
+class GlobalMMX(RewardNormalizer):
 
-def create_norm_sliding_zscore(V: np.ndarray, window: int | None):
-    if window is None or window < 1:
-        raise ValueError("Sliding z-score normalization requires a valid window >= 1")
-    means, stds = compute_sliding_window(V, window, [np.mean, np.std])
-    stds[stds == 0] = 1.0
-    return lambda raw, t: (raw - means[t]) / stds[t]
+    def __init__(self, V: np.ndarray, window: int | None):
+        self.vmin = V.min()
+        vmax = V.max()
+        self.span = (vmax - self.vmin) or 1.0
+
+    def __call__(self, raw: float, t: int):
+        return (raw - self.vmin) / self.span
+
+class GlobalZScore(RewardNormalizer):
+    def __init__(self, V: np.ndarray, window: int | None):
+        self.mu = V.mean()
+        self.sigma = V.std() or 1.0
+
+    def __call__(self, raw: float, t: int):
+        return (raw - self.mu) / self.sigma
+
+class SlidingMMX(RewardNormalizer):
+    def __init__(self, V: np.ndarray, window: int | None):
+        if window is None or window < 1:
+            raise ValueError("Sliding minmax normalization requires a valid window >= 1")
+        self.mins, maxs = compute_sliding_window(V, window, [np.min, np.max])
+        self.spans = maxs - self.mins
+        self.spans[self.spans == 0] = 1.0
+
+    def __call__(self, raw: float, t: int):
+        return (raw - self.mins[t]) / self.spans[t]
+
+class SlidingZScore(RewardNormalizer):
+    def __init__(self, V: np.ndarray, window: int | None):
+        if window is None or window < 1:
+            raise ValueError("Sliding z-score normalization requires a valid window >= 1")
+        self.means, self.stds = compute_sliding_window(V, window, [np.mean, np.std])
+        self.stds[self.stds == 0] = 1.0
+
+    def __call__(self, raw: float, t: int):
+        return (raw - self.means[t]) / self.stds[t]
+
+def _dp_reward_function(env, V: np.ndarray, n_actions: int, normalize: RewardNormalizer) -> float:
+    """
+    DO NOT USE DIRECTLY, CREATE USING create_dp_reward_function.
+    """
+    if env.n_steps >= V.shape[0]:
+        return 0.0
+
+    # extract exposure as before
+    cash = env.agent_data[env.n_steps, AgentDataCol.cash]
+    equity = env.agent_data[env.n_steps, AgentDataCol.equity_close]
+    exposure = (equity - cash) / equity
+
+    # bi-linear interpolation of V[t, exposure]
+    low_idx, high_idx = get_low_high_exposure_idx(exposure, n_actions)
+    low = get_exposure_val(low_idx, n_actions)
+    high = get_exposure_val(high_idx, n_actions)
+    alpha = 0 if high == low else (exposure - low) / (high - low)
+    raw = (1 - alpha) * V[env.t, low_idx] + alpha * V[env.t, high_idx]
+
+    # Normalize and return
+    return normalize(raw, env.t)
 
 def create_dp_reward_function(table: DPTable,
-                              rnf: RewardNormFactory,
+                              rn: Type[RewardNormalizer],
                               window: int | None = None):
     """
-    Returns a dp_reward_function(env) that
-    fetches table.value_table[t,idx] and
-    applies the chosen normalization.
-
-    Sliding modes require `window` >= 1.
+    Returns a dp_reward_function(env) that computes rewards using the value table.
+    Initializes RewardNormalizer. Sliding modes require `window` >= 1.
     """
     V = table.value_table
-    T, M = V.shape
-    normalize = rnf(V, window)
-    n_actions = table.n_actions
-    actions = get_exposure_levels(table.n_actions)
-
-    def dp_reward_function(env) -> float:
-        if env.n_steps >= T:
-            return 0.0
-
-        # extract exposure as before
-        cash = env.agent_data[env.n_steps, AgentDataCol.cash]
-        equity = env.agent_data[env.n_steps, AgentDataCol.equity_close]
-        exposure = (equity - cash) / equity
-
-        # bi-linear interpolation of V[t, exposure]
-        low_idx, high_idx = get_low_high_exposure_idx(exposure, n_actions)
-        low, high = actions[low_idx], actions[high_idx]
-        alpha = 0 if high == low else (exposure - low) / (high - low)
-        raw = (1 - alpha) * V[env.t, low_idx] + alpha * V[env.t, high_idx]
-
-        # Normalize and return
-        return normalize(raw, env.t) # type: ignore
-
-    return dp_reward_function
+    reward_normalizer = rn(V, window)
+    return partial(
+        _dp_reward_function,
+        V = V,
+        n_actions = table.n_actions,
+        normalize = reward_normalizer,
+    )
