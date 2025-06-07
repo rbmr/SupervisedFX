@@ -1,7 +1,7 @@
 import json
 import logging
 from functools import partial
-from multiprocessing import Pool, current_process, Manager, Process, Lock
+from multiprocessing import Manager, Process, Lock
 from pathlib import Path
 from typing import Any, Callable
 
@@ -11,12 +11,9 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
 from tqdm import tqdm
 
-from common.constants import MarketDataCol
-from common.data.data import ForexCandleData
-from common.data.feature_engineer import FeatureEngineer, copy_columns
-from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
 from common.envs.callbacks import SaveOnEpisodeEndCallback
 from common.envs.forex_env import ForexEnv
+from common.models.analysis import analyse_individual_run, analyse_finals
 from common.models.dummy_models import DUMMY_MODELS
 from common.scripts import set_seed, parallel_run
 from common.models.utils import load_models, save_model_with_metadata, load_model_with_metadata
