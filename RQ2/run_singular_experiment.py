@@ -18,7 +18,7 @@ from common.data.data import ForexCandleData, Timeframe
 from common.models.train_eval import run_experiment, evaluate_models, analyse_results
 from common.constants import *
 from common.scripts import *
-from common.envs.rewards import risk_adjusted_return
+from common.envs.rewards import risk_adjusted_return, log_equity_change
 
 
 
@@ -157,10 +157,10 @@ def main():
         transaction_cost_pct=TRANSACTION_COST_PCT,
         n_actions=1,
         allow_short=False,
-        custom_reward_function=risk_adjusted_return)
+        custom_reward_function=log_equity_change)
     logging.info("Environments created.")
 
-    policy_kwargs = dict(net_arch=[12,8], optimizer_class=optim.Adam, activation_fn=LeakyReLU)
+    policy_kwargs = dict(net_arch=[128,64,32], optimizer_class=optim.Adam, activation_fn=LeakyReLU)
     temp_env = DummyVecEnv([lambda: train_env])
     model = DQN(
         policy="MlpPolicy",
@@ -192,7 +192,7 @@ def main():
         base_folder_path=RQ2_DIR,
         experiment_group_name="hyperparameters",
         experiment_name="test_new_stuff",
-        train_episodes=250,
+        train_episodes=0,
         eval_episodes=1,
         checkpoints=True,
         tensorboard_logging=True
