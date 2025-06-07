@@ -99,6 +99,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
         'reward'
     ])
     close_bid, close_ask, equity_open, equity_high, equity_low, equity_close, actions, dates, rewards = np_columns
+    rewards = np.nan_to_num(rewards, nan=0.0)
     del df # df is no longer necessary
 
     # Plot market data
@@ -255,8 +256,8 @@ def analyse_individual_run(results_file: Path, model_name: str):
     estimated_total_spread_cost = total_trades * average_spread
     
     # rewards
-    total_rewards = rewards.sum() 
-    average_rewards = rewards.mean()
+    total_rewards = np.sum(rewards)
+    average_rewards = np.mean(rewards) if len(rewards) > 0 else 0.0
     
 
     # Prepare results

@@ -36,6 +36,6 @@ def risk_adjusted_return(env: ForexEnv) -> float:
     current_equity_change = equity_change(env)
     volatility = env.agent_data[current_time_step, AgentDataCol.equity_high] - env.agent_data[
         current_time_step, AgentDataCol.equity_low]
-    epsilon = 1e-5  # Small value to avoid division by zero
+    epsilon = 1e-10  # Small value to avoid division by zero
 
     return current_equity_change / (volatility + epsilon)
