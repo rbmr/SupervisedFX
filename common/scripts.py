@@ -6,18 +6,16 @@ import os
 import random
 import signal
 import tempfile
+import time
 from datetime import datetime, timedelta
 from functools import partial
-from multiprocessing import cpu_count, Pool, get_context
+from multiprocessing import cpu_count, get_context
 from pathlib import Path
-from typing import Any, Dict, Generator, Callable, TypeVar
-import time
+from typing import Any, Callable, Dict, Generator, TypeVar
+
 import numpy as np
 import pandas as pd
 import requests
-from numpy.typing import NDArray
-
-from common.constants import MarketDataCol
 
 K = TypeVar("K")
 V = TypeVar("V")

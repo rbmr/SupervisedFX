@@ -9,6 +9,7 @@ from common.envs.forex_env import ForexEnv
 from common.models.utils import save_model_with_metadata
 from common.scripts import circ_slice, render_horz_bar
 
+
 class SaveCallback(BaseCallback):
     def __init__(self, models_dir: Path, save_freq: int, verbose=0):
         super().__init__(verbose)

@@ -5,6 +5,7 @@ from numpy.typing import NDArray
 
 from common.constants import AgentDataCol
 
+
 class StepwiseFeatureEngineer:
 
     def __init__(self):

@@ -19,9 +19,9 @@ import numpy as np
 import pandas as pd
 from tqdm import trange
 
-from common.constants import MarketDataCol, AgentDataCol
+from common.constants import AgentDataCol, MarketDataCol
 from common.envs.forex_env import ForexEnv
-from common.envs.trade import execute_trade, calculate_equity, reverse_equity
+from common.envs.trade import calculate_equity, execute_trade, reverse_equity
 from common.scripts import compute_sliding_window
 
 DATA_HASH_LENGTH = 16

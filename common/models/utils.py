@@ -1,12 +1,12 @@
 import json
+import logging
 import zipfile
 from pathlib import Path
 from typing import Generator, Type
 
-import logging
-from stable_baselines3 import PPO, DQN, SAC, TD3, DDPG, A2C
-from stable_baselines3.common.base_class import BaseAlgorithm
 from sb3_contrib import RecurrentPPO
+from stable_baselines3 import A2C, DDPG, DQN, PPO, SAC, TD3
+from stable_baselines3.common.base_class import BaseAlgorithm
 
 ALGORITHM_MAP = {
     'PPO': PPO,

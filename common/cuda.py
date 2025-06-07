@@ -3,8 +3,10 @@ This file provides some debugging information to determine the version of cuda
 pytorch is using.
 """
 
-import torch
 import subprocess
+
+import torch
+
 
 def get_nvidia_smi_output():
     try:

@@ -1,7 +1,8 @@
 import numpy as np
 
 from common.constants import MarketDataCol
-from common.envs.forex_env import ForexEnv, AgentDataCol
+from common.envs.forex_env import AgentDataCol, ForexEnv
+
 
 def equity_change(env: ForexEnv) -> float:
     """
