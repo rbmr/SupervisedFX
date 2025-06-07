@@ -61,7 +61,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
     if info_file.exists():
         try:
             with open(info_file, "r") as f:
-                data = json.load(f)
+                _ = json.load(f)
             return
         except Exception:
             pass
