@@ -58,7 +58,7 @@ def run_experiment(train_env: ForexEnv,
 
     callbacks = []
     if checkpoints:
-        callbacks.append(SaveOnEpisodeEndCallback(save_path=models_path))
+        callbacks.append(SaveOnEpisodeEndCallback(models_dir=models_path))
 
     train_model(model, train_env=train_env, train_episodes=train_episodes, callback=callbacks)
 

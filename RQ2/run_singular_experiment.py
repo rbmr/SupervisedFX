@@ -36,7 +36,7 @@ def get_feature_engineer() -> FeatureEngineer:
     def feature_0(df):
         copy_column(df, "close_bid", "close_pct_change")
         as_pct_change(df, "close_pct_change")
-        #history_lookback(df, 11, ["close_pct_change"])
+        history_lookback(df, 11, ["close_pct_change"])
     feature_engineer.add(feature_0)
 
     # -- TREND FEATURES --
@@ -45,7 +45,7 @@ def get_feature_engineer() -> FeatureEngineer:
     def feature_1(df):
         ema(df, window=20)
         as_ratio_of_other_column(df, "ema_20_close_bid", "close_bid")
-        #history_lookback(df, 11, ["ema_20_close_bid"])
+        history_lookback(df, 11, ["ema_20_close_bid"])
     feature_engineer.add(feature_1)
 
     # FEATURE 2 - BOLLINGER_BANDS - 24 features
@@ -53,15 +53,15 @@ def get_feature_engineer() -> FeatureEngineer:
         bollinger_bands(df, window=20, num_std_dev=2)
         as_ratio_of_other_column(df, "bb_upper_20", "close_bid")
         as_ratio_of_other_column(df, "bb_lower_20", "close_bid")
-        #history_lookback(df, 11, ["bb_upper_20"])
-        #history_lookback(df, 11, ["bb_lower_20"])
+        history_lookback(df, 11, ["bb_upper_20"])
+        history_lookback(df, 11, ["bb_lower_20"])
     feature_engineer.add(feature_2)
 
     # FEATURE 3 - MACD - 12 features
     def feature_3(df):
         macd(df, short_window=12, long_window=26, signal_window=9)
         remove_columns(df, ["macd_signal", "macd"])
-        #history_lookback(df, 11, ["macd_hist"])
+        history_lookback(df, 11, ["macd_hist"])
     feature_engineer.add(feature_3)
 
     # -- TREND FEATURES END --
@@ -71,7 +71,7 @@ def get_feature_engineer() -> FeatureEngineer:
     def feature_4(df):
         rsi(df, window=14)
         as_min_max_fixed(df, "rsi_14", 0, 100)
-        #history_lookback(df, 11, ["rsi_14"])
+        history_lookback(df, 11, ["rsi_14"])
     feature_engineer.add(feature_4)
 
     # FEATURE 5 - STOCHASTIC_OSCILLATOR - 12 features
@@ -79,15 +79,15 @@ def get_feature_engineer() -> FeatureEngineer:
         stochastic_oscillator(df, window=3)
         as_min_max_fixed(df, "stoch_k", 0, 100)
         as_min_max_fixed(df, "stoch_d", 0, 100)
-        #history_lookback(df, 11, ["stoch_k"])
-        #history_lookback(df, 11, ["stoch_d"])
+        history_lookback(df, 11, ["stoch_k"])
+        history_lookback(df, 11, ["stoch_d"])
     feature_engineer.add(feature_5)
 
     # FEATURE 6 - CCI - 12 features
     def feature_6(df):
         cci(df, window=20)
         as_min_max_fixed(df, "cci_20", -100, 100)
-        #history_lookback(df, 11, ["cci_20"])
+        history_lookback(df, 11, ["cci_20"])
     feature_engineer.add(feature_6)
 
     # -- MOMENTUM FEATURES END --=
@@ -97,21 +97,21 @@ def get_feature_engineer() -> FeatureEngineer:
     def feature_7(df):
         mfi(df, window=14)
         as_min_max_fixed(df, "mfi_14", 0, 100)
-        #history_lookback(df, 11, ["mfi_14"])
+        history_lookback(df, 11, ["mfi_14"])
     feature_engineer.add(feature_7)
 
     def feature_8(df):
         # FEATURE 8 - OBV - 12 features
         obv(df)
         as_ratio_of_other_column(df, "obv", "volume")
-        #history_lookback(df, 11, ["obv"])
+        history_lookback(df, 11, ["obv"])
     feature_engineer.add(feature_8)
     
     def feature_9(df):
         # FEATURE 9 - CMF - 12 features
         cmf(df, window=20)
         as_min_max_fixed(df, "cmf_20", -1, 1)
-        #history_lookback(df, 11, ["cmf_20"])
+        history_lookback(df, 11, ["cmf_20"])
     feature_engineer.add(feature_9)
 
     # -- VOLUME FEATURES END --
@@ -121,7 +121,7 @@ def get_feature_engineer() -> FeatureEngineer:
         # FEATURE 10 - KAMA
         kama(df, window=10)
         as_ratio_of_other_column(df, "kama_10_close_bid", "close_bid")
-        #history_lookback(df, 11, ["kama_10_close_bid"])
+        history_lookback(df, 11, ["kama_10_close_bid"])
     feature_engineer.add(feature_10)
 
     return feature_engineer
@@ -166,12 +166,12 @@ def main():
         policy="MlpPolicy",
         env=temp_env,
         learning_rate=0.0001,
-        buffer_size=5000,
-        learning_starts=480,
+        buffer_size=10000,
+        learning_starts=1,
         batch_size=32,
         tau=1.0,
-        gamma=0.9,
-        train_freq=32,
+        gamma=0.8,
+        train_freq=4,
         target_update_interval=500,
         exploration_fraction=0.5,
         exploration_initial_eps=1.0,
@@ -191,8 +191,8 @@ def main():
         model=model,
         base_folder_path=RQ2_DIR,
         experiment_group_name="hyperparameters",
-        experiment_name="only_long_eurusd",
-        train_episodes=30,
+        experiment_name="test_new_stuff",
+        train_episodes=250,
         eval_episodes=1,
         checkpoints=True,
         tensorboard_logging=True
