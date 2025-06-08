@@ -108,5 +108,4 @@ def custom_comparison_model(action_space: Space) -> DummyModel:
 
     return DummyModel(pred_fn=prediction_value)
 
-
-DUMMY_MODELS: list[Callable[[Space], DummyModel]] = [short_model, long_model, hold_model, random_model, custom_comparison_model]
+DUMMY_MODELS: list[Callable[[Space], DummyModel]] = [short_model, long_model, hold_model, random_model]
