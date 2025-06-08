@@ -190,7 +190,7 @@ def evaluate_models(models_dir: Path,
                     eval_envs: dict[str, ForexEnv],
                     eval_episodes: int = 1,
                     force_eval: bool = False,
-                    num_workers: int = 1,
+                    num_workers: int = 4,
                     eval_dummies: bool = False) -> None:
     """
     Evaluates each model in a directory on a set of ForexEnvs for a given number of episodes.

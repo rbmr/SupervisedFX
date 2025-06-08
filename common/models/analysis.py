@@ -95,9 +95,11 @@ def analyse_individual_run(results_file: Path, model_name: str):
         'info.market_data.close_bid', 'info.market_data.close_ask',
         'info.agent_data.equity_open', 'info.agent_data.equity_high',
         'info.agent_data.equity_low', 'info.agent_data.equity_close',
-        'info.agent_data.action', 'info.market_data.date_gmt'
+        'info.agent_data.action', 'info.market_data.date_gmt',
+        'reward'
     ])
-    close_bid, close_ask, equity_open, equity_high, equity_low, equity_close, actions, dates = np_columns
+    close_bid, close_ask, equity_open, equity_high, equity_low, equity_close, actions, dates, rewards = np_columns
+    rewards = np.nan_to_num(rewards, nan=0.0)
     del df # df is no longer necessary
 
     # Plot market data
@@ -165,6 +167,15 @@ def analyse_individual_run(results_file: Path, model_name: str):
     plt.savefig(output_dir / f"actions_histogram.png")
     plt.close()
 
+    # scatter plot for the actions per time step
+    plt.figure(figsize=(12, 6))
+    plt.scatter(np.arange(len(actions)), actions, alpha=0.5)
+    plt.title(f"Actions Scatter Plot for {model_name}")
+    plt.xlabel('Time Step')
+    plt.ylabel('Action Value')
+    plt.savefig(output_dir / f"actions_scatter.png")
+    plt.close()
+    
     # profit factor. Calculate the gross profit (all positive returns) and gross loss (all negative returns)
     positive_returns = equity_returns[equity_returns > 0]
     negative_returns = equity_returns[equity_returns < 0]
@@ -172,33 +183,38 @@ def analyse_individual_run(results_file: Path, model_name: str):
     gross_loss = -np.sum(negative_returns)
     profit_factor = gross_profit / gross_loss if gross_loss != 0 else float('inf')
 
-    # setup trades_df
-    trade_mask = actions != 0
+    # ##################################################################
+    # #       TRADE DEFINITION LOGIC STARTS HERE                       #
+    # ##################################################################
 
-    if np.any(trade_mask):
-        # Extract trading rows
-        trade_actions = actions[trade_mask]
-        trade_dates = dates[trade_mask]
-        trade_equity_open = equity_open[trade_mask]
-        trade_equity_close = equity_close[trade_mask]
+    # A trade is a continuous block of actions with the same sign (>0 or <0).
+    # An action of 0 ends the current trade.
+    # We use np.sign() to get a sequence of 1 (long), -1 (short), and 0 (flat).
+    trade_types = np.sign(actions).astype(np.int8)
 
-        # Determine trade types
-        trade_types = np.where(trade_actions > 0, 1, -1).astype(np.int8)
+    # Find where the trade type changes. Pad with 0 to catch trades at start/end.
+    trade_changes = np.diff(np.concatenate(([0], trade_types, [0])))
+    trade_boundaries = np.where(trade_changes != 0)[0]
 
-        # Group consecutive trades of same type
-        trade_changes = np.diff(np.concatenate(([0], trade_types)))
-        group_starts = np.where(trade_changes != 0)[0]
-        group_ends = np.concatenate([group_starts[1:], [len(trade_types)]])
+    # Each boundary is the start of a new state (long, short, or flat)
+    group_starts = trade_boundaries[:-1]
+    group_ends = trade_boundaries[1:]
 
-        num_trades = len(group_starts)
-        trade_returns = np.zeros(num_trades, dtype=np.float32)
-        trade_durations = np.zeros(num_trades, dtype=np.float32)
-        trade_types_grouped = np.zeros(num_trades, dtype=np.int8)
+    # Filter out the "flat" periods where the action was 0
+    is_trade_group = trade_types[group_starts] != 0
+    trade_starts = group_starts[is_trade_group]
+    trade_ends = group_ends[is_trade_group]
 
-        for i, (start, end) in enumerate(zip(group_starts, group_ends)):
-            trade_types_grouped[i] = trade_types[start]
-            trade_returns[i] = trade_equity_close[end-1] - trade_equity_open[start]
-            trade_durations[i] = (trade_dates[end-1] - trade_dates[start]) / (1e9 * 60 * 60)
+    if len(trade_starts) > 0:
+        num_trades = len(trade_starts)
+        
+        # Get the type of each trade (1 for long, -1 for short)
+        trade_types_grouped = trade_types[trade_starts]
+        
+        # Calculate returns and durations for each trade
+        # A trade's return is equity at the end of the period minus equity at the start
+        trade_returns = equity_close[trade_ends - 1] - equity_open[trade_starts]
+        trade_durations = (dates[trade_ends - 1] - dates[trade_starts]) / (1e9 * 60 * 60) # in hours
 
         winning_trades = trade_returns > 0
         losing_trades = trade_returns < 0
@@ -210,7 +226,8 @@ def analyse_individual_run(results_file: Path, model_name: str):
         short_trades_count = np.sum(trade_types_grouped == -1)
         total_trades_returns = np.sum(trade_returns)
         average_trade_return = np.mean(trade_returns)
-        average_trade_return_pct = np.mean(trade_returns / trade_equity_open[group_starts])
+        # Calculate percentage return based on the equity at the start of each trade
+        average_trade_return_pct = np.mean(trade_returns / equity_open[trade_starts])
         average_trade_duration_hours = np.mean(trade_durations)
         total_winning_rate = np.sum(winning_trades) / num_trades if num_trades > 0 else 0
 
@@ -226,6 +243,22 @@ def analyse_individual_run(results_file: Path, model_name: str):
         max_winning_streak = 0
         max_losing_streak = 0
         total_winning_rate = 0.0
+
+    # ##################################################################
+    # #       TRADE DEFINITION LOGIC ENDS HERE                         #
+    # ##################################################################
+
+    # average spread of close_bid and close_ask and open_bid and open_ask
+    spread_bid = close_ask - close_bid
+    average_spread = np.mean(spread_bid)
+
+    # The cost of the spread is paid for each trade that is opened.
+    estimated_total_spread_cost = total_trades * average_spread
+    
+    # rewards
+    total_rewards = np.sum(rewards)
+    average_rewards = np.mean(rewards) if len(rewards) > 0 else 0.0
+    
 
     # Prepare results
     info = {
@@ -244,6 +277,13 @@ def analyse_individual_run(results_file: Path, model_name: str):
         "max_winning_streak": max_winning_streak,
         "max_losing_streak": max_losing_streak,
         "total_winning_rate": total_winning_rate,
+
+        # Additional metrics
+        "average_spread": average_spread,
+        "estimated_total_spread_cost": estimated_total_spread_cost,
+
+        "total_rewards": total_rewards,
+        "average_rewards": average_rewards,
     }
 
     # Create results table
@@ -262,6 +302,12 @@ def analyse_individual_run(results_file: Path, model_name: str):
         ('Max Winning Streak', info['max_winning_streak']),
         ('Max Losing Streak', info['max_losing_streak']),
         ('Total Winning Rate (%)', info['total_winning_rate'] * 100),
+
+        ('Average Spread', info['average_spread']),
+        ('Estimated Total Spread Cost', info['estimated_total_spread_cost']),
+
+        ('Total Rewards', info['total_rewards']),
+        ('Average Rewards', info['average_rewards']),
     ]
     row_labels, table_data = zip(*metrics)
     table_data = [[val] for val in table_data]
