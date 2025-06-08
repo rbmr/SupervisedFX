@@ -36,7 +36,7 @@ def get_exposure_levels(n: int) -> np.ndarray:
     """
     Divides the range [-1, 1] into (2n + 1) equally spaced steps including endpoints.
     """
-    return np.linspace(-1, 1, n * 2 + 1, dtype=np.float32)
+    return np.linspace(-1, 1, n * 2 + 1, dtype=np.float64)
 
 def get_exposure_idx(x: float, n: int) -> int:
     """
@@ -127,9 +127,9 @@ def compute_dp_table(market_data: np.ndarray,
     logging.info(f"Generating DP table with data hash {data_hash}, n_actions {n_actions}, and transaction_cost_pct {transaction_cost_pct}.")
 
     # Initialize tables
-    value_table = np.zeros((timesteps, len(actions)), dtype=np.float32)
+    value_table = np.zeros((timesteps, len(actions)), dtype=np.float64)
     policy_table = np.full((timesteps, len(actions)), 255, dtype=np.uint8) # 255 indicates unfilled value.
-    q_min_table = np.full((timesteps, len(actions)), np.inf, dtype=np.float32)
+    q_min_table = np.full((timesteps, len(actions)), np.inf, dtype=np.float64)
 
     # Backward induction
     for t in trange(timesteps - 2, -1, -1):  # Skip last timestep (terminal)
@@ -241,9 +241,9 @@ def load_dp_table(table_dir: Path, safe: bool = False) -> DPTable | None:
         raise FileNotFoundError(f"DP table files not found for {table_dir}")
 
     # Load data
-    value_table = pd.read_csv(value_path).to_numpy(dtype=np.float32)
+    value_table = pd.read_csv(value_path).to_numpy(dtype=np.float64)
     policy_table = pd.read_csv(policy_path).to_numpy(dtype=np.uint8)
-    q_min_table = pd.read_csv(q_min_path).to_numpy(dtype=np.float32)
+    q_min_table = pd.read_csv(q_min_path).to_numpy(dtype=np.float64)
     with open(metadata_path, "r") as f:
         metadata = json.load(f)
 
@@ -271,7 +271,7 @@ def interp(v_row: np.ndarray, exposure: float, n_actions: int):
 
 class DPRewardFunction:
 
-    def __init__(self, table: DPTable):
+    def __init__(self, table: DPTable, window: int = 1):
         self.v = table.value_table
         self.pi = table.policy_table
         self.q_min = table.q_min_table
@@ -279,6 +279,8 @@ class DPRewardFunction:
         self.actions = get_exposure_levels(table.n_actions)
         self.T = self.v.shape[0]
         self.c = table.transaction_cost_pct
+        self.row_q_min = self.q_min.min(axis=1)
+        self.row_q_max = self.v.max(axis=1)
 
     def __call__(self, env) -> float:
         t = env.n_steps
@@ -301,8 +303,8 @@ class DPRewardFunction:
 
         # Normalize Q-value against min and max action
         i = get_exposure_idx(curr_exposure, self.n_actions)
-        q_min = self.q_min[t, i]
-        q_max = self.v[t, i]
+        q_min = self.q_min[t, i] # Value of the worst action you can take in the current state.
+        q_max = self.v[t, i] # Value of the best action you can take in the current state.
         if q_min == q_max:
             return 0.0
-        return (raw_q - q_min) / (q_max - q_min) # [0, 1]
+        return np.sqrt(np.clip((raw_q - q_min) / (q_max - q_min), 0, 1)) # [0, 1]
