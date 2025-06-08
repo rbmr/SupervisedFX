@@ -30,7 +30,7 @@ def get_feature_engineer() -> FeatureEngineer:
     def feature_0(df):
         copy_column(df, "close_bid", "close_pct_change")
         as_pct_change(df, "close_pct_change")
-        history_lookback(df, 11, ["close_pct_change"])
+        #history_lookback(df, 11, ["close_pct_change"])
     feature_engineer.add(feature_0)
 
     # -- TREND FEATURES --
@@ -39,7 +39,7 @@ def get_feature_engineer() -> FeatureEngineer:
     def feature_1(df):
         ema(df, window=20)
         as_ratio_of_other_column(df, "ema_20_close_bid", "close_bid")
-        history_lookback(df, 11, ["ema_20_close_bid"])
+        #history_lookback(df, 11, ["ema_20_close_bid"])
     feature_engineer.add(feature_1)
 
     # FEATURE 2 - BOLLINGER_BANDS - 24 features
@@ -47,15 +47,15 @@ def get_feature_engineer() -> FeatureEngineer:
         bollinger_bands(df, window=20, num_std_dev=2)
         as_ratio_of_other_column(df, "bb_upper_20", "close_bid")
         as_ratio_of_other_column(df, "bb_lower_20", "close_bid")
-        history_lookback(df, 11, ["bb_upper_20"])
-        history_lookback(df, 11, ["bb_lower_20"])
+        #history_lookback(df, 11, ["bb_upper_20"])
+        #history_lookback(df, 11, ["bb_lower_20"])
     feature_engineer.add(feature_2)
 
     # FEATURE 3 - MACD - 12 features
     def feature_3(df):
         macd(df, short_window=12, long_window=26, signal_window=9)
         remove_columns(df, ["macd_signal", "macd"])
-        history_lookback(df, 11, ["macd_hist"])
+        #history_lookback(df, 11, ["macd_hist"])
     feature_engineer.add(feature_3)
 
     # -- TREND FEATURES END --
@@ -65,7 +65,7 @@ def get_feature_engineer() -> FeatureEngineer:
     def feature_4(df):
         rsi(df, window=14)
         as_min_max_fixed(df, "rsi_14", 0, 100)
-        history_lookback(df, 11, ["rsi_14"])
+        #history_lookback(df, 11, ["rsi_14"])
     feature_engineer.add(feature_4)
 
     # FEATURE 5 - STOCHASTIC_OSCILLATOR - 12 features
@@ -73,15 +73,15 @@ def get_feature_engineer() -> FeatureEngineer:
         stochastic_oscillator(df, window=3)
         as_min_max_fixed(df, "stoch_k", 0, 100)
         as_min_max_fixed(df, "stoch_d", 0, 100)
-        history_lookback(df, 11, ["stoch_k"])
-        history_lookback(df, 11, ["stoch_d"])
+        #history_lookback(df, 11, ["stoch_k"])
+        #history_lookback(df, 11, ["stoch_d"])
     feature_engineer.add(feature_5)
 
     # FEATURE 6 - CCI - 12 features
     def feature_6(df):
         cci(df, window=20)
         as_min_max_fixed(df, "cci_20", -100, 100)
-        history_lookback(df, 11, ["cci_20"])
+        #history_lookback(df, 11, ["cci_20"])
     feature_engineer.add(feature_6)
 
     # -- MOMENTUM FEATURES END --=
@@ -91,21 +91,21 @@ def get_feature_engineer() -> FeatureEngineer:
     def feature_7(df):
         mfi(df, window=14)
         as_min_max_fixed(df, "mfi_14", 0, 100)
-        history_lookback(df, 11, ["mfi_14"])
+        #history_lookback(df, 11, ["mfi_14"])
     feature_engineer.add(feature_7)
 
     def feature_8(df):
         # FEATURE 8 - OBV - 12 features
         obv(df)
         as_ratio_of_other_column(df, "obv", "volume")
-        history_lookback(df, 11, ["obv"])
+        #history_lookback(df, 11, ["obv"])
     feature_engineer.add(feature_8)
     
     def feature_9(df):
         # FEATURE 9 - CMF - 12 features
         cmf(df, window=20)
         as_min_max_fixed(df, "cmf_20", -1, 1)
-        history_lookback(df, 11, ["cmf_20"])
+        #history_lookback(df, 11, ["cmf_20"])
     feature_engineer.add(feature_9)
 
     # -- VOLUME FEATURES END --
@@ -115,7 +115,7 @@ def get_feature_engineer() -> FeatureEngineer:
         # FEATURE 10 - KAMA
         kama(df, window=10)
         as_ratio_of_other_column(df, "kama_10_close_bid", "close_bid")
-        history_lookback(df, 11, ["kama_10_close_bid"])
+        #history_lookback(df, 11, ["kama_10_close_bid"])
     feature_engineer.add(feature_10)
 
     return feature_engineer
@@ -126,11 +126,20 @@ def main():
     set_seed(42)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+    # forex_data = ForexCandleData.load(source="dukascopy",
+    #                                   instrument="EURUSD",
+    #                                   granularity=Timeframe.M15,
+    #                                   start_time=RQ2_HYPERPARAMETERS_START_DATE,
+    #                                   end_time= RQ2_HYPERPARAMETERS_END_DATE,
+    #                                 )
+    
+    
+
     forex_data = ForexCandleData.load(source="dukascopy",
                                       instrument="EURUSD",
-                                      granularity=Timeframe.M15,
-                                      start_time=RQ2_HYPERPARAMETERS_START_DATE,
-                                      end_time= RQ2_HYPERPARAMETERS_END_DATE,
+                                      granularity=Timeframe.M30,
+                                      start_time=datetime(2022, 1, 2, 22, 0, 0, 0),
+                                      end_time=datetime(2023, 6, 30, 20, 30, 0, 0),
                                     )
     
     # --- Feature Engineering ---
@@ -153,19 +162,19 @@ def main():
         custom_reward_function=percentage_return)
     logging.info("Environments created.")
 
-    policy_kwargs = dict(net_arch=[128,64,32], optimizer_class=optim.Adam, activation_fn=LeakyReLU)
+    policy_kwargs = dict(net_arch=[16, 8], optimizer_class=optim.Adam, activation_fn=LeakyReLU)
     temp_env = DummyVecEnv([lambda: train_env])
     model = DQN(
         policy="MlpPolicy",
         env=temp_env,
-        learning_rate=0.0002,
+        learning_rate=0.0001,
         buffer_size=10000,
         learning_starts=5000,
         batch_size=32,
-        tau=0.01,
+        tau=0.05,
         gamma=0.95,
         train_freq=4,
-        target_update_interval=1,
+        target_update_interval=16,
         exploration_fraction=0.5,
         exploration_initial_eps=1.0,
         exploration_final_eps=0.05,
@@ -185,8 +194,8 @@ def main():
         model=model,
         base_folder_path=RQ2_DIR,
         experiment_group_name="hyperparameters",
-        experiment_name="new_reward_new_params",
-        train_episodes=250,
+        experiment_name="30m_test",
+        train_episodes=30,
         eval_episodes=1,
         checkpoints=True,
         tensorboard_logging=True
