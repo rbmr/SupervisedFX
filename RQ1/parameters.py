@@ -167,9 +167,7 @@ def get_model(env: ForexEnv):
 
     policy_kwargs = dict(
         activation_fn=nn.ReLU,
-        net_arch=[
-            dict(pi=[64, 64], vf=[64, 64])
-        ],
+        net_arch=dict(pi=[64, 64], vf=[64, 64]),
     )
 
     hyperparams = dict(
