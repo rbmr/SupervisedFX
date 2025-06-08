@@ -208,24 +208,26 @@ class ForexEnv(gym.Env):
         # Standardize action
         target_exposure = self._get_target_exposure(action)
 
-        # Perform step
+        # Increment step
         self.n_steps += 1
         self.t = self.step_map[self.n_steps]
 
         # Perform action
-        prev_cash = self.agent_data[self.n_steps - 1, AgentDataCol.cash]
-        prev_shares = self.agent_data[self.n_steps - 1, AgentDataCol.shares]
-        current_data = self.market_data[self.t, :]
-        current_cash, current_shares = execute_trade(target_exposure, current_data, prev_cash, prev_shares, self.transaction_cost_pct) # type: ignore
-        equity_open, equity_high, equity_low, equity_close = calculate_ohlc_equity(current_data, current_cash, current_shares)
-        self.agent_data[self.n_steps, :] = (current_cash, current_shares, equity_open, equity_high, equity_low, equity_close, target_exposure)
+        prev_cash = self.agent_data[self.n_steps-1, AgentDataCol.cash]
+        prev_shares = self.agent_data[self.n_steps-1, AgentDataCol.shares]
+        prev_close_ask = self.market_data[self.step_map[self.n_steps-1], MarketDataCol.close_ask]
+        prev_close_bid = self.market_data[self.step_map[self.n_steps-1], MarketDataCol.close_bid]
+        curr_cash, curr_shares = execute_trade(target_exposure, prev_close_bid, prev_close_ask, prev_cash, prev_shares, self.transaction_cost_pct) # type: ignore
+        curr_equity_ohlc = calculate_ohlc_equity(self.market_data[self.t], curr_cash, curr_shares)
+        self.agent_data[self.n_steps, :] = (curr_cash, curr_shares, *curr_equity_ohlc, target_exposure)
 
         # Determine done
         terminated = False
         truncated = False
-        if equity_close <= 0:
+        curr_equity_close = curr_equity_ohlc[3]
+        if curr_equity_close <= 0:
             terminated = True
-            logging.warning(f"Step {self.n_steps}: Agent ruined. Equity: {equity_close}.")
+            logging.warning(f"Step {self.n_steps}: Agent ruined. Equity: {curr_equity_close}.")
         if self.n_steps >= self.total_steps - 1:
             truncated = True
 

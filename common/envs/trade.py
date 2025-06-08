@@ -39,15 +39,13 @@ def calculate_ohlc_equity(current_prices: NDArray[np.float32], cash: float, shar
     equity_close = calculate_equity(current_prices[MarketDataCol.close_bid], current_prices[MarketDataCol.close_ask], cash, shares) # type: ignore
     return equity_open, equity_high, equity_low, equity_close
 
-def execute_trade(target_exposure: float, current_data, current_cash: float, current_shares: float, transaction_cost_pct: float) -> tuple[float, float]:
+def execute_trade(target_exposure: float, bid_price: float, ask_price: float, current_cash: float, current_shares: float, transaction_cost_pct: float) -> tuple[float, float]:
     """
     Execute trade to achieve target exposure.
     Returns (new_cash, new_shares).
     """
     # Calculate current equity
-    open_bid = current_data[MarketDataCol.open_bid]
-    open_ask = current_data[MarketDataCol.open_ask]
-    current_equity = calculate_equity(open_bid, open_ask, current_cash, current_shares)
+    current_equity = calculate_equity(bid_price, ask_price, current_cash, current_shares)
     assert current_equity > 0, f"current_equity should be greater than zero, was {current_equity:.2f}"
 
     # Jitter Mitigation, skip action if it has no significant effect.
@@ -60,9 +58,9 @@ def execute_trade(target_exposure: float, current_data, current_cash: float, cur
 
     # Determine target number of shares based on target value
     if target_exposure > 0:  # Target is LONG
-        target_num_shares = target_position_value / open_ask
+        target_num_shares = target_position_value / ask_price
     else:  # Target is SHORT
-        target_num_shares = target_position_value / open_bid
+        target_num_shares = target_position_value / bid_price
 
     # Determine the change in shares needed
     shares_to_trade = target_num_shares - current_shares
@@ -70,7 +68,7 @@ def execute_trade(target_exposure: float, current_data, current_cash: float, cur
     if shares_to_trade > 0:  # Need to buy
         new_cash, new_shares = buy_shares(
             shares_to_buy=shares_to_trade,
-            ask_price=open_ask,
+            ask_price=ask_price,
             current_cash=current_cash,
             current_shares=current_shares,
             transaction_cost_pct=transaction_cost_pct
@@ -78,8 +76,8 @@ def execute_trade(target_exposure: float, current_data, current_cash: float, cur
     else:  # Need to sell
         new_cash, new_shares = sell_shares(
             shares_to_sell=-shares_to_trade,
-            bid_price=open_bid,
-            ask_price=open_ask,  # needed to determine max shares to sell
+            bid_price=bid_price,
+            ask_price=ask_price,  # needed to determine max shares to sell
             current_cash=current_cash,
             current_shares=current_shares,
             transaction_cost_pct=transaction_cost_pct
