@@ -18,6 +18,8 @@ from common.models.dummy_models import DUMMY_MODELS
 from common.models.utils import (load_model_with_metadata, save_model_with_metadata)
 from common.scripts import parallel_run
 
+from common.models.dummy_models import DummyModel
+
 
 def run_experiment(train_env: ForexEnv,
                        eval_env: ForexEnv,
@@ -99,27 +101,39 @@ def train_model(model: BaseAlgorithm,
 
     logging.info("Training complete.")
 
+def evaluate_dummy(dummy_model: DummyModel, name: str, results_dir: Path, eval_env: ForexEnv, eval_env_name: str) -> None:
+    """
+    Evaluates a dummy model on a ForexEnv and saves the results.
+    """
+    model_results_dir = results_dir / name
+    env_results_dir = model_results_dir / eval_env_name
+    env_results_file = env_results_dir / "data.csv"
+    eval_episode_length = eval_env.episode_len
+
+    logging.info(f"Running dummy model ({name}) on environment ({eval_env_name}) for 1 episode...")
+
+    run_model(model=dummy_model,
+              env=eval_env,
+              data_path=env_results_file,
+              total_steps=eval_episode_length,
+              deterministic=True,
+              progress_bar=True)
+
 def evaluate_dummies(results_dir: Path, eval_envs: dict[str, ForexEnv]):
 
     for model_fn in DUMMY_MODELS:
         for eval_env_name, eval_env in eval_envs.items():
 
-            model = model_fn(eval_env.action_space)
+            model = model_fn(eval_env)
             model_name = model_fn.__name__
-
-            model_results_dir = results_dir / model_name
-            env_results_dir = model_results_dir / eval_env_name
-            env_results_file = env_results_dir / "data.csv"
-            eval_episode_length = eval_env.episode_len
 
             logging.info(f"Running model ({model_name}) on environment ({eval_env_name}) for 1 episode...")
 
-            run_model(model=model,
-                      env=eval_env,
-                      data_path=env_results_file,
-                      total_steps=eval_episode_length,
-                      deterministic=True,
-                      progress_bar=True)
+            evaluate_dummy(dummy_model=model,
+                           name=model_name,
+                           results_dir=results_dir,
+                           eval_env=eval_env,
+                           eval_env_name=eval_env_name)
 
 def evaluate_model(model_zip: Path,
                    results_dir: Path,

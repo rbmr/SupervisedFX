@@ -8,12 +8,12 @@ from common.data.feature_engineer import *
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
 from common.envs.forex_env import ForexEnv
 from common.envs.rewards import risk_adjusted_return
-from common.models.dummy_models import DummyModel, long_model, short_model, custom_comparison_model
-from common.models.train_eval import run_experiment
+from common.models.dummy_models import DummyModel, long_model, short_model, custom_comparison_model, dp_perfect_model
+from common.models.train_eval import run_experiment, evaluate_dummy, analyse_results
 from common.scripts import *
 
 
-def get_baselines() -> List[Tuple[str, DummyModel, FeatureEngineer, StepwiseFeatureEngineer]]:
+def get_baselines() -> List[Tuple[str, Callable[[ForexEnv], DummyModel], FeatureEngineer, StepwiseFeatureEngineer]]:
 
     baselines = []
 
@@ -38,8 +38,17 @@ def get_baselines() -> List[Tuple[str, DummyModel, FeatureEngineer, StepwiseFeat
         "KAMA_Comparison",
         custom_comparison_model,
         FeatureEngineer()
-        .add(kama, window=10)
-        .add(kama, window=25),
+        .add(lambda df: kama(df, window=10))
+        .add(lambda df: kama(df, window=25)),
+        StepwiseFeatureEngineer()
+    ))
+
+    
+
+    baselines.append((
+        "DP_Perfect_Policy",
+        dp_perfect_model,
+        FeatureEngineer(),
         StepwiseFeatureEngineer()
     ))
 
@@ -70,24 +79,36 @@ def main():
             agent_feature_engineer=stepwise_feature_engineer,
             initial_capital=INITIAL_CAPITAL,
             transaction_cost_pct=TRANSACTION_COST_PCT,
-            n_actions=1,
-            allow_short=False,
+            n_actions=0,
             custom_reward_function=risk_adjusted_return)
         logging.info("Environments created.")
 
-        # Run experiment
-        run_experiment(
-            train_env=train_env,
-            eval_env=eval_env,
-            model=model,
-            base_folder_path=RQ2_DIR,
-            experiment_group_name="baselines",
-            experiment_name=name,
-            train_episodes=0,
-            eval_episodes=1,
-            checkpoints=True,
-            tensorboard_logging=True
-        )
+        eval_envs = {
+            "train": train_env,
+            "eval": eval_env
+        }
+
+        results_dir = RQ2_DIR / "experiments" / "baselines"
+        results_dir.mkdir(parents=True, exist_ok=True)
+
+        for env_name, env in eval_envs.items():
+            logging.info(f"Running evaluation on {env_name} environment...")
+            evaluate_dummy(
+                dummy_model=model(env),
+                name=name,
+                results_dir=results_dir,
+                eval_env=env,
+                eval_env_name=env_name
+            )
+            logging.info(f"Evaluation on {env_name} environment completed.")
+    
+    analyse_results(
+        results_dir=results_dir,
+        model_name_suffix= "[Baseline Models]",
+    )
+
+        
+
 
     
 if __name__ == '__main__':
