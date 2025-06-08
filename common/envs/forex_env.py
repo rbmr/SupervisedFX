@@ -160,7 +160,7 @@ class ForexEnv(gym.Env):
         self.market_data = market_data_df.to_numpy(dtype=np.float32)
         self.market_features = market_feature_df.to_numpy(dtype=np.float32)
         self.market_feature_names = market_feature_df.columns.tolist()
-        self.agent_data = np.zeros(shape = (self.episode_len, len(AgentDataCol.all_names())), dtype=np.float32)
+        self.agent_data = np.zeros(shape = (self.data_len, len(AgentDataCol.all_names())), dtype=np.float32)
         self.agent_data[0, :] = (
             self.initial_capital, # cash
             0.0,                  # shares
@@ -168,11 +168,14 @@ class ForexEnv(gym.Env):
             self.initial_capital, # equity_high
             self.initial_capital, # equity_low
             self.initial_capital, # equity_close
-            0.0                   # action (no action at start)
+            0.0,                  # action (no action at start)
+            self.initial_capital, # pre_action_equity
         )
+        self.agent_data[1, AgentDataCol.pre_action_equity] = self.initial_capital
+
         assert self.market_data.shape == (self.data_len, len(MarketDataCol))
         assert self.market_features.shape == (self.data_len, len(self.market_feature_names))
-        assert self.agent_data.shape == (self.episode_len, len(AgentDataCol))
+        assert self.agent_data.shape == (self.data_len, len(AgentDataCol))
 
         # Action space
         self.n_actions = n_actions
@@ -210,13 +213,21 @@ class ForexEnv(gym.Env):
         self.n_steps += 1
 
         # Perform action
-        prev_cash = self.agent_data[self.n_steps-1, AgentDataCol.cash]
-        prev_shares = self.agent_data[self.n_steps-1, AgentDataCol.shares]
+        prev_cash = self.agent_data[self.n_steps - 1, AgentDataCol.cash]
+        prev_shares = self.agent_data[self.n_steps - 1, AgentDataCol.shares]
         open_ask = self.market_data[self.n_steps, MarketDataCol.open_ask]
         open_bid = self.market_data[self.n_steps, MarketDataCol.open_bid]
         cash, shares = execute_trade(target_exposure, open_bid, open_ask, prev_cash, prev_shares, self.transaction_cost_pct) # type: ignore
+
+        # Update agent data
         equity_ohlc = calculate_ohlc_equity(self.market_data[self.n_steps], cash, shares)
-        self.agent_data[self.n_steps, :] = (cash, shares, *equity_ohlc, target_exposure)
+        self.agent_data[self.n_steps, :-1] = (cash, shares, *equity_ohlc, target_exposure)
+
+        # Compute pre_action_equity of next timeframe
+        next_open_ask = self.market_data[self.n_steps + 1, MarketDataCol.open_ask]
+        next_open_bid = self.market_data[self.n_steps + 1, MarketDataCol.open_bid]
+        next_equity_open = calculate_equity(next_open_bid, next_open_ask, cash, shares)
+        self.agent_data[self.n_steps + 1, AgentDataCol.pre_action_equity] = next_equity_open
 
         # Determine done
         terminated = False
@@ -254,21 +265,9 @@ class ForexEnv(gym.Env):
         """
         if self.custom_reward_function is not None:
             return self.custom_reward_function(self)
-
-        # We calculate the difference between the equity immediately AFTER making the current trade,
-        # and the equity just BEFORE making the next trade.
-
-        # equity just after making the current trade
-        equity_open = self.agent_data[self.n_steps, AgentDataCol.equity_open]
-
-        # equity just before making the next trade
-        cash = self.agent_data[self.n_steps, AgentDataCol.cash]
-        shares = self.agent_data[self.n_steps, AgentDataCol.shares]
-        next_bid_price = self.market_data[self.n_steps+1, MarketDataCol.open_bid]
-        next_ask_price = self.market_data[self.n_steps+1, MarketDataCol.open_ask]
-        next_equity_open = calculate_equity(next_bid_price, next_ask_price, cash, shares) # type: ignore
-
-        return next_equity_open - equity_open
+        prev_equity = self.agent_data[self.n_steps, AgentDataCol.pre_action_equity]
+        next_equity = self.agent_data[self.n_steps + 1, AgentDataCol.pre_action_equity]
+        return next_equity - prev_equity
 
     def _get_observation(self):
         """
