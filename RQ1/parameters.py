@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from pathlib import Path
 
 from stable_baselines3 import A2C
 from torch import nn
@@ -155,7 +156,7 @@ def get_feature_engineer():
 
     return fe
 
-def get_model(env: ForexEnv):
+def get_model(env: ForexEnv, tensorboard_log: Path = None):
 
     logging.info("Creating model...")
 
@@ -184,7 +185,8 @@ def get_model(env: ForexEnv):
         normalize_advantage=True,
         policy_kwargs=policy_kwargs,
         verbose=1,
-        device="cpu"
+        device="cpu",
+        tensorboard_log=tensorboard_log
     )
 
     model = A2C(**hyperparams)
