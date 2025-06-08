@@ -2,6 +2,7 @@ import numpy as np
 
 from common.constants import MarketDataCol
 from common.envs.forex_env import AgentDataCol, ForexEnv
+from common.envs.trade import calculate_equity
 
 def get_curr_equity_open(env: ForexEnv):
     """Get the equity immediately after making the current trade."""
