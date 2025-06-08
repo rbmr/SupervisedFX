@@ -3,6 +3,7 @@ from datetime import datetime
 
 from stable_baselines3 import A2C
 
+from RQ1.custom_a2c_policy import A2C_LSTM_Policy
 from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import (FeatureEngineer, adx,
                                           as_min_max_fixed, as_min_max_window,
@@ -159,7 +160,7 @@ def get_model(env: ForexEnv):
     logging.info("Creating model...")
 
     model = A2C(
-        policy="MlpPolicy",
+        policy=A2C_LSTM_Policy,
         env=env,
         learning_rate=1e-4,
         n_steps=128,
