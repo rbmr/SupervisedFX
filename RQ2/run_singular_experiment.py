@@ -28,7 +28,8 @@ def get_feature_engineer() -> FeatureEngineer:
     """
     feature_engineer = FeatureEngineer()
 
-    feature_engineer.add(percent_of_day)
+    feature_engineer.add(complex_7d)
+    feature_engineer.add(complex_24h)
     
     # Add basic features
     # FEATURE 0 - CLOSE_PCT_CHANGE - 12 features
@@ -163,14 +164,14 @@ def main():
     model = DQN(
         policy="MlpPolicy",
         env=temp_env,
-        learning_rate=0.0001,
+        learning_rate=0.0002,
         buffer_size=10000,
-        learning_starts=1,
-        batch_size=16,
-        tau=1.0,
+        learning_starts=5000,
+        batch_size=32,
+        tau=0.01,
         gamma=0.95,
         train_freq=4,
-        target_update_interval=5000,
+        target_update_interval=1,
         exploration_fraction=0.5,
         exploration_initial_eps=1.0,
         exploration_final_eps=0.05,
@@ -190,8 +191,8 @@ def main():
         model=model,
         base_folder_path=RQ2_DIR,
         experiment_group_name="hyperparameters",
-        experiment_name="another_new_test",
-        train_episodes=0,
+        experiment_name="new_reward_new_params",
+        train_episodes=250,
         eval_episodes=1,
         checkpoints=True,
         tensorboard_logging=True
