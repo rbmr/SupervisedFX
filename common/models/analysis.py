@@ -93,12 +93,13 @@ def analyse_individual_run(results_file: Path, model_name: str):
     # Extract arrays that will be used
     np_columns = drop_and_return_numpy(df,[
         'info.market_data.close_bid', 'info.market_data.close_ask',
+        'info.agent_data.pre_action_equity',
         'info.agent_data.equity_open', 'info.agent_data.equity_high',
         'info.agent_data.equity_low', 'info.agent_data.equity_close',
-        'info.agent_data.action', 'info.market_data.date_gmt',
+        'info.agent_data.target_exposure', 'info.market_data.date_gmt',
         'reward'
     ])
-    close_bid, close_ask, equity_open, equity_high, equity_low, equity_close, actions, dates, rewards = np_columns
+    close_bid, close_ask, pre_action_equity, equity_open, equity_high, equity_low, equity_close, actions, dates, rewards = np_columns
     rewards = np.nan_to_num(rewards, nan=0.0)
     del df # df is no longer necessary
 
@@ -234,7 +235,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
             ends_normal = trade_ends[normal_trades_mask]
 
             # For these trades, return is calculated using the open equity of the bar AFTER the trade closes.
-            trade_returns[normal_trades_mask] = equity_open[ends_normal] - equity_open[starts_normal]
+            trade_returns[normal_trades_mask] = pre_action_equity[ends_normal] - pre_action_equity[starts_normal]
 
         # --- Handle the Special Case (trade open at the very end) ---
         
@@ -245,7 +246,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
 
             # For this final trade, we "mark-to-market" using the CLOSE equity of the final bar.
             # This provides the most accurate final Profit & Loss snapshot.
-            trade_returns[final_candle_mask] = equity_close[last_valid_index] - equity_open[starts_special]
+            trade_returns[final_candle_mask] = equity_close[last_valid_index] - pre_action_equity[starts_special]
 
         ######### END TRADE RETURNS #############
 
