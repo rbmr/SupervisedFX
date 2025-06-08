@@ -91,7 +91,7 @@ def train_model(model: BaseAlgorithm,
 
     train_dummy_env = DummyVecEnv([lambda: train_env])
     model.set_env(train_dummy_env)
-    total_timesteps = int(train_env.total_steps * train_episodes)
+    total_timesteps = int(train_env.episode_len * train_episodes)
 
     if total_timesteps > 0:
         model.learn(total_timesteps=total_timesteps, callback=callback, log_interval=1, progress_bar=True)
@@ -111,7 +111,7 @@ def evaluate_dummies(results_dir: Path, eval_envs: dict[str, ForexEnv]):
             model_results_dir = results_dir / model_name
             env_results_dir = model_results_dir / eval_env_name
             env_results_file = env_results_dir / "data.csv"
-            eval_episode_length = eval_env.total_steps
+            eval_episode_length = eval_env.episode_len
 
             logging.info(f"Running model ({model_name}) on environment ({eval_env_name}) for 1 episode...")
 
@@ -147,7 +147,7 @@ def evaluate_model(model_zip: Path,
     for eval_env_name, eval_env in eval_envs.items():
         env_results_dir = model_results_dir / eval_env_name
         env_results_file = env_results_dir / "data.csv"
-        eval_episode_length = eval_env.total_steps
+        eval_episode_length = eval_env.episode_len
 
         logging.info(f"Running model ({model_name}) on environment ({eval_env_name}) for {eval_episodes} episodes...")
 
