@@ -179,6 +179,7 @@ def main():
         policy_kwargs=policy_kwargs,
         verbose=0,
         seed=42,
+        device=DEVICE
     )
 
     logging.info("Model created.")
