@@ -1,25 +1,17 @@
 import logging
+from typing import List, Tuple
 
-import torch.optim as optim
-from torch.nn import LeakyReLU
-
-from common.scripts import set_seed
-from stable_baselines3 import DQN
-from stable_baselines3.common.vec_env import DummyVecEnv
-
-from common.envs.forex_env import ForexEnv
-from common.data.feature_engineer import *
-from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
 from RQ2.constants import *
-
-from common.data.data import ForexCandleData, Timeframe
-from common.models.train_eval import run_experiment, evaluate_models, analyse_results
-from common.models.dummy_models import DummyModel, long_model, short_model, custom_comparison_model
 from common.constants import *
-from common.scripts import *
+from common.data.data import ForexCandleData, Timeframe
+from common.data.feature_engineer import *
+from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
+from common.envs.forex_env import ForexEnv
 from common.envs.rewards import risk_adjusted_return
+from common.models.dummy_models import DummyModel, long_model, short_model, custom_comparison_model
+from common.models.train_eval import run_experiment
+from common.scripts import *
 
-from typing import Callable, Dict, Any, List, Tuple
 
 def get_baselines() -> List[Tuple[str, DummyModel, FeatureEngineer, StepwiseFeatureEngineer]]:
 

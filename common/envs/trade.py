@@ -16,7 +16,7 @@ def reverse_equity(bid_price: float, ask_price: float, equity: float, exposure: 
     - exposure == shares * price / equity == (equity - cash) / equity
     """
     assert -1.0 <= exposure <= 1.0, "Exposure must be between -1 and 1"
-    price = bid_price if exposure >= 0 else ask_price
+    price  = bid_price if exposure >= 0 else ask_price
     cash   = equity * (1 - exposure)
     shares = (equity * exposure) / price
     return cash, shares

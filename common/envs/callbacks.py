@@ -68,7 +68,7 @@ class ActionHistogramCallback(BaseCallback):
 
         start = self.num_timesteps - self.log_freq
         end = self.num_timesteps
-        actions = circ_slice(self.env.agent_data[:, AgentDataCol.action], start, end)
+        actions = circ_slice(self.env.agent_data[:, AgentDataCol.target_exposure], start, end)
         hist, bin_edges = np.histogram(actions, bins=self.bins)
         max_count = hist.max()
         if max_count == 0:

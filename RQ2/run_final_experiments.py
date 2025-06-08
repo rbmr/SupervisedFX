@@ -1,21 +1,17 @@
 import logging
-import random
+from typing import Callable, Tuple
 
-from common.scripts import set_seed
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from common.envs.forex_env import ForexEnv
+from RQ2.constants import *
+from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import FeatureEngineer, rsi, history_lookback, remove_ohlcv
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
-from RQ2.constants import *
-
-from common.data.data import ForexCandleData, Timeframe
+from common.envs.forex_env import ForexEnv
 from common.models.train_eval import run_experiment
-from common.constants import *
 from common.scripts import *
 
-from typing import Callable, Dict, Any, List, Tuple
 
 def main():
     

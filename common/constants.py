@@ -41,7 +41,8 @@ class AgentDataCol(ColumnCollection):
     equity_high = 3
     equity_low = 4
     equity_close = 5
-    action = 6
+    target_exposure = 6
+    pre_action_equity = 7
 
 class RawDataCol:
     """

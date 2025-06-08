@@ -9,11 +9,8 @@ import hashlib
 import json
 import logging
 import math
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
-from typing import Type
 
 import numpy as np
 import pandas as pd
@@ -22,15 +19,15 @@ from tqdm import trange
 from common.constants import AgentDataCol, MarketDataCol
 from common.envs.forex_env import ForexEnv
 from common.envs.trade import calculate_equity, execute_trade, reverse_equity
-from common.scripts import compute_sliding_window
 
 DATA_HASH_LENGTH = 16
 
 @dataclass
 class DPTable:
     """Results from DP computation"""
-    value_table: np.ndarray         # Shape: (timesteps, exposure_levels)
-    policy_table: np.ndarray        # Shape: (timesteps, exposure_levels)
+    value_table: np.ndarray         # Shape: (timesteps, 2 * n_actions + 1)
+    policy_table: np.ndarray        # Shape: (timesteps, 2 * n_actions + 1)
+    q_min_table: np.ndarray         # Shape: (timesteps, 2 * n_actions + 1)
     n_actions: int                  # The value for n_actions used.
     transaction_cost_pct: float     # The value for transaction_cost_pct used.
     data_hash: str                  # Hash of the market_data used.
@@ -68,15 +65,15 @@ def get_exposure_val(i: int, n: int) -> float:
     """
     return (i / n) - 1
 
-def get_optimal_action(dp_result: DPTable, timestep: int, current_exposure: float) -> float:
+def get_optimal_action(table: DPTable, t: int, current_exposure: float) -> float:
     """
-    Get optimal action for a given state timestep dp_result.
+    Get optimal action from a table given a timestep t and current exposure value.
     """
-    if timestep >= dp_result.policy_table.shape[0]:
+    if t >= table.policy_table.shape[0]:
         return current_exposure  # No action at terminal state
-    exposure_idx = get_exposure_idx(current_exposure, dp_result.n_actions)
-    action_idx = dp_result.policy_table[timestep, exposure_idx]
-    return get_exposure_val(action_idx, dp_result.n_actions) # type: ignore
+    exposure_idx = get_exposure_idx(current_exposure, table.n_actions)
+    action_idx = table.policy_table[t, exposure_idx]
+    return get_exposure_val(action_idx, table.n_actions) # type: ignore
 
 def get_dp_table_from_env(env: ForexEnv, cache_dir, n_actions: int | None = None) -> DPTable:
     if n_actions is None:
@@ -105,74 +102,78 @@ def get_dp_table(market_data: np.ndarray,
     save_dp_table(table, cache_dir)
     return table
 
-def calculate_dp_reward(prev_exposure, curr_exposure, prev_data, current_data, transaction_cost_pct: float) -> float:
-    """
-    Calculate equity return for transitioning from prev_exposure to curr_exposure.
-    Attempts to exactly mimic the .step logic from ForexEnv.
-    """
-    # Retrieve previous state
-    prev_bid = prev_data[MarketDataCol.close_bid]
-    prev_ask = prev_data[MarketDataCol.close_ask]
-    prev_equity = 100.0 # Can be any value, just determines the scale of the output.
-    prev_cash, prev_shares = reverse_equity(prev_bid, prev_ask, prev_equity, prev_exposure)
-
-    # Get next state
-    curr_bid = current_data[MarketDataCol.close_bid]
-    curr_ask = current_data[MarketDataCol.close_ask]
-    curr_cash, curr_shares = execute_trade(curr_exposure, current_data, prev_cash, prev_shares, transaction_cost_pct)  # type: ignore
-    current_equity = calculate_equity(curr_bid, curr_ask, curr_cash, curr_shares)
-
-    # Calculate equity return
-    return current_equity - prev_equity
-
 def compute_dp_table(market_data: np.ndarray,
                      transaction_cost_pct: float = 0.0,
                      n_actions: int = 1,
                      data_hash: str | None = None) -> DPTable:
     """
-    Compute the optimal value and policy tables using backward induction
+    Compute the optimal value and policy tables using backward induction.
+    - value_table[t, e] contains the log of the maximal equity ratio starting from timestep t and exposure e.
+    - policy_table[t, e] contains the best target exposure (action) for timestep t and exposure e.
+    - q_min_table[t, e] contains the log of the equity ratio taking the worst action in timestep t and exposure e, taking the best action onwards.
+    Where the equity ratio is defined as the ratio between the current equity and the equity and the end of the time domain.
     """
     if n_actions < 1:
         raise ValueError(f"n_actions must be at least one, was {n_actions}")
+    if n_actions > 127:
+        raise ValueError(f"n_actions must be at most 127, was {n_actions}")
     if transaction_cost_pct < 0 or transaction_cost_pct > 1:
         raise ValueError(f"transaction_cost_pct must be between 0 and 1, was {transaction_cost_pct}")
 
     actions = get_exposure_levels(n_actions)
     timesteps = market_data.shape[0]
-    n_exposures = len(actions)
     data_hash = data_hash if data_hash is not None else get_data_hash(market_data)
 
     logging.info(f"Generating DP table with data hash {data_hash}, n_actions {n_actions}, and transaction_cost_pct {transaction_cost_pct}.")
 
     # Initialize tables
-    value_table = np.zeros((timesteps, n_exposures), dtype=np.float32)
-    policy_table = np.zeros((timesteps, n_exposures), dtype=int)
+    value_table = np.zeros((timesteps, len(actions)), dtype=np.float32)
+    policy_table = np.full((timesteps, len(actions)), 255, dtype=np.uint8) # 255 indicates unfilled value.
+    q_min_table = np.full((timesteps, len(actions)), np.inf, dtype=np.float32)
 
     # Backward induction
     for t in trange(timesteps - 2, -1, -1):  # Skip last timestep (terminal)
-        for i, current_exposure in enumerate(actions):
+        for i, curr_exposure in enumerate(actions):
 
             best_val = -np.inf
+            worst_val = np.inf
             best_j = 0
 
             # Try all possible actions
             for j, target_exposure in enumerate(actions):
-                # Calculate immediate reward + future value
-                dval = calculate_dp_reward(current_exposure, target_exposure,
-                                           market_data[t], market_data[t + 1],
-                                           transaction_cost_pct)
-                val = dval + value_table[t+1, j]
+
+                # Get cash, and shares just BEFORE executing the trade.
+                curr_bid = market_data[t, MarketDataCol.open_bid]
+                curr_ask = market_data[t, MarketDataCol.open_ask]
+                curr_cash, curr_shares = reverse_equity(curr_bid, curr_ask, 1, curr_exposure) # type: ignore
+
+                # Get cash, and shares just AFTER executing the trade using target exposure.
+                next_cash, next_shares = execute_trade(target_exposure, curr_bid, curr_ask, # type: ignore
+                                                       curr_cash, curr_shares, transaction_cost_pct)
+
+                # Get equity just BEFORE executing the next trade.
+                next_bid = market_data[t + 1, MarketDataCol.open_bid]
+                next_ask = market_data[t + 1, MarketDataCol.open_ask]
+                next_equity = calculate_equity(next_bid, next_ask, next_cash, next_shares) # type: ignore
+                next_exposure = (next_equity - next_cash) / next_equity
+
+                # next_equity is equity ratio, since curr_equity was 1.
+                val = np.log(next_equity) + interp(value_table[t+1], next_exposure, n_actions)
 
                 if val > best_val:
                     best_val = val
                     best_j = j
+                if val < worst_val:
+                    worst_val = val
 
             value_table[t, i] = best_val
             policy_table[t, i] = best_j
+            q_min_table[t, i] = worst_val
 
     return DPTable(
         value_table=value_table,
         policy_table=policy_table,
+        q_min_table=q_min_table,
         n_actions=n_actions,
         transaction_cost_pct=transaction_cost_pct,
         data_hash=data_hash
@@ -197,8 +198,9 @@ def save_dp_table(table: DPTable, cache_dir: Path) -> Path:
     # Create paths
     table_dir = cache_dir / get_db_table_name(table.data_hash, table.transaction_cost_pct, table.n_actions)
     table_dir.mkdir(parents=True, exist_ok=True)
-    value_path = table_dir / f"values.csv"
+    value_path = table_dir / f"value.csv"
     policy_path = table_dir / f"policy.csv"
+    q_min_path = table_dir / f"q_min.csv"
     metadata_path = table_dir / f"metadata.json"
 
     logging.info(f"Saving DP table to {table_dir}.")
@@ -206,6 +208,7 @@ def save_dp_table(table: DPTable, cache_dir: Path) -> Path:
     # Save data
     pd.DataFrame(table.value_table).to_csv(value_path, index=False)
     pd.DataFrame(table.policy_table).to_csv(policy_path, index=False)
+    pd.DataFrame(table.q_min_table).to_csv(q_min_path, index=False)
     metadata = {
         "transaction_cost_pct": table.transaction_cost_pct,
         "n_actions": table.n_actions,
@@ -225,12 +228,13 @@ def load_dp_table(table_dir: Path, safe: bool = False) -> DPTable | None:
     logging.info(f"Getting DP table from {table_dir}.")
 
     # Create paths
-    value_path = table_dir / f"values.csv"
+    value_path = table_dir / f"value.csv"
     policy_path = table_dir / f"policy.csv"
+    q_min_path = table_dir / f"q_min.csv"
     metadata_path = table_dir / f"metadata.json"
 
     # Validate input
-    if not all(p.is_file() for p in [value_path, policy_path, metadata_path]):
+    if not all(p.is_file() for p in [value_path, policy_path, q_min_path, metadata_path]):
         if safe:
             logging.info(f"DP table doesnt exist {table_dir}.")
             return None
@@ -238,7 +242,8 @@ def load_dp_table(table_dir: Path, safe: bool = False) -> DPTable | None:
 
     # Load data
     value_table = pd.read_csv(value_path).to_numpy(dtype=np.float32)
-    policy_table = pd.read_csv(policy_path).to_numpy(dtype=np.int16)
+    policy_table = pd.read_csv(policy_path).to_numpy(dtype=np.uint8)
+    q_min_table = pd.read_csv(q_min_path).to_numpy(dtype=np.float32)
     with open(metadata_path, "r") as f:
         metadata = json.load(f)
 
@@ -246,92 +251,58 @@ def load_dp_table(table_dir: Path, safe: bool = False) -> DPTable | None:
     return DPTable(
         value_table=value_table,
         policy_table=policy_table,
+        q_min_table=q_min_table,
         n_actions=metadata["n_actions"],
         transaction_cost_pct=metadata["transaction_cost_pct"],
         data_hash=metadata["data_hash"],
     )
 
-class RewardNormalizer(ABC):
-
-    @abstractmethod
-    def __init__(self, V: np.ndarray, window: int | None): ...
-
-    @abstractmethod
-    def __call__(self, raw: float, t: int): ...
-
-class GlobalMMX(RewardNormalizer):
-
-    def __init__(self, V: np.ndarray, window: int | None):
-        self.vmin = V.min()
-        vmax = V.max()
-        self.span = (vmax - self.vmin) or 1.0
-
-    def __call__(self, raw: float, t: int):
-        return (raw - self.vmin) / self.span
-
-class GlobalZScore(RewardNormalizer):
-    def __init__(self, V: np.ndarray, window: int | None):
-        self.mu = V.mean()
-        self.sigma = V.std() or 1.0
-
-    def __call__(self, raw: float, t: int):
-        return (raw - self.mu) / self.sigma
-
-class SlidingMMX(RewardNormalizer):
-    def __init__(self, V: np.ndarray, window: int | None):
-        if window is None or window < 1:
-            raise ValueError("Sliding minmax normalization requires a valid window >= 1")
-        self.mins, maxs = compute_sliding_window(V, window, [np.min, np.max])
-        self.spans = maxs - self.mins
-        self.spans[self.spans == 0] = 1.0
-
-    def __call__(self, raw: float, t: int):
-        return (raw - self.mins[t]) / self.spans[t]
-
-class SlidingZScore(RewardNormalizer):
-    def __init__(self, V: np.ndarray, window: int | None):
-        if window is None or window < 1:
-            raise ValueError("Sliding z-score normalization requires a valid window >= 1")
-        self.means, self.stds = compute_sliding_window(V, window, [np.mean, np.std])
-        self.stds[self.stds == 0] = 1.0
-
-    def __call__(self, raw: float, t: int):
-        return (raw - self.means[t]) / self.stds[t]
-
-def _dp_reward_function(env, V: np.ndarray, n_actions: int, normalize: RewardNormalizer) -> float:
+def interp(v_row: np.ndarray, exposure: float, n_actions: int):
     """
-    DO NOT USE DIRECTLY, CREATE USING create_dp_reward_function.
+    Calculates a bi-linear interpolation of a row from the value table using the exposure.
     """
-    if env.n_steps >= V.shape[0]:
-        return 0.0
+    i0, i1 = get_low_high_exposure_idx(exposure, n_actions)
+    x0 = get_exposure_val(i0, n_actions)
+    x1 = get_exposure_val(i1, n_actions)
+    if x0 == x1:  # shortcut and prevent div by zero
+        return v_row[i0]
+    a = (exposure - x0) / (x1 - x0)
+    return (1 - a) * v_row[i0] + a * v_row[i1]
 
-    # extract exposure as before
-    cash = env.agent_data[env.n_steps, AgentDataCol.cash]
-    equity = env.agent_data[env.n_steps, AgentDataCol.equity_close]
-    exposure = (equity - cash) / equity
+class DPRewardFunction:
 
-    # bi-linear interpolation of V[t, exposure]
-    low_idx, high_idx = get_low_high_exposure_idx(exposure, n_actions)
-    low = get_exposure_val(low_idx, n_actions)
-    high = get_exposure_val(high_idx, n_actions)
-    alpha = 0 if high == low else (exposure - low) / (high - low)
-    raw = (1 - alpha) * V[env.t, low_idx] + alpha * V[env.t, high_idx]
+    def __init__(self, table: DPTable):
+        self.v = table.value_table
+        self.pi = table.policy_table
+        self.q_min = table.q_min_table
+        self.n_actions = table.n_actions
+        self.actions = get_exposure_levels(table.n_actions)
+        self.T = self.v.shape[0]
+        self.c = table.transaction_cost_pct
 
-    # Normalize and return
-    return normalize(raw, env.t)
+    def __call__(self, env) -> float:
+        t = env.n_steps
+        if t >= self.T - 1:
+            return 0.0
 
-def create_dp_reward_function(table: DPTable,
-                              rn: Type[RewardNormalizer],
-                              window: int | None = None):
-    """
-    Returns a dp_reward_function(env) that computes rewards using the value table.
-    Initializes RewardNormalizer. Sliding modes require `window` >= 1.
-    """
-    V = table.value_table
-    reward_normalizer = rn(V, window)
-    return partial(
-        _dp_reward_function,
-        V = V,
-        n_actions = table.n_actions,
-        normalize = reward_normalizer,
-    )
+        # Get current exposure (just before the trade)
+        curr_cash = env.agent_data[t-1, AgentDataCol.cash]
+        curr_equity = env.agent_data[t, AgentDataCol.pre_action_equity]
+        curr_exposure = (curr_equity - curr_cash) / curr_equity
+
+        # Get the next exposure (just before the next trade)
+        next_cash = env.agent_data[t, AgentDataCol.cash]
+        next_equity = env.agent_data[t+1, AgentDataCol.pre_action_equity]
+        next_exposure = (next_equity - next_cash) / next_equity
+
+        # Compute Q-value of taking action j in state (t, i)
+        r = next_equity / curr_equity
+        raw_q = np.log(r) + interp(self.v[t+1], next_exposure, self.n_actions)
+
+        # Normalize Q-value against min and max action
+        i = get_exposure_idx(curr_exposure, self.n_actions)
+        q_min = self.q_min[t, i]
+        q_max = self.v[t, i]
+        if q_min == q_max:
+            return 0.0
+        return (raw_q - q_min) / (q_max - q_min) # [0, 1]

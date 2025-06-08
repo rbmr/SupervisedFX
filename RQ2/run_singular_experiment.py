@@ -1,25 +1,19 @@
 import logging
-import random
 
 import torch.optim as optim
-from torch.nn import ReLU, LeakyReLU
-
-from common.scripts import set_seed
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
+from torch.nn import LeakyReLU
 
-from common.envs.forex_env import ForexEnv
+from RQ2.constants import *
+from common.constants import *
+from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import *
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
-from RQ2.constants import *
-
-from common.data.data import ForexCandleData, Timeframe
-from common.models.train_eval import run_experiment, evaluate_models, analyse_results
-from common.constants import *
+from common.envs.forex_env import ForexEnv
+from common.envs.rewards import percentage_return
+from common.models.train_eval import run_experiment
 from common.scripts import *
-from common.envs.rewards import risk_adjusted_return, percentage_return
-
-
 
 
 def get_feature_engineer() -> FeatureEngineer:

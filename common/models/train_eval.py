@@ -15,9 +15,8 @@ from common.envs.callbacks import SaveOnEpisodeEndCallback
 from common.envs.forex_env import ForexEnv
 from common.models.analysis import analyse_finals, analyse_individual_run
 from common.models.dummy_models import DUMMY_MODELS
-from common.models.utils import (load_model_with_metadata, load_models,
-                                 save_model_with_metadata)
-from common.scripts import parallel_run, set_seed
+from common.models.utils import (load_model_with_metadata, save_model_with_metadata)
+from common.scripts import parallel_run
 
 
 def run_experiment(train_env: ForexEnv,
