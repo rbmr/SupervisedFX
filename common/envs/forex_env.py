@@ -10,7 +10,7 @@ from common.constants import *
 from common.data.data import ForexCandleData
 from common.data.feature_engineer import FeatureEngineer
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
-from common.envs.trade import calculate_ohlc_equity, execute_trade
+from common.envs.trade import calculate_ohlc_equity, execute_trade, calculate_equity
 from common.scripts import find_first_row_with_nan, find_first_row_without_nan
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -148,20 +148,19 @@ class ForexEnv(gym.Env):
             raise ValueError(f"market_feature_df contains NaN values. First NaN index: {first_nan_index}. Row: {market_feature_df.iloc[first_nan_index]}.")
 
         # Step counter
-        self.n_steps = 0 # the number of steps since the start of the episode
-        self.total_steps = len(market_data_df)
+        self.n_steps = 0 # the current step index
+        self.episode_len = len(market_data_df) - 1 # the total #steps in an episode
+        self.data_len = len(market_data_df)
 
         # Shuffling logic
         if shuffled:
-           logging.info("shuffled is True, going through market data in random order")
-        self.step_map = np.random.permutation(self.total_steps) if shuffled else np.arange(self.total_steps)
-        self.t = self.step_map[self.n_steps]  # used for indexing market information
+            logging.warning("shuffling has been temporarily been removed, no shuffling has occurred.")
 
         # Use numpy arrays for speed
         self.market_data = market_data_df.to_numpy(dtype=np.float32)
         self.market_features = market_feature_df.to_numpy(dtype=np.float32)
         self.market_feature_names = market_feature_df.columns.tolist()
-        self.agent_data = np.zeros(shape = (self.market_data.shape[0], len(AgentDataCol.all_names())), dtype=np.float32)
+        self.agent_data = np.zeros(shape = (self.episode_len, len(AgentDataCol.all_names())), dtype=np.float32)
         self.agent_data[0, :] = (
             self.initial_capital, # cash
             0.0,                  # shares
@@ -171,9 +170,9 @@ class ForexEnv(gym.Env):
             self.initial_capital, # equity_close
             0.0                   # action (no action at start)
         )
-        assert self.market_data.shape == (self.total_steps, len(MarketDataCol))
-        assert self.market_features.shape == (self.total_steps, len(self.market_feature_names))
-        assert self.agent_data.shape == (self.total_steps, len(AgentDataCol))
+        assert self.market_data.shape == (self.data_len, len(MarketDataCol))
+        assert self.market_features.shape == (self.data_len, len(self.market_feature_names))
+        assert self.agent_data.shape == (self.episode_len, len(AgentDataCol))
 
         # Action space
         self.n_actions = n_actions
@@ -199,7 +198,6 @@ class ForexEnv(gym.Env):
 
         # Reset environment state
         self.n_steps = 0
-        self.t = self.step_map[self.n_steps]
 
         return self._get_observation(), {}
 
@@ -210,25 +208,24 @@ class ForexEnv(gym.Env):
 
         # Increment step
         self.n_steps += 1
-        self.t = self.step_map[self.n_steps]
 
         # Perform action
         prev_cash = self.agent_data[self.n_steps-1, AgentDataCol.cash]
         prev_shares = self.agent_data[self.n_steps-1, AgentDataCol.shares]
-        prev_close_ask = self.market_data[self.step_map[self.n_steps-1], MarketDataCol.close_ask]
-        prev_close_bid = self.market_data[self.step_map[self.n_steps-1], MarketDataCol.close_bid]
-        curr_cash, curr_shares = execute_trade(target_exposure, prev_close_bid, prev_close_ask, prev_cash, prev_shares, self.transaction_cost_pct) # type: ignore
-        curr_equity_ohlc = calculate_ohlc_equity(self.market_data[self.t], curr_cash, curr_shares)
-        self.agent_data[self.n_steps, :] = (curr_cash, curr_shares, *curr_equity_ohlc, target_exposure)
+        open_ask = self.market_data[self.n_steps, MarketDataCol.open_ask]
+        open_bid = self.market_data[self.n_steps, MarketDataCol.open_bid]
+        cash, shares = execute_trade(target_exposure, open_bid, open_ask, prev_cash, prev_shares, self.transaction_cost_pct) # type: ignore
+        equity_ohlc = calculate_ohlc_equity(self.market_data[self.n_steps], cash, shares)
+        self.agent_data[self.n_steps, :] = (cash, shares, *equity_ohlc, target_exposure)
 
         # Determine done
         terminated = False
         truncated = False
-        curr_equity_close = curr_equity_ohlc[3]
-        if curr_equity_close <= 0:
+        equity_close = equity_ohlc[3]
+        if equity_close <= 0:
             terminated = True
-            logging.warning(f"Step {self.n_steps}: Agent ruined. Equity: {curr_equity_close}.")
-        if self.n_steps >= self.total_steps - 1:
+            logging.warning(f"Step {self.n_steps}: Agent ruined. Equity: {equity_close}.")
+        if self.n_steps >= self.episode_len - 1: # We are at or after the last step.
             truncated = True
 
         # Determine info dict
@@ -236,8 +233,8 @@ class ForexEnv(gym.Env):
         if terminated or truncated:
             # Episode is ending, put relevant final info here
             number_of_steps = self.n_steps + 1
-            market_data = self.market_data[self.step_map][:number_of_steps]
-            market_features = self.market_features[self.step_map][:number_of_steps]
+            market_data = self.market_data[:number_of_steps]
+            market_features = self.market_features[:number_of_steps]
             agent_data = self.agent_data[:number_of_steps]
 
             market_data_df = pd.DataFrame(market_data, columns=MarketDataCol.all_names())
@@ -257,16 +254,28 @@ class ForexEnv(gym.Env):
         """
         if self.custom_reward_function is not None:
             return self.custom_reward_function(self)
-        current_equity = self.agent_data[self.n_steps, AgentDataCol.equity_close]
-        prev_equity = self.agent_data[self.n_steps - 1, AgentDataCol.equity_close]
-        return current_equity - prev_equity
+
+        # We calculate the difference between the equity immediately AFTER making the current trade,
+        # and the equity just BEFORE making the next trade.
+
+        # equity just after making the current trade
+        equity_open = self.agent_data[self.n_steps, AgentDataCol.equity_open]
+
+        # equity just before making the next trade
+        cash = self.agent_data[self.n_steps, AgentDataCol.cash]
+        shares = self.agent_data[self.n_steps, AgentDataCol.shares]
+        next_bid_price = self.market_data[self.n_steps+1, MarketDataCol.open_bid]
+        next_ask_price = self.market_data[self.n_steps+1, MarketDataCol.open_ask]
+        next_equity_open = calculate_equity(next_bid_price, next_ask_price, cash, shares) # type: ignore
+
+        return next_equity_open - equity_open
 
     def _get_observation(self):
         """
         Returns the current observation of the environment.
         The observation is a combination of market features and state features.
         """
-        market_features = self.market_features[self.t]
+        market_features = self.market_features[self.n_steps]
         state_features = self.agent_feature_engineer.run(self.agent_data, self.n_steps)
         return np.concatenate((market_features, state_features), axis=0)
 

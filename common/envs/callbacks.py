@@ -51,46 +51,6 @@ class SaveOnEpisodeEndCallback(BaseCallback):
             logging.info(f"Saved model at episode {self.episode_num} to {filename}")
         return True
 
-class CoolStatsCallback(BaseCallback):
-    """
-    Prints some cool stats about the agents actions, every `log_freq` steps.
-    """
-    def __init__(self, env: ForexEnv, log_freq: int = 1000, verbose=0):
-        super().__init__(verbose)
-        self.env = env
-        self.log_freq = log_freq
-
-    def _on_step(self) -> bool:
-        if self.num_timesteps % self.log_freq != 0:
-            return True
-
-        # Wrap indices
-        n = self.env.total_steps
-        i = (self.num_timesteps - self.log_freq) % n
-        j = self.num_timesteps % n
-        equity_data = self.env.agent_data[:, AgentDataCol.equity_close]
-
-        # Change in equity.
-        if i > j: # Interval crossed episode boundary, ignore the gap.
-            equity_1 = equity_data[i:]
-            d_equity1 = equity_1[-1] - equity_1[0] if len(equity_1) >= 2 else 0.0
-            equity_2 = equity_data[:j]
-            d_equity2 = equity_2[-1] - equity_2[0] if len (equity_2) >= 2 else 0.0
-            d_equity = d_equity1 + d_equity2
-        elif j > i: # Interval within episode
-            equity = equity_data[i:j]
-            d_equity = equity[-1] - equity[0] if len(equity) >= 2 else 0.0
-        else: # Exactly one full episode, log change over full episode.
-            equity = equity_data[:]
-            d_equity = equity[-1] - equity[0] if len(equity) >= 2 else 0.0
-        logging.info(f"Change in equity over last {self.log_freq} steps: {d_equity}")
-
-        # Current equity
-        curr_equity = equity_data[j]
-        logging.info(f"Current equity: {curr_equity}")
-
-        return True
-
 class ActionHistogramCallback(BaseCallback):
     """
     Logs a histogram of actions taken during training, every `log_freq` steps.
