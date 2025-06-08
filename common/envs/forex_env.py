@@ -13,8 +13,6 @@ from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
 from common.envs.trade import calculate_ohlc_equity, execute_trade, calculate_equity
 from common.scripts import find_first_row_with_nan, find_first_row_without_nan
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 class ForexEnv(gym.Env):
 
     @staticmethod
@@ -264,7 +262,9 @@ class ForexEnv(gym.Env):
         Uses a custom reward function if provided, otherwise defaults to equity change.
         """
         if self.custom_reward_function is not None:
-            return self.custom_reward_function(self)
+            r = self.custom_reward_function(self)
+            logging.debug(f"reward {r}")
+            return r
         prev_equity = self.agent_data[self.n_steps, AgentDataCol.pre_action_equity]
         next_equity = self.agent_data[self.n_steps + 1, AgentDataCol.pre_action_equity]
         return next_equity - prev_equity
