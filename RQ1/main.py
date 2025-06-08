@@ -21,7 +21,7 @@ logging.info("Done.")
 def train():
 
     train_env, _ = get_environments(shuffled=True)
-    save_freq = 20_000
+    save_freq = 50_000
 
     model = get_model(train_env)
 
