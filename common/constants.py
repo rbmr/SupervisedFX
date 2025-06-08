@@ -44,17 +44,4 @@ class AgentDataCol(ColumnCollection):
     target_exposure = 6
     pre_action_equity = 7
 
-class RawDataCol:
-    """
-    Class with static attributes to group column names in one place,
-    helps prevent typos, and makes refactoring easier.
-    """
-
-    TIME = "date_gmt"
-    VOL = "volume"
-    OPEN = "open"
-    HIGH = "high"
-    LOW = "low"
-    CLOSE = "close"
-
 DEVICE = "cuda" if is_cuda_available() else "cpu"
