@@ -3,7 +3,7 @@ import os
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.info("Loading imports...")
 from datetime import datetime
 from pathlib import Path

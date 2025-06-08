@@ -2,9 +2,9 @@ import logging
 from datetime import datetime
 
 from stable_baselines3 import A2C
+from torch import nn
 
 from RQ1.constants import RQ1_DP_CACHE_DIR
-from RQ1.custom_a2c_policy import A2C_LSTM_Policy
 from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import (FeatureEngineer, adx,
                                           as_min_max_fixed, as_min_max_window,
@@ -13,7 +13,7 @@ from common.data.feature_engineer import (FeatureEngineer, adx,
                                           atr, bollinger_bands, cci,
                                           copy_column, ema,
                                           historic_pct_change, macd, rsi,
-                                          stochastic_oscillator)
+                                          stochastic_oscillator, complex_7d, complex_24h)
 from common.data.stepwise_feature_engineer import (StepwiseFeatureEngineer,
                                                    calculate_current_exposure)
 from common.envs.dp import get_dp_table_from_env, DPRewardFunction
@@ -72,10 +72,7 @@ def get_feature_engineer():
       3) Momentum/Oscillators (RSI, Stochastic‐K/D, CCI)
       4) Volatility (ATR‐ratio)
 
-    Usage:
-        market_df = your_raw_OHLCV_dataframe
-        fe = get_feature_engineer()
-        feature_df = fe.run(market_df, remove_original_columns=True)
+    And adds time-based features.
     """
     fe = FeatureEngineer()
 
@@ -152,23 +149,47 @@ def get_feature_engineer():
 
     fe.add(_feat_volatility)
 
+    # 5) Time of day/week
+    fe.add(complex_7d)
+    fe.add(complex_24h)
+
     return fe
 
 def get_model(env: ForexEnv):
 
     logging.info("Creating model...")
 
-    model = A2C(
-        policy=A2C_LSTM_Policy,
+    def linear_lr(start: float, end: float):
+        diff = start - end
+        def func(progress_remaining):
+            return diff * progress_remaining + end
+        return func
+
+    policy_kwargs = dict(
+        activation_fn=nn.ReLU,
+        net_arch=[
+            dict(pi=[64, 64], vf=[64, 64])
+        ],
+    )
+
+    hyperparams = dict(
+        policy="MlpPolicy",
         env=env,
-        learning_rate=1e-4,
-        n_steps=128,
-        gamma=0.3,
-        vf_coef=0.1,
-        ent_coef=0.0,
+        learning_rate=linear_lr(7e-4, 1e-5),
+        n_steps=32,
+        gamma=0.99,
+        gae_lambda=0.95,
+        ent_coef=0.01,
+        vf_coef=0.5,
+        max_grad_norm=0.5,
+        rms_prop_eps=1e-5,
+        normalize_advantage=True,
+        policy_kwargs=policy_kwargs,
         verbose=1,
         device="cpu"
     )
+
+    model = A2C(**hyperparams)
 
     logging.info("Model created.")
 
