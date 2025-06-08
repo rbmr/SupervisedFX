@@ -13,7 +13,7 @@ from common.models.train_eval import (analyse_results, evaluate_models,
                                       train_model)
 from common.models.utils import save_model_with_metadata
 from common.scripts import has_nonempty_subdir, n_children, picker
-from RQ1.constants import EXPERIMENT_NAME_FORMAT, RQ1_EXPERIMENTS_DIR
+from RQ1.constants import EXPERIMENT_NAME_FORMAT, RQ1_EXPERIMENTS_DIR, TENSORBOARD_DIR
 from RQ1.parameters import get_environments, get_model
 
 logging.info("Done.")
@@ -23,9 +23,10 @@ def train():
     train_env, _ = get_environments(shuffled=True)
     save_freq = 50_000
 
-    model = get_model(train_env)
-
     experiment_name = datetime.now().strftime(EXPERIMENT_NAME_FORMAT)
+
+    model = get_model(train_env, tensorboard_log=TENSORBOARD_DIR / experiment_name)
+
     experiment_dir = RQ1_EXPERIMENTS_DIR / experiment_name
     models_dir = experiment_dir / "models"
     models_dir.mkdir(parents=True, exist_ok=True)

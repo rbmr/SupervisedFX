@@ -40,47 +40,6 @@ class FeatureEngineer:
     
 
 # TIME Indicators
-def sinusoidal_wave_24hr(df: pd.DataFrame):
-    # check if 'date_gmt' column exists and is pd.Timestamp
-    if 'date_gmt' not in df.columns:
-        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
-    if not pd.api.types.is_datetime64_any_dtype(df['date_gmt']):
-        raise ValueError("'date_gmt' column must be of datetime type.")
-    
-    # Calculate the time in seconds since the start of the day
-    seconds_since_midnight = (df['date_gmt'] - df['date_gmt'].dt.normalize()).dt.total_seconds()
-    # Calculate the sinusoidal wave values
-    df['sinusoidal_wave_24hr'] = np.sin(2 * np.pi * seconds_since_midnight / (24 * 3600))
-
-def percent_of_day(df: pd.DataFrame):
-    """
-    Calculate the percentage of the day that has passed based on the 'date_gmt' column.
-    This will create a new column 'percent_of_day' with values between 0 and 1.
-    """
-    if 'date_gmt' not in df.columns:
-        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
-    if not pd.api.types.is_datetime64_any_dtype(df['date_gmt']):
-        raise ValueError("'date_gmt' column must be of datetime type.")
-
-    seconds_since_midnight = (df['date_gmt'] - df['date_gmt'].dt.normalize()).dt.total_seconds()
-    df['percent_of_day'] = seconds_since_midnight / (24 * 3600)
-
-def circle_coordinate_of_day(df: pd.DataFrame):
-    """
-    Calculate the circular coordinates of the day based on the 'date_gmt' column.
-    This will create two new columns 'circle_x' and 'circle_y' representing the x and y coordinates
-    on a unit circle, where 0 is midnight and 1 is the end of the day.
-    """
-    if 'date_gmt' not in df.columns:
-        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
-    if not pd.api.types.is_datetime64_any_dtype(df['date_gmt']):
-        raise ValueError("'date_gmt' column must be of datetime type.")
-
-    seconds_since_midnight = (df['date_gmt'] - df['date_gmt'].dt.normalize()).dt.total_seconds()
-    angle = 2 * np.pi * seconds_since_midnight / (24 * 3600)
-
-    df['hour_of_day_x'] = np.cos(angle)
-    df['hour_of_day_y'] = np.sin(angle)
 
 def _norm_time_of_day(dt_series: pd.Series):
     """Converts a time column to a [0,1] range of time of day."""
@@ -92,27 +51,6 @@ def _norm_time_of_day(dt_series: pd.Series):
         dt_series.dt.second +
         dt_series.dt.microsecond / 1_000_000
     ) / (60 * 60 * 24)
-
-def atr(df: pd.DataFrame, window: int = 14, column_high: str = "high_bid", column_low: str = "low_bid", column_close: str = "close_bid"):
-    """
-    Adds an 'atr_{window}' column to df containing the rolling ATR.
-    ATR = rolling mean of True Range over `window` bars.
-    True Range = max(high - low, |high - prev_close|, |low - prev_close|).
-    """
-    high = df[column_high]
-    low = df[column_low]
-    close_shifted = df[column_close].shift(1).bfill()
-
-    # Compute True Range using np.maximum, then convert to Series
-    true_range_array = np.maximum.reduce([
-        high - low,
-        (high - close_shifted).abs(),
-        (low - close_shifted).abs()
-    ])
-
-    true_range = pd.Series(true_range_array, index=df.index)
-
-    df[f"atr_{window}"] = true_range.rolling(window=window, min_periods=1).mean().fillna(0)
 
 def _norm_time_of_week(dt_series: pd.Series):
     """Converts a time column to a [0,1] range of time of week."""
@@ -291,7 +229,27 @@ def parabolic_sar(df: pd.DataFrame, acceleration_factor: float = 0.02, max_accel
                 ep = min(ep, df['low_bid'].iloc[i])
 
         df.at[i, 'sar'] = sar
-    
+
+def atr(df: pd.DataFrame, window: int = 14, column_high: str = "high_bid", column_low: str = "low_bid", column_close: str = "close_bid"):
+    """
+    Adds an 'atr_{window}' column to df containing the rolling ATR.
+    ATR = rolling mean of True Range over `window` bars.
+    True Range = max(high - low, |high - prev_close|, |low - prev_close|).
+    """
+    high = df[column_high]
+    low = df[column_low]
+    close_shifted = df[column_close].shift(1).bfill()
+
+    # Compute True Range using np.maximum, then convert to Series
+    true_range_array = np.maximum.reduce([
+        high - low,
+        (high - close_shifted).abs(),
+        (low - close_shifted).abs()
+    ])
+
+    true_range = pd.Series(true_range_array, index=df.index)
+
+    df[f"atr_{window}"] = true_range.rolling(window=window, min_periods=1).mean().fillna(0)
 
 # Momentum Indicators
 
