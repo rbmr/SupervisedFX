@@ -2,6 +2,7 @@ import numpy as np
 
 from common.constants import MarketDataCol
 from common.envs.forex_env import AgentDataCol, ForexEnv
+from common.envs.trade import calculate_equity
 
 def get_curr_equity_open(env: ForexEnv):
     """Get the equity immediately after making the current trade."""
@@ -30,7 +31,11 @@ def percentage_return(env: ForexEnv) -> float:
     curr_equity = get_curr_equity_open(env)
     if curr_equity == 0:
         return 0.0 # Avoid div by zero.
-    return get_next_equity_open(env) / curr_equity - 1.0
+    
+    reward = get_next_equity_open(env) / curr_equity - 1.0
+    # scale to be a full percentage
+    reward *= 100.0
+    return reward
 
 def log_equity_change(env: ForexEnv) -> float:
     """

@@ -211,10 +211,45 @@ def analyse_individual_run(results_file: Path, model_name: str):
         # Get the type of each trade (1 for long, -1 for short)
         trade_types_grouped = trade_types[trade_starts]
         
+
+        ######### TRADE RETURNS #############
         # Calculate returns and durations for each trade
         # A trade's return is equity at the end of the period minus equity at the start
-        trade_returns = equity_close[trade_ends - 1] - equity_open[trade_starts]
-        trade_durations = (dates[trade_ends - 1] - dates[trade_starts]) / (1e9 * 60 * 60) # in hours
+        # Get the total number of data points.
+        num_data_points = len(equity_open)
+
+        # Initialize the array to hold the calculated returns for each trade.
+        trade_returns = np.zeros(len(trade_starts), dtype=np.float32)
+
+        # Create a boolean mask to identify the special case: the trade active on the last candle.
+        # Its 'end' index will be equal to the length of the entire dataset.
+        final_candle_mask = (trade_ends == num_data_points)
+
+        # --- Handle the General Case (trades closing before the end) ---
+        normal_trades_mask = ~final_candle_mask
+        
+        # Check if there are any normal trades to process
+        if np.any(normal_trades_mask):
+            starts_normal = trade_starts[normal_trades_mask]
+            ends_normal = trade_ends[normal_trades_mask]
+
+            # For these trades, return is calculated using the open equity of the bar AFTER the trade closes.
+            trade_returns[normal_trades_mask] = equity_open[ends_normal] - equity_open[starts_normal]
+
+        # --- Handle the Special Case (trade open at the very end) ---
+        
+        # Check if there is a final trade to process
+        if np.any(final_candle_mask):
+            starts_special = trade_starts[final_candle_mask]
+            last_valid_index = num_data_points - 1
+
+            # For this final trade, we "mark-to-market" using the CLOSE equity of the final bar.
+            # This provides the most accurate final Profit & Loss snapshot.
+            trade_returns[final_candle_mask] = equity_close[last_valid_index] - equity_open[starts_special]
+
+        ######### END TRADE RETURNS #############
+
+        trade_durations = (dates[trade_ends-1] - dates[trade_starts]) / (1e9 * 60 * 60) # in hours
 
         winning_trades = trade_returns > 0
         losing_trades = trade_returns < 0
@@ -249,15 +284,51 @@ def analyse_individual_run(results_file: Path, model_name: str):
     # ##################################################################
 
     # average spread of close_bid and close_ask and open_bid and open_ask
-    spread_bid = close_ask - close_bid
-    average_spread = np.mean(spread_bid)
+    spread = close_ask - close_bid
+    average_spread = np.mean(spread)
 
-    # The cost of the spread is paid for each trade that is opened.
-    estimated_total_spread_cost = total_trades * average_spread
+    if total_trades > 0:
+        # --- NEW, MORE ACCURATE COST CALCULATION ---
+        # Based on Action being an allocation of equity
+
+        # 1. Get the equity value at the moment the trade decision was made.
+        # This is the equity from the previous timestep. Handle edge case for a trade at t=0.
+        decision_indices = np.maximum(0, trade_starts - 1)
+        equity_for_sizing = equity_open[decision_indices]
+
+        # 2. Get the allocation rate for each trade from the 'actions' array.
+        allocation_rates = np.abs(actions[trade_starts])
+
+        # 3. Calculate the monetary amount to be allocated for each trade.
+        monetary_allocation = equity_for_sizing * allocation_rates
+
+        # 4. Determine the price at which the position was opened to convert money to position size.
+        # Longs are opened at the 'ask', shorts at the 'bid'.
+        prices_at_open = np.where(actions[trade_starts] > 0,
+                                  close_ask[trade_starts],
+                                  close_bid[trade_starts])
+
+        # Prevent division by zero if prices can be zero (highly unlikely in forex data).
+        prices_at_open[prices_at_open == 0] = 1
+
+        # 5. Calculate the actual position size in base currency units for each trade.
+        position_sizes = monetary_allocation / prices_at_open
+
+        # 6. Calculate the total cost by summing the cost of each individual trade.
+        estimated_total_spread_cost = np.sum(position_sizes * average_spread)
+    else:
+        estimated_total_spread_cost = 0.0
     
+    # total equity change
+    equity_change = equity_close[-1] - equity_open[0]
+    equity_change_pct = (equity_change / equity_open[0]) * 100 if equity_open[0] != 0 else 0.0
+
+
     # rewards
     total_rewards = np.sum(rewards)
     average_rewards = np.mean(rewards) if len(rewards) > 0 else 0.0
+    average_positive_rewards = np.mean(rewards[rewards > 0]) if np.any(rewards > 0) else 0.0
+    average_negative_rewards = np.mean(rewards[rewards < 0]) if np.any(rewards < 0) else 0.0
     
 
     # Prepare results
@@ -282,8 +353,14 @@ def analyse_individual_run(results_file: Path, model_name: str):
         "average_spread": average_spread,
         "estimated_total_spread_cost": estimated_total_spread_cost,
 
+        # Equity Summary
+        "equity_change": equity_change,
+        "equity_change_pct": equity_change_pct,
+
         "total_rewards": total_rewards,
         "average_rewards": average_rewards,
+        "average_positive_rewards": average_positive_rewards,
+        "average_negative_rewards": average_negative_rewards,
     }
 
     # Create results table
@@ -291,6 +368,8 @@ def analyse_individual_run(results_file: Path, model_name: str):
         ('Sharpe Ratio', sharpe_ratio),
         ('Max Drawdown', max_drawdown),
         ('Profit Factor', profit_factor),
+        ('Total Equity Change', equity_change),
+        ('Equity Change (%)', equity_change_pct),
 
         ('Total Trades', info['total_trades']),
         ('Long Trades Count', info['long_trades_count']),
@@ -308,6 +387,8 @@ def analyse_individual_run(results_file: Path, model_name: str):
 
         ('Total Rewards', info['total_rewards']),
         ('Average Rewards', info['average_rewards']),
+        ('Average Positive Rewards', info['average_positive_rewards']),
+        ('Average Negative Rewards', info['average_negative_rewards']),
     ]
     row_labels, table_data = zip(*metrics)
     table_data = [[val] for val in table_data]
@@ -388,4 +469,24 @@ def analyse_finals(final_metrics: List[Dict[str, Any]], output_dir: Path, env_na
     plt.xlabel('Model')
     plt.ylabel('Total Trades Returns')
     plt.savefig(output_dir / f"total_trades_returns.png")
+    plt.close()
+
+    # make a plot of the total equity change
+    equity_changes = [metrics['equity_change'] for metrics in final_metrics]
+    plt.figure(figsize=(12, 6))
+    plt.bar(range(len(equity_changes)), equity_changes, tick_label=[f"{i + 1}" for i in range(len(equity_changes))])
+    plt.title(f"Total Equity Change for {env_name}")
+    plt.xlabel('Model')
+    plt.ylabel('Total Equity Change')
+    plt.savefig(output_dir / f"total_equity_change.png")
+    plt.close()
+
+    # make a plot of total_trades
+    total_trades = [metrics['total_trades'] for metrics in final_metrics]
+    plt.figure(figsize=(12, 6))
+    plt.bar(range(len(total_trades)), total_trades, tick_label=[f"{i + 1}" for i in range(len(total_trades))])
+    plt.title(f"Total Trades for {env_name}")
+    plt.xlabel('Model')
+    plt.ylabel('Total Trades')
+    plt.savefig(output_dir / f"total_trades.png")
     plt.close()

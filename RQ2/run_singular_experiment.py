@@ -7,7 +7,6 @@ from torch.nn import ReLU, LeakyReLU
 from common.scripts import set_seed
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
-from sb3_contrib import RecurrentPPO
 
 from common.envs.forex_env import ForexEnv
 from common.data.feature_engineer import *
@@ -18,7 +17,7 @@ from common.data.data import ForexCandleData, Timeframe
 from common.models.train_eval import run_experiment, evaluate_models, analyse_results
 from common.constants import *
 from common.scripts import *
-from common.envs.rewards import risk_adjusted_return, log_equity_change
+from common.envs.rewards import risk_adjusted_return, percentage_return
 
 
 
@@ -156,8 +155,7 @@ def main():
         initial_capital=INITIAL_CAPITAL,
         transaction_cost_pct=TRANSACTION_COST_PCT,
         n_actions=1,
-        allow_short=False,
-        custom_reward_function=log_equity_change)
+        custom_reward_function=percentage_return)
     logging.info("Environments created.")
 
     policy_kwargs = dict(net_arch=[128,64,32], optimizer_class=optim.Adam, activation_fn=LeakyReLU)
@@ -168,11 +166,11 @@ def main():
         learning_rate=0.0001,
         buffer_size=10000,
         learning_starts=1,
-        batch_size=32,
+        batch_size=16,
         tau=1.0,
-        gamma=0.8,
+        gamma=0.95,
         train_freq=4,
-        target_update_interval=500,
+        target_update_interval=5000,
         exploration_fraction=0.5,
         exploration_initial_eps=1.0,
         exploration_final_eps=0.05,
@@ -192,7 +190,7 @@ def main():
         model=model,
         base_folder_path=RQ2_DIR,
         experiment_group_name="hyperparameters",
-        experiment_name="test_new_stuff",
+        experiment_name="another_new_test",
         train_episodes=0,
         eval_episodes=1,
         checkpoints=True,
