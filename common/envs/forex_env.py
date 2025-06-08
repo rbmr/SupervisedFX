@@ -17,116 +17,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class ForexEnv(gym.Env):
 
-    def __init__(self,
-                 market_data_df: pd.DataFrame,
-                 market_feature_df: pd.DataFrame,
-                 agent_feature_engineer: StepwiseFeatureEngineer,
-                 initial_capital: float = 10000.0,
-                 transaction_cost_pct: float = 0.0,
-                 n_actions: int = 1,
-                 allow_short: bool = True,
-                 allow_long: bool = True,
-                 custom_reward_function: Callable[['ForexEnv'], float] | None = None,
-                 shuffled: bool = False,
-                 ):
-        super(ForexEnv, self).__init__()
-
-        # Validate input
-        if not isinstance(market_data_df, pd.DataFrame):
-            raise ValueError(f"market_data_df must be a pandas DataFrame, was {type(market_data_df)}.")
-        if not isinstance(market_feature_df, pd.DataFrame):
-            raise ValueError(f"market_feature_df must be a pandas DataFrame, was {type(market_feature_df)}.")
-        actual_columns = set(market_data_df.columns)
-        expected_columns = set(MarketDataCol.all_names())
-        if not expected_columns.issubset(actual_columns):
-            missing_columns = expected_columns - actual_columns
-            raise ValueError(f"market_data_df is missing columns {missing_columns}.")
-        if initial_capital <= 0.0:
-            raise ValueError(f"initial_capital must be positive, was {initial_capital}.")
-        if transaction_cost_pct < 0.0 or transaction_cost_pct > 1.0:
-            raise ValueError(f"transaction_cost_pct must be between 0.0 and 1.0, was {transaction_cost_pct}. For 0.1%, use 0.001.")
-        if n_actions < 0:
-            raise ValueError(f"n_actions must be >= 0. If n_actions == 0, then the action space is continuous between -1 and 1.")
-
-        # Environment parameters
-        self.initial_capital = initial_capital
-        self.transaction_cost_pct = transaction_cost_pct
-        self.agent_feature_engineer = agent_feature_engineer
-        self.custom_reward_function = custom_reward_function
-
-        # Market data and Market features
-        market_data_df = market_data_df.copy(deep=True)[MarketDataCol.all_names()]
-        market_feature_df = market_feature_df.copy(deep=True)
-        start_index = find_first_row_without_nan(market_data_df)
-        start_index = max(start_index, find_first_row_without_nan(market_feature_df))
-        market_data_df = market_data_df.iloc[start_index:]
-        market_feature_df = market_feature_df.iloc[start_index:]
-        market_data_df.reset_index(drop=True, inplace=True)
-        market_feature_df.reset_index(drop=True, inplace=True)
-
-        # Processed data validation
-        if len(market_data_df) != len(market_feature_df):
-            raise ValueError(f"market_data, and market_features must be the same length, was {len(market_data_df)}, and {len(market_feature_df)}.")
-        if market_data_df.isna().any().any():
-            first_nan_index = find_first_row_with_nan(market_data_df)
-            raise ValueError(f"market_data_df contains NaN values. First NaN index: {first_nan_index}. Row: {market_data_df.iloc[first_nan_index]}.")
-        if market_feature_df.isna().any().any():
-            first_nan_index = find_first_row_with_nan(market_feature_df)
-            raise ValueError(f"market_feature_df contains NaN values. First NaN index: {first_nan_index}. Row: {market_feature_df.iloc[first_nan_index]}.")
-
-        # Step counter
-        self.n_steps = 0 # the number of steps since the start of the episode
-        self.total_steps = len(market_data_df)
-        self.step_map = np.random.permutation(self.total_steps) if shuffled else np.arange(self.total_steps)
-        self.t = self.step_map[self.n_steps] # used for indexing market information
-        if shuffled:
-           logging.info("shuffled is True, going through market data in random order")
-
-        # Use numpy arrays for speed
-        self.market_data = market_data_df.to_numpy(dtype=np.float32)
-        self.market_features = market_feature_df.to_numpy(dtype=np.float32)
-        self.market_feature_names = market_feature_df.columns.tolist()
-        self.agent_data = np.zeros(shape = (self.market_data.shape[0], len(AgentDataCol.all_names())), dtype=np.float32)
-        self.agent_data[0, :] = (
-            self.initial_capital, # cash
-            0.0,                  # shares
-            self.initial_capital, # equity_open
-            self.initial_capital, # equity_high
-            self.initial_capital, # equity_low
-            self.initial_capital, # equity_close
-            0.0                   # action (no action at start)
-        )
-        assert self.market_data.shape == (self.total_steps, len(MarketDataCol))
-        assert self.market_features.shape == (self.total_steps, len(self.market_feature_names))
-        assert self.agent_data.shape == (self.total_steps, len(AgentDataCol))
-
-        # Action space
-        self.n_actions = n_actions
-        self.allow_short = allow_short
-        self.allow_long = allow_long
-        if self.n_actions == 0:
-            logging.info(f"n_actions is zero, using continuous action space")
-
-            low = -1.0 if allow_short else 0.0
-            high = 1.0 if allow_long else 0.0
-
-            self.action_space = spaces.Box(low=low, high=high, shape=(), dtype=np.float32)
-        else:
-            logging.info(f"n_actions is larger than zero, using discrete action space with {n_actions} actions for buys, {n_actions} for sells, and 1 action for no_participation.")
-
-            if not allow_short and not allow_long:
-                raise ValueError("If n_actions > 0, at least one of allow_short or allow_long must be True.")
-            if allow_short and allow_long:
-                self.action_space = spaces.Discrete(2 * self.n_actions + 1)
-            else:
-                self.action_space = spaces.Discrete(self.n_actions + 1)
-
-        # Define observation space
-        num_market_features = len(market_feature_df.columns)
-        num_state_features = self.agent_feature_engineer.num_of_features()
-        observation_space_shape = num_market_features + num_state_features
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(observation_space_shape,), dtype=np.float32)   
-    
     @staticmethod
     def create_train_eval_envs(
         split_ratio: float,
@@ -198,6 +88,112 @@ class ForexEnv(gym.Env):
 
         return train_env, eval_env
 
+    def __init__(self,
+                 market_data_df: pd.DataFrame,
+                 market_feature_df: pd.DataFrame,
+                 agent_feature_engineer: StepwiseFeatureEngineer,
+                 initial_capital: float = 10_000.0,
+                 transaction_cost_pct: float = 0.0,
+                 n_actions: int = 1,
+                 allow_short: bool = True,
+                 allow_long: bool = True,
+                 custom_reward_function: Callable[['ForexEnv'], float] | None = None,
+                 shuffled: bool = False,
+                 ):
+        super(ForexEnv, self).__init__()
+
+        # Validate input
+        if not allow_short and not allow_long:
+            raise ValueError(f"either allow_short or allow_long must be True, no simulation should allow only holding.")
+        if not isinstance(market_data_df, pd.DataFrame):
+            raise ValueError(f"market_data_df must be a pandas DataFrame, was {type(market_data_df)}.")
+        if not isinstance(market_feature_df, pd.DataFrame):
+            raise ValueError(f"market_feature_df must be a pandas DataFrame, was {type(market_feature_df)}.")
+        actual_columns = set(market_data_df.columns)
+        expected_columns = set(MarketDataCol.all_names())
+        if not expected_columns.issubset(actual_columns):
+            missing_columns = expected_columns - actual_columns
+            raise ValueError(f"market_data_df is missing columns {missing_columns}.")
+        if initial_capital <= 0.0:
+            raise ValueError(f"initial_capital must be positive, was {initial_capital}.")
+        if transaction_cost_pct < 0.0 or transaction_cost_pct > 1.0:
+            raise ValueError(f"transaction_cost_pct must be between 0.0 and 1.0, was {transaction_cost_pct}. For 0.1%, use 0.001.")
+        if n_actions < 0:
+            raise ValueError(f"n_actions must be >= 0. If n_actions == 0, then the action space is continuous between -1 and 1.")
+
+        # Environment parameters
+        self.initial_capital = initial_capital
+        self.transaction_cost_pct = transaction_cost_pct
+        self.agent_feature_engineer = agent_feature_engineer
+        self.custom_reward_function = custom_reward_function
+
+        # Market data and Market features
+        market_data_df = market_data_df.copy(deep=True)[MarketDataCol.all_names()]
+        market_feature_df = market_feature_df.copy(deep=True)
+        start_index = find_first_row_without_nan(market_data_df)
+        start_index = max(start_index, find_first_row_without_nan(market_feature_df))
+        market_data_df = market_data_df.iloc[start_index:]
+        market_feature_df = market_feature_df.iloc[start_index:]
+        market_data_df.reset_index(drop=True, inplace=True)
+        market_feature_df.reset_index(drop=True, inplace=True)
+
+        # Processed data validation
+        if len(market_data_df) != len(market_feature_df):
+            raise ValueError(f"market_data, and market_features must be the same length, was {len(market_data_df)}, and {len(market_feature_df)}.")
+        if market_data_df.isna().any().any():
+            first_nan_index = find_first_row_with_nan(market_data_df)
+            raise ValueError(f"market_data_df contains NaN values. First NaN index: {first_nan_index}. Row: {market_data_df.iloc[first_nan_index]}.")
+        if market_feature_df.isna().any().any():
+            first_nan_index = find_first_row_with_nan(market_feature_df)
+            raise ValueError(f"market_feature_df contains NaN values. First NaN index: {first_nan_index}. Row: {market_feature_df.iloc[first_nan_index]}.")
+
+        # Step counter
+        self.n_steps = 0 # the number of steps since the start of the episode
+        self.total_steps = len(market_data_df)
+
+        # Shuffling logic
+        if shuffled:
+           logging.info("shuffled is True, going through market data in random order")
+        self.step_map = np.random.permutation(self.total_steps) if shuffled else np.arange(self.total_steps)
+        self.t = self.step_map[self.n_steps]  # used for indexing market information
+
+        # Use numpy arrays for speed
+        self.market_data = market_data_df.to_numpy(dtype=np.float32)
+        self.market_features = market_feature_df.to_numpy(dtype=np.float32)
+        self.market_feature_names = market_feature_df.columns.tolist()
+        self.agent_data = np.zeros(shape = (self.market_data.shape[0], len(AgentDataCol.all_names())), dtype=np.float32)
+        self.agent_data[0, :] = (
+            self.initial_capital, # cash
+            0.0,                  # shares
+            self.initial_capital, # equity_open
+            self.initial_capital, # equity_high
+            self.initial_capital, # equity_low
+            self.initial_capital, # equity_close
+            0.0                   # action (no action at start)
+        )
+        assert self.market_data.shape == (self.total_steps, len(MarketDataCol))
+        assert self.market_features.shape == (self.total_steps, len(self.market_feature_names))
+        assert self.agent_data.shape == (self.total_steps, len(AgentDataCol))
+
+        # Action space
+        self.n_actions = n_actions
+        if self.n_actions == 0:
+            logging.info(f"n_actions is zero, using continuous action space")
+            low = -1.0 if allow_short else 0.0
+            high = 1.0 if allow_long else 0.0
+            self.action_space = spaces.Box(low=low, high=high, shape=(1,), dtype=np.float32)
+        else:
+            self.short_actions = n_actions * allow_short
+            long_actions = n_actions * allow_short
+            logging.info(f"n_actions is larger than zero, using discrete action space with {long_actions} action(s) for long, {self.short_actions} for short, and 1 for no_participation.")
+            self.action_space = spaces.Discrete(self.short_actions + 1 + long_actions)
+
+        # Define observation space
+        num_market_features = len(market_feature_df.columns)
+        num_state_features = self.agent_feature_engineer.num_of_features()
+        observation_space_shape = num_market_features + num_state_features
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(observation_space_shape,), dtype=np.float32)   
+
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
 
@@ -223,9 +219,6 @@ class ForexEnv(gym.Env):
         current_cash, current_shares = execute_trade(target_exposure, current_data, prev_cash, prev_shares, self.transaction_cost_pct) # type: ignore
         equity_open, equity_high, equity_low, equity_close = calculate_ohlc_equity(current_data, current_cash, current_shares)
         self.agent_data[self.n_steps, :] = (current_cash, current_shares, equity_open, equity_high, equity_low, equity_close, target_exposure)
-
-        # calculate reward
-        reward = self._get_reward()
 
         # Determine done
         terminated = False
@@ -253,7 +246,7 @@ class ForexEnv(gym.Env):
             info['market_features'] = market_features_df
             info['agent_data'] = agent_data_df
 
-        return self._get_observation(), reward, terminated, truncated, info
+        return self._get_observation(), self._get_reward(), terminated, truncated, info
 
     def _get_reward(self):
         """
@@ -273,22 +266,13 @@ class ForexEnv(gym.Env):
         """
         market_features = self.market_features[self.t]
         state_features = self.agent_feature_engineer.run(self.agent_data, self.n_steps)
-        observation = np.concatenate((market_features, state_features), axis=0)
-        
-        return observation
+        return np.concatenate((market_features, state_features), axis=0)
 
     def _get_target_exposure(self, action: np.ndarray | np.generic) -> float:
         """
         Standardizes actions by converting them to the target exposure.
         """
         action = action.item()
-        if self.n_actions > 0:
-            if self.allow_long and self.allow_short:
-                action = (action - self.n_actions) / self.n_actions
-            elif self.allow_long:
-                action = action / self.n_actions
-            else: # self.allow_short
-                action = action / self.n_actions
-                action -= 1.0  # Shift to [-1, 0] for shorting
-                
-        return action
+        if self.n_actions == 0:
+            return action
+        return (action - self.short_actions) / self.n_actions
