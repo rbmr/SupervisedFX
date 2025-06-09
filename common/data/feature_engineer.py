@@ -198,39 +198,59 @@ def adx(df: pd.DataFrame, window: int = 14):
 def parabolic_sar(df: pd.DataFrame, acceleration_factor: float = 0.02, max_acceleration: float = 0.2):
     """
     Calculate the Parabolic SAR (Stop and Reverse) indicator.
-    Gives either a -1 or 1 value indicating the trend direction.
     """
-    df['sar'] = np.nan
-    df['sar_direction'] = 0  # 1 for uptrend, -1 for downtrend
+    # Use bid prices for calculation
+    high = df['high_bid']
+    low = df['low_bid']
+    close = df['close_bid']
 
-    # Initialize variables
-    af = acceleration_factor
-    ep = df['close_bid'].iloc[0]  # Extreme point
-    sar = df['close_bid'].iloc[0]  # Initial SAR
+    # Initial values
+    initial_af = acceleration_factor
+    max_af = max_acceleration
+    sar = [close[0]]
+    ep = [high[0]]
+    af = [initial_af]
+    trend = [1]  # 1 for uptrend, -1 for downtrend
 
     for i in range(1, len(df)):
-        if df['sar_direction'].iloc[i-1] == 1:  # Uptrend
-            sar = sar + af * (ep - sar)
-            if df['low_bid'].iloc[i] < sar:  # Trend reversal
-                df.at[i, 'sar_direction'] = -1
-                sar = ep  # Reset SAR to extreme point
-                ep = df['low_bid'].iloc[i]
-                af = acceleration_factor
+        # Determine current trend
+        if trend[-1] == 1:  # Uptrend
+            sar_i = sar[-1] + af[-1] * (ep[-1] - sar[-1])
+            if low[i] < sar_i:
+                # Switch to downtrend
+                trend.append(-1)
+                sar_i = ep[-1]
+                ep_i = low[i]
+                af_i = initial_af
             else:
-                df.at[i, 'sar_direction'] = 1
-                ep = max(ep, df['high_bid'].iloc[i])
+                trend.append(1)
+                ep_i = max(ep[-1], high[i])
+                if ep_i > ep[-1]:
+                    af_i = min(max_af, af[-1] + initial_af)
+                else:
+                    af_i = af[-1]
         else:  # Downtrend
-            sar = sar + af * (ep - sar)
-            if df['high_bid'].iloc[i] > sar:  # Trend reversal
-                df.at[i, 'sar_direction'] = 1
-                sar = ep  # Reset SAR to extreme point
-                ep = df['high_bid'].iloc[i]
-                af = acceleration_factor
+            sar_i = sar[-1] - af[-1] * (sar[-1] - ep[-1])
+            if high[i] > sar_i:
+                # Switch to uptrend
+                trend.append(1)
+                sar_i = ep[-1]
+                ep_i = high[i]
+                af_i = initial_af
             else:
-                df.at[i, 'sar_direction'] = -1
-                ep = min(ep, df['low_bid'].iloc[i])
+                trend.append(-1)
+                ep_i = min(ep[-1], low[i])
+                if ep_i < ep[-1]:
+                    af_i = min(max_af, af[-1] + initial_af)
+                else:
+                    af_i = af[-1]
 
-        df.at[i, 'sar'] = sar
+        sar.append(sar_i)
+        ep.append(ep_i)
+        af.append(af_i)
+
+    df['sar'] = sar
+    return df
 
 # -------------------------- #
 # -- END TREND Indicators -- #
@@ -282,7 +302,6 @@ def stochastic_oscillator(df: pd.DataFrame, window: int = 14):
     
     df['stoch_k'] = 100 * (df['close_bid'] - low_min) / (high_max - low_min)
     df['stoch_d'] = df['stoch_k'].rolling(window=3).mean()  # 3-period smoothing for %D
-
 
 def historic_pct_change(df: pd.DataFrame, window: int = 14):
     """
@@ -372,7 +391,6 @@ def ad_line(df: pd.DataFrame):
 # -- VOLATILITY Indicators -- #
 # --------------------------- #
 
-
 def bollinger_bands(df: pd.DataFrame, window: int = 20, num_std_dev: float = 2.0):
     """
     Calculate Bollinger Bands for a given column.
@@ -383,8 +401,6 @@ def bollinger_bands(df: pd.DataFrame, window: int = 20, num_std_dev: float = 2.0
     
     df[f'bb_upper_{window}'] = df[sma_col] + (num_std_dev * rolling_std)
     df[f'bb_lower_{window}'] = df[sma_col] - (num_std_dev * rolling_std)
-
-
 
 def atr(df: pd.DataFrame, window: int = 14, column_high: str = "high_bid", column_low: str = "low_bid", column_close: str = "close_bid"):
     """
@@ -406,6 +422,21 @@ def atr(df: pd.DataFrame, window: int = 14, column_high: str = "high_bid", colum
     true_range = pd.Series(true_range_array, index=df.index)
 
     df[f"atr_{window}"] = true_range.rolling(window=window, min_periods=1).mean().fillna(0)
+
+def chaikin_volatility(df: pd.DataFrame, ema_window: int = 10, roc_period: int = 10):
+    """
+    Calculate the Chaikin Volatility indicator.
+    It measures the rate of change of an EMA of the High-Low range.
+    """
+    # Step 1: Calculate the EMA of the High-Low difference
+    high_low_range = df['high_bid'] - df['low_bid']
+    ema_high_low = high_low_range.ewm(span=ema_window, adjust=False).mean()
+    
+    # Step 2: Calculate the rate of change of that EMA
+    roc_ema = ema_high_low.pct_change(periods=roc_period)
+    
+    df[f'chaikin_vol_{ema_window}_{roc_period}'] = roc_ema
+    df[f'chaikin_vol_{ema_window}_{roc_period}'].fillna(0, inplace=True)
 
 # ------------------------------- #
 # -- END VOLATILITY Indicators -- #
@@ -440,7 +471,7 @@ def as_ratio_of_other_column(df: pd.DataFrame, column: str, other_column: str):
     df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)
       # Replace inf with 0
 
-def as_z_score(df: pd.DataFrame, column: str, window: int = 500):
+def as_z_score(df: pd.DataFrame, column: str, window: int = 50):
     """
     Normalize a column as z-score with a window.
     To reduce NaNs, we use 0:index window for the rows where index<window.
@@ -450,7 +481,7 @@ def as_z_score(df: pd.DataFrame, column: str, window: int = 500):
     df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
     df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
 
-def as_min_max_window(df: pd.DataFrame, column: str, window: int = 500):
+def as_min_max_window(df: pd.DataFrame, column: str, window: int = 50):
     """
     Normalize a column as min-max scaling with a rolling window.
     """
