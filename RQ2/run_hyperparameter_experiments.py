@@ -1,8 +1,10 @@
 import logging
 from typing import Callable, List
 
+import torch.optim as optim
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
+from torch.nn import LeakyReLU
 
 from RQ2.constants import *
 from common.data.data import ForexCandleData, Timeframe
@@ -148,89 +150,94 @@ def main():
 
 # EXPERIMENT FUNCTIONS
 
-def base_experiment_func(temp_env: DummyVecEnv) -> DQN:
-    policy_kwargs = dict(net_arch=[32, 16])
-    return DQN(
+def base_experiment_func(temp_env: DummyVecEnv) -> Dict[str, Any]:
+    policy_kwargs = dict(net_arch=[32, 16], optimizer_class=optim.Adam, activation_fn=LeakyReLU)
+
+    kwargs = dict(
         policy="MlpPolicy",
         env=temp_env,
         learning_starts=1000,
-        gamma=0.95,
         policy_kwargs=policy_kwargs,
         verbose=0,
-        seed=SEED,
-
-        # variables that need to be set
-        learning_rate=0,
-        buffer_size=0,
-        batch_size=0,
-        tau=0.0,
-        train_freq=0,
-        gradient_steps=0,
-        target_update_interval=0,
-        exploration_fraction=0.0,
-        exploration_initial_eps=0.0,
-        exploration_final_eps=0.0
+        seed=SEED
     )
+    return kwargs
 
 def exprmt_patient(temp_env: DummyVecEnv) -> DQN:
-    dqn = base_experiment_func(temp_env)
-    dqn.learning_rate = 0.00001
-    dqn.buffer_size = 100_000
-    dqn.batch_size = 512
-    dqn.tau = 0.001
-    dqn.train_freq = (1, 'episode')
-    dqn.gradient_steps = -1
-    dqn.target_update_interval = 5_000
-    dqn.exploration_fraction = 0.5
-    dqn.exploration_initial_eps = 1.0
-    dqn.exploration_final_eps = 0.01
+    """
+    Initializes a 'patient' DQN model.
+    """
+    dqn_kwargs = base_experiment_func(temp_env)
 
-    return dqn
+    dqn_kwargs['learning_rate'] = 0.00001
+    dqn_kwargs['buffer_size'] = 100_000
+    dqn_kwargs['batch_size'] = 512
+    dqn_kwargs['tau'] = 0.001
+    dqn_kwargs['train_freq'] = (1, 'episode')
+    dqn_kwargs['gradient_steps'] = -1
+    dqn_kwargs['target_update_interval'] = 5_000
+    dqn_kwargs['exploration_fraction'] = 0.5
+    dqn_kwargs['exploration_initial_eps'] = 1.0
+    dqn_kwargs['exploration_final_eps'] = 0.01
+
+    return DQN(**dqn_kwargs)
 
 def exprmt_cautious(temp_env: DummyVecEnv) -> DQN:
-    dqn = base_experiment_func(temp_env)
-    dqn.learning_rate = 0.00005
-    dqn.buffer_size = 60_000
-    dqn.batch_size = 512
-    dqn.tau = 0.0025
-    dqn.train_freq = 64
-    dqn.gradient_steps = 1
-    dqn.target_update_interval = 2500
-    dqn.exploration_fraction = 0.4
-    dqn.exploration_initial_eps = 1.0
-    dqn.exploration_final_eps = 0.02
+    """
+    Initializes a 'cautious' DQN model.
+    """
+    dqn_kwargs = base_experiment_func(temp_env)
 
-    return dqn
+    dqn_kwargs['learning_rate'] = 0.00005
+    dqn_kwargs['buffer_size'] = 60_000
+    dqn_kwargs['batch_size'] = 512
+    dqn_kwargs['tau'] = 0.0025
+    dqn_kwargs['train_freq'] = 64
+    dqn_kwargs['gradient_steps'] = 1
+    dqn_kwargs['target_update_interval'] = 2500
+    dqn_kwargs['exploration_fraction'] = 0.4
+    dqn_kwargs['exploration_initial_eps'] = 1.0
+    dqn_kwargs['exploration_final_eps'] = 0.02
+
+    return DQN(**dqn_kwargs)
 
 def exprmt_balanced(temp_env: DummyVecEnv) -> DQN:
-    dqn = base_experiment_func(temp_env)
-    dqn.learning_rate = 0.0001
-    dqn.buffer_size = 30_000
-    dqn.batch_size = 256
-    dqn.tau = 0.005
-    dqn.train_freq = 16
-    dqn.gradient_steps = 1
-    dqn.target_update_interval = 1_000
-    dqn.exploration_fraction = 0.33
-    dqn.exploration_initial_eps = 1.0
-    dqn.exploration_final_eps = 0.05
+    """
+    Initializes a 'balanced' DQN model.
+    """
+    dqn_kwargs = base_experiment_func(temp_env)
 
-    return dqn
+    dqn_kwargs['learning_rate'] = 0.0001
+    dqn_kwargs['buffer_size'] = 30_000
+    dqn_kwargs['batch_size'] = 256
+    dqn_kwargs['tau'] = 0.005
+    dqn_kwargs['train_freq'] = 16
+    dqn_kwargs['gradient_steps'] = 1
+    dqn_kwargs['target_update_interval'] = 1_000
+    dqn_kwargs['exploration_fraction'] = 0.33
+    dqn_kwargs['exploration_initial_eps'] = 1.0
+    dqn_kwargs['exploration_final_eps'] = 0.05
+
+    return DQN(**dqn_kwargs)
 
 def exprmt_aggresive(temp_env: DummyVecEnv) -> DQN:
-    dqn = base_experiment_func(temp_env)
-    dqn.learning_rate = 0.001
-    dqn.buffer_size = 5_000
-    dqn.batch_size = 64
-    dqn.tau = 0.01
-    dqn.train_freq = 4
-    dqn.gradient_steps = 1
-    dqn.target_update_interval = 500
-    dqn.exploration_fraction = 0.25
-    dqn.exploration_initial_eps = 1.0
-    dqn.exploration_final_eps = 0.1
+    """
+    Initializes an 'aggressive' DQN model.
+    """
+    dqn_kwargs = base_experiment_func(temp_env)
 
-    return dqn
+    dqn_kwargs['learning_rate'] = 0.001
+    dqn_kwargs['buffer_size'] = 5_000
+    dqn_kwargs['batch_size'] = 64
+    dqn_kwargs['tau'] = 0.01
+    dqn_kwargs['train_freq'] = 4
+    dqn_kwargs['gradient_steps'] = 1
+    dqn_kwargs['target_update_interval'] = 500
+    dqn_kwargs['exploration_fraction'] = 0.25
+    dqn_kwargs['exploration_initial_eps'] = 1.0
+    dqn_kwargs['exploration_final_eps'] = 0.1
+
+    return DQN(**dqn_kwargs)
 
 
 
