@@ -10,6 +10,7 @@ from common.data.feature_engineer import *
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, get_current_exposure, duration_of_current_trade 
 from common.envs.forex_env import ForexEnv
 from common.models.train_eval import run_experiment
+from common.envs.rewards import percentage_return
 from common.scripts import *
 
 
@@ -19,106 +20,71 @@ def get_feature_engineers() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
     """
     # Create a feature engineer object
     feature_engineer = FeatureEngineer()
-    feature_engineer.add(complex_7d)
-    feature_engineer.add(complex_24h)
+
+    looky_backy = 4
+
+    # ------------------------- #
+    # ---- TIME Indicators ---- #
+    # ------------------------- #
+    feature_engineer.add(complex_24h) # 2
+
+
+    # ----------------------------- #
+    # ---- TA-Trend Indicators ---- #
+    # ----------------------------- #
+    def feat_sar(df):
+        parabolic_sar(df)
+        as_ratio_of_other_column(df, 'sar', 'close_bid')
+        history_lookback(df, looky_backy, ["sar"])
+    feature_engineer.add(feat_sar) # 1 * looky_backy
     
-    # Add basic features
-    # FEATURE 0 - CLOSE_PCT_CHANGE - 12 features
-    def feature_0(df):
-        copy_column(df, "close_bid", "close_pct_change")
-        as_pct_change(df, "close_pct_change")
-        history_lookback(df, 3, ["close_pct_change"])
-    feature_engineer.add(feature_0)
+    def feat_vwap(df):
+        vwap(df)
+        as_ratio_of_other_column(df, 'vwap_14', 'close_bid')
+        history_lookback(df, looky_backy, ["sar"])
+    feature_engineer.add(feat_vwap) # 1 * looky_backy
 
-    # -- TREND FEATURES --
+    # -------------------------------- #
+    # ---- TA-Momentum Indicators ---- #
+    # -------------------------------- #
 
-    # FEATURE 1 - EMA_20 - 12 features 
-    def feature_1(df):
-        ema(df, window=20)
-        as_ratio_of_other_column(df, "ema_20_close_bid", "close_bid")
-        history_lookback(df, 3, ["ema_20_close_bid"])
-    feature_engineer.add(feature_1)
+    def feat_macd(df):
+        macd(df, short_window=12, long_window=26, signal_window=9)
+        remove_columns(df, ["macd_signal", "macd"])
+        as_z_score(df, 'macd_hist', window=50)
+        history_lookback(df, looky_backy, ["macd_hist"])
+    feature_engineer.add(feat_macd) # 1
 
-    # FEATURE 2 - BOLLINGER_BANDS - 24 features
-    def feature_2(df):
+    def feat_mfi(df):
+        mfi(df)
+        as_min_max_fixed(df, 'mfi_14', 0, 100)
+    feature_engineer.add(feat_mfi) # 1 * looky_backy
+
+    # ---------------------------------- #
+    # ---- TA-Volatility Indicators ---- #
+    # ---------------------------------- #
+
+    def feat_boll_bands(df):
         bollinger_bands(df, window=20, num_std_dev=2)
         as_ratio_of_other_column(df, "bb_upper_20", "close_bid")
         as_ratio_of_other_column(df, "bb_lower_20", "close_bid")
-        history_lookback(df, 3, ["bb_upper_20"])
-        history_lookback(df, 3, ["bb_lower_20"])
-    feature_engineer.add(feature_2)
+        history_lookback(df, looky_backy, ["bb_upper_20"])
+        history_lookback(df, looky_backy, ["bb_lower_20"])
+    feature_engineer.add(feat_boll_bands) # 2 * looky_backy
 
-    # FEATURE 3 - MACD - 12 features
-    def feature_3(df):
-        macd(df, short_window=12, long_window=26, signal_window=9)
-        remove_columns(df, ["macd_signal", "macd"])
-        history_lookback(df, 3, ["macd_hist"])
-    feature_engineer.add(feature_3)
+    def feat_ch_vol(df):
+        chaikin_volatility(df)
+        history_lookback(df, looky_backy, ['chaikin_vol_10_10'])
+    feature_engineer.add(feat_ch_vol) # 1 * looky_backy
 
-    # -- TREND FEATURES END --
-
-    # -- MOMENTUM FEATURES --
-    # FEATURE 4 - RSI - 12 features
-    def feature_4(df):
-        rsi(df, window=14)
-        as_min_max_fixed(df, "rsi_14", 0, 100)
-        history_lookback(df, 3, ["rsi_14"])
-    feature_engineer.add(feature_4)
-
-    # FEATURE 5 - STOCHASTIC_OSCILLATOR - 12 features
-    def feature_5(df):
-        stochastic_oscillator(df, window=3)
-        as_min_max_fixed(df, "stoch_k", 0, 100)
-        as_min_max_fixed(df, "stoch_d", 0, 100)
-        history_lookback(df, 3, ["stoch_k"])
-        history_lookback(df, 3, ["stoch_d"])
-    feature_engineer.add(feature_5)
-
-    # FEATURE 6 - CCI - 12 features
-    def feature_6(df):
-        cci(df, window=20)
-        as_min_max_fixed(df, "cci_20", -100, 100)
-        history_lookback(df, 3, ["cci_20"])
-    feature_engineer.add(feature_6)
-
-    # -- MOMENTUM FEATURES END --=
-
-    # -- VOLUME FEATURES --
-    # FEATURE 7 - MFI - 12 features
-    def feature_7(df):
-        mfi(df, window=14)
-        as_min_max_fixed(df, "mfi_14", 0, 100)
-        history_lookback(df, 3, ["mfi_14"])
-    feature_engineer.add(feature_7)
-
-    def feature_8(df):
-        # FEATURE 8 - OBV - 12 features
-        obv(df)
-        as_ratio_of_other_column(df, "obv", "volume")
-        history_lookback(df, 3, ["obv"])
-    feature_engineer.add(feature_8)
-    
-    def feature_9(df):
-        # FEATURE 9 - CMF - 12 features
-        cmf(df, window=20)
-        as_min_max_fixed(df, "cmf_20", -1, 1)
-        history_lookback(df, 3, ["cmf_20"])
-    feature_engineer.add(feature_9)
-
-    # -- VOLUME FEATURES END --
-
-    # -- EXTRA TEST FEATURES --
-    def feature_10(df):
-        # FEATURE 10 - KAMA
-        kama(df, window=10)
-        as_ratio_of_other_column(df, "kama_10_close_bid", "close_bid")
-        history_lookback(df, 3, ["kama_10_close_bid"])
-    feature_engineer.add(feature_10)
+    # -------------------------- #
+    # ---- Agent Indicators ---- #
+    # -------------------------- #
 
     # Create a stepwise feature engineer object
     stepwise_feature_engineer = StepwiseFeatureEngineer()
-    stepwise_feature_engineer.add(['cash_percentage'], get_current_exposure)
-    stepwise_feature_engineer.add(['current_trade_length'], duration_of_current_trade)
+    stepwise_feature_engineer.add(['cash_percentage'], get_current_exposure) # 1
+    stepwise_feature_engineer.add(['current_trade_length'], duration_of_current_trade) # 1
 
     return feature_engineer, stepwise_feature_engineer
 
@@ -131,7 +97,7 @@ def main():
 
     forex_data = ForexCandleData.load(source="dukascopy",
                                       instrument="EURUSD",
-                                      granularity=Timeframe.M15,
+                                      granularity=Timeframe.H1,
                                       start_time=RQ2_HYPERPARAMETERS_START_DATE,
                                       end_time= RQ2_HYPERPARAMETERS_END_DATE,
                                     )
@@ -148,15 +114,18 @@ def main():
         agent_feature_engineer=stepwise_feature_engineer,
         initial_capital=INITIAL_CAPITAL,
         transaction_cost_pct=TRANSACTION_COST_PCT,
-        n_actions=1)
+        n_actions=1,
+        custom_reward_function=percentage_return
+        )
     logging.info("Environments created.")
 
     temp_env = DummyVecEnv([lambda: train_env])
 
     experiment_funcs: List[Callable[[DummyVecEnv], DQN]] = [
-        exprmt_fast,
-        exprmt_medium,
-        exprmt_slow,
+        exprmt_aggresive,
+        exprmt_balanced,
+        exprmt_cautious,
+        exprmt_patient
     ]
 
     for experiment_func in experiment_funcs:
@@ -168,9 +137,9 @@ def main():
             eval_env=eval_env,
             model=dqn_model,
             base_folder_path=RQ2_DIR,
-            experiment_group_name="hyperparameters_1h",
+            experiment_group_name="[hyperparameters]-1h_data",
             experiment_name=experiment_func.__name__,
-            train_episodes=200,
+            train_episodes=250,
             eval_episodes=1,
             checkpoints=True
         )
@@ -180,45 +149,86 @@ def main():
 # EXPERIMENT FUNCTIONS
 
 def base_experiment_func(temp_env: DummyVecEnv) -> DQN:
-    policy_kwargs = dict(net_arch=[20, 10])
+    policy_kwargs = dict(net_arch=[32, 16])
     return DQN(
         policy="MlpPolicy",
         env=temp_env,
-        learning_rate=0.001,
-        buffer_size=1000,
         learning_starts=1000,
-        batch_size=64,
-        tau=1.0,
-        gamma=0.99,
-        train_freq=64,
-        gradient_steps=64,
-        target_update_interval=500,
-        exploration_fraction=0.2,
-        exploration_initial_eps=1.0,
-        exploration_final_eps=0.05,
+        gamma=0.95,
         policy_kwargs=policy_kwargs,
         verbose=0,
-        seed=42
+        seed=SEED,
+
+        # variables that need to be set
+        learning_rate=0,
+        buffer_size=0,
+        batch_size=0,
+        tau=0.0,
+        train_freq=0,
+        gradient_steps=0,
+        target_update_interval=0,
+        exploration_fraction=0.0,
+        exploration_initial_eps=0.0,
+        exploration_final_eps=0.0
     )
 
-def exprmt_slow(temp_env: DummyVecEnv) -> DQN:
+def exprmt_patient(temp_env: DummyVecEnv) -> DQN:
+    dqn = base_experiment_func(temp_env)
+    dqn.learning_rate = 0.00001
+    dqn.buffer_size = 100_000
+    dqn.batch_size = 512
+    dqn.tau = 0.001
+    dqn.train_freq = (1, 'episode')
+    dqn.gradient_steps = -1
+    dqn.target_update_interval = 5_000
+    dqn.exploration_fraction = 0.5
+    dqn.exploration_initial_eps = 1.0
+    dqn.exploration_final_eps = 0.01
+
+    return dqn
+
+def exprmt_cautious(temp_env: DummyVecEnv) -> DQN:
+    dqn = base_experiment_func(temp_env)
+    dqn.learning_rate = 0.00005
+    dqn.buffer_size = 60_000
+    dqn.batch_size = 512
+    dqn.tau = 0.0025
+    dqn.train_freq = 64
+    dqn.gradient_steps = 1
+    dqn.target_update_interval = 2500
+    dqn.exploration_fraction = 0.4
+    dqn.exploration_initial_eps = 1.0
+    dqn.exploration_final_eps = 0.02
+
+    return dqn
+
+def exprmt_balanced(temp_env: DummyVecEnv) -> DQN:
+    dqn = base_experiment_func(temp_env)
+    dqn.learning_rate = 0.0001
+    dqn.buffer_size = 30_000
+    dqn.batch_size = 256
+    dqn.tau = 0.005
+    dqn.train_freq = 16
+    dqn.gradient_steps = 1
+    dqn.target_update_interval = 1_000
+    dqn.exploration_fraction = 0.33
+    dqn.exploration_initial_eps = 1.0
+    dqn.exploration_final_eps = 0.05
+
+    return dqn
+
+def exprmt_aggresive(temp_env: DummyVecEnv) -> DQN:
     dqn = base_experiment_func(temp_env)
     dqn.learning_rate = 0.001
-    dqn.buffer_size = 1000
-
-    return dqn
-
-def exprmt_medium(temp_env: DummyVecEnv) -> DQN:
-    dqn = base_experiment_func(temp_env)
-    dqn.learning_rate = 0.0005
-    dqn.buffer_size = 5000
-
-    return dqn
-
-def exprmt_fast(temp_env: DummyVecEnv) -> DQN:
-    dqn = base_experiment_func(temp_env)
-    dqn.learning_rate = 0.0009
-    dqn.buffer_size = 10_000
+    dqn.buffer_size = 5_000
+    dqn.batch_size = 64
+    dqn.tau = 0.01
+    dqn.train_freq = 4
+    dqn.gradient_steps = 1
+    dqn.target_update_interval = 500
+    dqn.exploration_fraction = 0.25
+    dqn.exploration_initial_eps = 1.0
+    dqn.exploration_final_eps = 0.1
 
     return dqn
 
