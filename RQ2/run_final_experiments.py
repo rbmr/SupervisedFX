@@ -7,7 +7,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from RQ2.constants import *
 from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import FeatureEngineer, rsi, history_lookback, remove_ohlcv
-from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
+from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, get_current_exposure
 from common.envs.forex_env import ForexEnv
 from common.models.train_eval import run_experiment
 from common.scripts import *
@@ -93,7 +93,7 @@ def base_experiment_func() -> Tuple[FeatureEngineer, StepwiseFeatureEngineer]:
     feature_engineer.add(lambda df: history_lookback(df, 20))
 
     stepwise_feature_engineer = StepwiseFeatureEngineer()
-    stepwise_feature_engineer.add(['cash_percentage'], calculate_cash_percentage)
+    stepwise_feature_engineer.add(['cash_percentage'], get_current_exposure)
 
     return feature_engineer, stepwise_feature_engineer
 
