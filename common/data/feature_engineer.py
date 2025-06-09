@@ -386,8 +386,13 @@ def as_ratio_of_other_column(df: pd.DataFrame, column: str, other_column: str):
     Normalize a column as a ratio of another column.
     """
     df[f'{column}'] = df[column] / df[other_column]
+
+    # minus 1 to center around 0
+    df[f'{column}'] = df[f'{column}'] - 1
+
     df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
-    df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
+    df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)
+      # Replace inf with 0
 
 def as_z_score(df: pd.DataFrame, column: str, window: int = 500):
     """
@@ -404,6 +409,10 @@ def as_min_max_window(df: pd.DataFrame, column: str, window: int = 500):
     Normalize a column as min-max scaling with a rolling window.
     """
     df[f'{column}'] = (df[column] - df[column].rolling(window=window, min_periods=1).min()) / (df[column].rolling(window=window, min_periods=1).max() - df[column].rolling(window=window, min_periods=1).min())
+    
+    # center around 0
+    df[f'{column}'] = 2 * df[f'{column}'] - 1
+    
     df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
     df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
 
@@ -413,6 +422,10 @@ def as_min_max_fixed(df: pd.DataFrame, column: str, min: int = 0, max: int = 100
     This is not recommended for training, but can be used for testing.
     """
     df[f'{column}'] = (df[column] - min) / (max - min)
+
+    # center around 0
+    df[f'{column}'] = 2 * df[f'{column}'] - 1
+
     df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
     df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
 

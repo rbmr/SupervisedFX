@@ -9,7 +9,7 @@ from RQ2.constants import *
 from common.constants import *
 from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import *
-from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_cash_percentage
+from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, get_current_exposure
 from common.envs.forex_env import ForexEnv
 from common.envs.rewards import percentage_return
 from common.models.train_eval import run_experiment
@@ -148,7 +148,7 @@ def main():
 
     # Add stepwise feature engineering
     stepwise_feature_engineer = StepwiseFeatureEngineer()
-    stepwise_feature_engineer.add(['cash_percentage'], calculate_cash_percentage)
+    stepwise_feature_engineer.add(['cash_percentage'], get_current_exposure)
 
     logging.info("Creating environments...")
     train_env, eval_env = ForexEnv.create_train_eval_envs(

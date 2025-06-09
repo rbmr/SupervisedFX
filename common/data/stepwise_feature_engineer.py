@@ -88,14 +88,27 @@ def calculate_current_exposure(data: np.ndarray, index: int) -> NDArray[np.float
         exposure = (equity - cash) / equity
     return np.array([exposure,], dtype=np.float32)
 
-def calculate_cash_percentage(data: np.ndarray, index) -> NDArray[np.float32]:
+def get_current_exposure(data: np.ndarray, index) -> NDArray[np.float32]:
     """
     Calculate the cash to shares ratio.
     """
-    current_cash = data[index, AgentDataCol.cash]
-    current_equity = data[index, AgentDataCol.equity_close]
-    percentage = current_cash / current_equity
-    return np.array([percentage,], dtype=np.float32)
+    exposure = data[index, AgentDataCol.target_exposure]
+    return np.array([exposure,], dtype=np.float32)
+
+def duration_of_current_trade(data: np.ndarray, index, scaling_factor = 24) -> NDArray[np.float32]:
+    curr = data[index, AgentDataCol.target_exposure]
+    length = 1
+    index -= 1
+
+    while index >= 0 and data[index, AgentDataCol.target_exposure] == curr:
+        length += 1
+        index -= 1
+
+    length = min(length / scaling_factor, 1.0)
+
+    return np.array([length,], dtype=np.float32)
+    
+        
 
 
         
