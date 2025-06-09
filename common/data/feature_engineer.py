@@ -39,7 +39,9 @@ class FeatureEngineer:
         return df
     
 
-# TIME Indicators
+# #######################################
+# # Time Analysis                     #
+# #######################################
 
 def _norm_time_of_day(dt_series: pd.Series):
     """Converts a time column to a [0,1] range of time of day."""
@@ -74,6 +76,18 @@ def lin_7d(df: pd.DataFrame):
         raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
     df['lin_7d'] = _norm_time_of_week(df['date_gmt'])
 
+def sin_7d(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    ntow = _norm_time_of_week(df['date_gmt'])
+    df['sin_7d'] = np.sin(ntow * np.pi * 2)
+
+def sin_24h(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    ntod = _norm_time_of_day(df['date_gmt'])
+    df['sin_24h'] = np.sin(ntod * np.pi * 2)
+
 def complex_7d(df: pd.DataFrame):
     if 'date_gmt' not in df.columns:
         raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
@@ -88,19 +102,19 @@ def complex_24h(df: pd.DataFrame):
     df['sin_24h'] = np.sin(ntod * np.pi * 2)
     df['cos_24h'] = np.cos(ntod * np.pi * 2)
 
-def sin_7d(df: pd.DataFrame):
-    if 'date_gmt' not in df.columns:
-        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
-    ntow = _norm_time_of_week(df['date_gmt'])
-    df['sin_7d'] = np.sin(ntow * np.pi * 2)
 
-def sin_24h(df: pd.DataFrame):
-    if 'date_gmt' not in df.columns:
-        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
-    ntod = _norm_time_of_day(df['date_gmt'])
-    df['sin_24h'] = np.sin(ntod * np.pi * 2)
+# ####################################### #
+# # End Time Analysis                   # #
+# ####################################### #
 
-# TREND Indicators
+
+# ####################################### #
+# # Technical Analysis                  # #
+# ####################################### #
+
+# ---------------------- #
+# -- TREND Indicators -- #
+# ---------------------- #
 
 def sma(df: pd.DataFrame, window: int, column: str = 'close_bid'):
     """
@@ -142,27 +156,15 @@ def kama(df: pd.DataFrame, window: int = 10, fast: int = 2, slow: int = 30, colu
 
     df[f'kama_{window}_{column}'] = kama
 
-def bollinger_bands(df: pd.DataFrame, window: int = 20, num_std_dev: float = 2.0):
+def vwap(df: pd.DataFrame, window: int = 14):
     """
-    Calculate Bollinger Bands for a given column.
+    Calculate the Volume Weighted Average Price (VWAP) for a given column.
+    VWAP is the average price a security has traded at throughout the day, based on both volume and price.
     """
-    sma_col = f'sma_{window}_close_bid'
-    df[sma_col] = df['close_bid'].rolling(window=window).mean()
-    rolling_std = df['close_bid'].rolling(window=window).std()
-    
-    df[f'bb_upper_{window}'] = df[sma_col] + (num_std_dev * rolling_std)
-    df[f'bb_lower_{window}'] = df[sma_col] - (num_std_dev * rolling_std)
-
-def macd(df: pd.DataFrame, short_window: int = 12, long_window: int = 26, signal_window: int = 9):
-    """
-    Calculate the Moving Average Convergence Divergence (MACD) and Signal Line.
-    """
-    short_ema = df['close_bid'].ewm(span=short_window, adjust=False).mean()
-    long_ema = df['close_bid'].ewm(span=long_window, adjust=False).mean()
-    
-    df['macd'] = short_ema - long_ema
-    df['macd_signal'] = df['macd'].ewm(span=signal_window, adjust=False).mean()
-    df['macd_hist'] = df['macd'] - df['macd_signal']
+    cumulative_volume = df['volume'].cumsum()
+    cumulative_vwap = (df['close_bid'] * df['volume']).cumsum() / cumulative_volume
+    df[f'vwap_{window}'] = cumulative_vwap.rolling(window=window).mean()
+    df[f'vwap_{window}'] = df[f'vwap_{window}'].fillna(0)  # Fill NaN values with 0
 
 def adx(df: pd.DataFrame, window: int = 14):
     """
@@ -230,28 +232,27 @@ def parabolic_sar(df: pd.DataFrame, acceleration_factor: float = 0.02, max_accel
 
         df.at[i, 'sar'] = sar
 
-def atr(df: pd.DataFrame, window: int = 14, column_high: str = "high_bid", column_low: str = "low_bid", column_close: str = "close_bid"):
+# -------------------------- #
+# -- END TREND Indicators -- #
+# -------------------------- #
+
+#---------------------------------------#
+
+# ------------------------- #
+# -- MOMENTUM Indicators -- #
+# ------------------------- #
+
+
+def macd(df: pd.DataFrame, short_window: int = 12, long_window: int = 26, signal_window: int = 9):
     """
-    Adds an 'atr_{window}' column to df containing the rolling ATR.
-    ATR = rolling mean of True Range over `window` bars.
-    True Range = max(high - low, |high - prev_close|, |low - prev_close|).
+    Calculate the Moving Average Convergence Divergence (MACD) and Signal Line.
     """
-    high = df[column_high]
-    low = df[column_low]
-    close_shifted = df[column_close].shift(1).bfill()
-
-    # Compute True Range using np.maximum, then convert to Series
-    true_range_array = np.maximum.reduce([
-        high - low,
-        (high - close_shifted).abs(),
-        (low - close_shifted).abs()
-    ])
-
-    true_range = pd.Series(true_range_array, index=df.index)
-
-    df[f"atr_{window}"] = true_range.rolling(window=window, min_periods=1).mean().fillna(0)
-
-# Momentum Indicators
+    short_ema = df['close_bid'].ewm(span=short_window, adjust=False).mean()
+    long_ema = df['close_bid'].ewm(span=long_window, adjust=False).mean()
+    
+    df['macd'] = short_ema - long_ema
+    df['macd_signal'] = df['macd'].ewm(span=signal_window, adjust=False).mean()
+    df['macd_hist'] = df['macd'] - df['macd_signal']
 
 def rsi(df, window=14):
     """
@@ -313,31 +314,6 @@ def williams_r(df: pd.DataFrame, window: int = 14):
     df[f'williams_r_{window}'] = -100 * (high_max - df['close_bid']) / (high_max - low_min)
     df[f'williams_r_{window}'] = df[f'williams_r_{window}'].fillna(0)  # Fill NaN values with 0
 
-# VOLUME Indicators
-def obv(df: pd.DataFrame):
-    """
-    Calculate the On-Balance Volume (OBV) indicator.
-    OBV is a cumulative volume indicator that adds volume on up days and subtracts volume on down days.
-    """
-    df['obv'] = 0
-    for i in range(1, len(df)):
-        if df['close_bid'].iloc[i] > df['close_bid'].iloc[i - 1]:
-            df.at[i, 'obv'] = df['obv'].iloc[i - 1] + df['volume'].iloc[i]
-        elif df['close_bid'].iloc[i] < df['close_bid'].iloc[i - 1]:
-            df.at[i, 'obv'] = df['obv'].iloc[i - 1] - df['volume'].iloc[i]
-        else:
-            df.at[i, 'obv'] = df['obv'].iloc[i - 1]
-
-def vwap(df: pd.DataFrame, window: int = 14):
-    """
-    Calculate the Volume Weighted Average Price (VWAP) for a given column.
-    VWAP is the average price a security has traded at throughout the day, based on both volume and price.
-    """
-    cumulative_volume = df['volume'].cumsum()
-    cumulative_vwap = (df['close_bid'] * df['volume']).cumsum() / cumulative_volume
-    df[f'vwap_{window}'] = cumulative_vwap.rolling(window=window).mean()
-    df[f'vwap_{window}'] = df[f'vwap_{window}'].fillna(0)  # Fill NaN values with 0
-
 def mfi(df: pd.DataFrame, window: int = 14):
     """
     Calculate the Money Flow Index (MFI) for a given column.
@@ -363,6 +339,20 @@ def cmf(df: pd.DataFrame, window: int = 20):
     df[f'cmf_{window}'] = money_flow_volume.rolling(window=window).sum() / df['volume'].rolling(window=window).sum()
     df[f'cmf_{window}'] = df[f'cmf_{window}'].fillna(0)  # Fill NaN values with 0
 
+def obv(df: pd.DataFrame):
+    """
+    Calculate the On-Balance Volume (OBV) indicator.
+    OBV is a cumulative volume indicator that adds volume on up days and subtracts volume on down days.
+    """
+    df['obv'] = 0
+    for i in range(1, len(df)):
+        if df['close_bid'].iloc[i] > df['close_bid'].iloc[i - 1]:
+            df.at[i, 'obv'] = df['obv'].iloc[i - 1] + df['volume'].iloc[i]
+        elif df['close_bid'].iloc[i] < df['close_bid'].iloc[i - 1]:
+            df.at[i, 'obv'] = df['obv'].iloc[i - 1] - df['volume'].iloc[i]
+        else:
+            df.at[i, 'obv'] = df['obv'].iloc[i - 1]
+
 def ad_line(df: pd.DataFrame):
     """
     Calculate the Accumulation/Distribution Line (AD Line) for a given column.
@@ -372,8 +362,64 @@ def ad_line(df: pd.DataFrame):
     df['ad_line'] = ad.cumsum()
 
 
+# ----------------------------- #
+# -- END MOMENTUM Indicators -- #
+# ----------------------------- #
 
-## NORMALIZATION FUNCTIONS
+#---------------------------------------#
+
+# --------------------------- #
+# -- VOLATILITY Indicators -- #
+# --------------------------- #
+
+
+def bollinger_bands(df: pd.DataFrame, window: int = 20, num_std_dev: float = 2.0):
+    """
+    Calculate Bollinger Bands for a given column.
+    """
+    sma_col = f'sma_{window}_close_bid'
+    df[sma_col] = df['close_bid'].rolling(window=window).mean()
+    rolling_std = df['close_bid'].rolling(window=window).std()
+    
+    df[f'bb_upper_{window}'] = df[sma_col] + (num_std_dev * rolling_std)
+    df[f'bb_lower_{window}'] = df[sma_col] - (num_std_dev * rolling_std)
+
+
+
+def atr(df: pd.DataFrame, window: int = 14, column_high: str = "high_bid", column_low: str = "low_bid", column_close: str = "close_bid"):
+    """
+    Adds an 'atr_{window}' column to df containing the rolling ATR.
+    ATR = rolling mean of True Range over `window` bars.
+    True Range = max(high - low, |high - prev_close|, |low - prev_close|).
+    """
+    high = df[column_high]
+    low = df[column_low]
+    close_shifted = df[column_close].shift(1).bfill()
+
+    # Compute True Range using np.maximum, then convert to Series
+    true_range_array = np.maximum.reduce([
+        high - low,
+        (high - close_shifted).abs(),
+        (low - close_shifted).abs()
+    ])
+
+    true_range = pd.Series(true_range_array, index=df.index)
+
+    df[f"atr_{window}"] = true_range.rolling(window=window, min_periods=1).mean().fillna(0)
+
+# ------------------------------- #
+# -- END VOLATILITY Indicators -- #
+# ------------------------------- #
+
+# ####################################### #
+# # End Technical Analysis              # #
+# ####################################### #
+
+
+# ############################################### #
+# # NORMALIZATION TRANSFORMATION SCALIUNG       # #
+# ############################################### #
+
 def as_pct_change(df: pd.DataFrame, column: str, periods: int = 1):
     """
     Normalize a column as percentage change.
@@ -479,3 +525,8 @@ def copy_column(df: pd.DataFrame, source_column: str, target_column: str):
     df[target_column] = df[source_column].copy()
     df[target_column] = df[target_column].fillna(0)  # Fill NaN values with 0
     df[target_column] = df[target_column].replace(np.inf, 0)  # Replace inf with 0
+
+# ############################################### #
+# # END NORMALIZATION TRANSFORMATION SCALIUNG   # #
+# ############################################### #
+
