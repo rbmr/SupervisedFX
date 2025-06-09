@@ -99,7 +99,7 @@ def main():
                                       instrument="EURUSD",
                                       granularity=Timeframe.H1,
                                       start_time=RQ2_HYPERPARAMETERS_START_DATE,
-                                      end_time= RQ2_HYPERPARAMETERS_END_DATE,
+                                      end_time= RQ2_HYPERPARAMETERS_END_DATE_1H,
                                     )
     
     # --- Feature Engineering ---
