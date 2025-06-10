@@ -326,7 +326,7 @@ def run_model(model: BaseAlgorithm,
         obs, rewards, dones, infos = env.step(action)
         episode_log.append({
             "step": step,
-            "action": action[0].tolist(),
+            "action": action[0] if isinstance(action[0], (int, float)) else action[0].item(),
             "reward": rewards[0],
             "done": dones[0],
         })
