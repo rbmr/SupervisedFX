@@ -134,5 +134,5 @@ def dp_perfect_model(env: ForexEnv) -> DummyModel:
     
     return DummyModel(pred_fn=prediction_logic)
 
-
-DUMMY_MODELS: list[Callable[[ForexEnv], DummyModel]] = [short_model, long_model, hold_model, random_model]
+DummyModelFactory = Callable[[ForexEnv], DummyModel]
+DUMMY_MODELS: list[DummyModelFactory] = [short_model, long_model, hold_model, random_model]
