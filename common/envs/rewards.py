@@ -201,6 +201,10 @@ class DPRewardFunction:
         self.T = self.v.shape[0]
         self.c = table.transaction_cost_pct
         self.normalizer = normalizer
+        step_diffs = (self.v - self.q_min)[:-1].flatten() # Exclude terminal state, and flatten
+        self.max_diff = np.percentile(step_diffs, 98)
+        if self.max_diff <= 1e-9:
+            raise ValueError("Unexpected table values, step importance is almost non-existent.")
 
     def __call__(self, env) -> float:
         t = env.n_steps
@@ -220,21 +224,12 @@ class DPRewardFunction:
         true_log_return = np.log(next_equity / curr_equity)
 
         # Interpolated DP expected cumulative log-equity from current/next state
-        exp_log_next = interp(self.v[t+1], next_exposure, self.n_actions)
-        exp_log_curr = interp(self.v[t], curr_exposure, self.n_actions)
+        exp_log_next_optimal = interp(self.v[t+1], next_exposure, self.n_actions)
+        exp_log_worst = interp(self.q_min[t], curr_exposure, self.n_actions)
 
-        # Baseline shaped reward (potential-based shaping)
-        r = true_log_return + exp_log_next - exp_log_curr
+        # How much was the action better than the worst action you could have taken?
+        # and how significant was this difference? (Normalize)
+        r = (true_log_return + exp_log_next_optimal - exp_log_worst) / self.max_diff
 
-        # Apply normalization if applicable
-        if self.normalizer is not None:
-            normalized_r = self.normalizer.normalize(r)
-        else:
-            normalized_r = r
-
-        # Log to sneaky buffer if it is being used
-        sneaky_buf: dict = getattr(env, "sneaky_buffer", None)
-        if sneaky_buf is not None:
-            sneaky_buf.setdefault("reward/raw", []).append(r)
-            sneaky_buf.setdefault("reward/normalized", []).append(normalized_r)
-        return normalized_r
+        # Clip and adjust
+        return np.clip(r, 0.0, 1.0)
