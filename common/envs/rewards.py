@@ -191,7 +191,7 @@ class RunningZScoreNormalizer(Normalizer):
 
 class DPRewardFunction:
 
-    def __init__(self, table: DPTable, normalizer: Normalizer | None = None):
+    def __init__(self, table: DPTable):
         # Reward computation
         self.v = table.value_table
         self.pi = table.policy_table
@@ -200,7 +200,6 @@ class DPRewardFunction:
         self.actions = get_exposure_levels(table.n_actions)
         self.T = self.v.shape[0]
         self.c = table.transaction_cost_pct
-        self.normalizer = normalizer
         step_diffs = (self.v - self.q_min)[:-1].flatten() # Exclude terminal state, and flatten
         self.max_diff = np.percentile(step_diffs, 98)
         if self.max_diff <= 1e-9:
