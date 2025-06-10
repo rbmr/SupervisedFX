@@ -176,6 +176,8 @@ cython_debug/
 
 # Custom
 RQ1/experiments/*
+RQ1/dp_cache/*
+RQ1/tensorboard/*
 RQ2/experiments/*
 RQ3/experiments/*
 RQ4/experiments/*

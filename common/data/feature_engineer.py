@@ -37,8 +37,84 @@ class FeatureEngineer:
             df.drop(columns=original_columns, inplace=True, errors='ignore')
         
         return df
+    
 
-# TREND Indicators
+# #######################################
+# # Time Analysis                     #
+# #######################################
+
+def _norm_time_of_day(dt_series: pd.Series):
+    """Converts a time column to a [0,1] range of time of day."""
+    if not pd.api.types.is_datetime64_any_dtype(dt_series):
+        raise ValueError("series must be of datetime type.")
+    return (
+        dt_series.dt.hour * (60 * 60) +
+        dt_series.dt.minute * 60 +
+        dt_series.dt.second +
+        dt_series.dt.microsecond / 1_000_000
+    ) / (60 * 60 * 24)
+
+def _norm_time_of_week(dt_series: pd.Series):
+    """Converts a time column to a [0,1] range of time of week."""
+    if not pd.api.types.is_datetime64_any_dtype(dt_series):
+        raise ValueError("series must be of datetime type.")
+    return (
+        dt_series.dt.weekday * (60 * 60 * 24) +  # days since Monday
+        dt_series.dt.hour * (60 * 60) +
+        dt_series.dt.minute * 60 +
+        dt_series.dt.second +
+        dt_series.dt.microsecond / 1_000_000
+    ) / (7 * 60 * 60 * 24)
+
+def lin_24h(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    df['lin_24h'] = _norm_time_of_day(df['date_gmt'])
+
+def lin_7d(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    df['lin_7d'] = _norm_time_of_week(df['date_gmt'])
+
+def sin_7d(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    ntow = _norm_time_of_week(df['date_gmt'])
+    df['sin_7d'] = np.sin(ntow * np.pi * 2)
+
+def sin_24h(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    ntod = _norm_time_of_day(df['date_gmt'])
+    df['sin_24h'] = np.sin(ntod * np.pi * 2)
+
+def complex_7d(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    ntow = _norm_time_of_week(df['date_gmt'])
+    df['sin_7d'] = np.sin(ntow * np.pi * 2)
+    df['cos_7d'] = np.cos(ntow * np.pi * 2)
+
+def complex_24h(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    ntod = _norm_time_of_day(df['date_gmt'])
+    df['sin_24h'] = np.sin(ntod * np.pi * 2)
+    df['cos_24h'] = np.cos(ntod * np.pi * 2)
+
+
+# ####################################### #
+# # End Time Analysis                   # #
+# ####################################### #
+
+
+# ####################################### #
+# # Technical Analysis                  # #
+# ####################################### #
+
+# ---------------------- #
+# -- TREND Indicators -- #
+# ---------------------- #
 
 def sma(df: pd.DataFrame, window: int, column: str = 'close_bid'):
     """
@@ -52,16 +128,140 @@ def ema(df: pd.DataFrame, window: int, column: str = 'close_bid'):
     """
     df[f'ema_{window}_{column}'] = df[column].ewm(span=window, adjust=False).mean()
 
-def bollinger_bands(df: pd.DataFrame, window: int = 20, num_std_dev: float = 2.0):
+def kama(df: pd.DataFrame, window: int = 10, fast: int = 2, slow: int = 30, column: str = 'close_bid'):
     """
-    Calculate Bollinger Bands for a given column.
+    Calculate the Kaufman's Adaptive Moving Average (KAMA) for a given column.
+    KAMA adjusts its sensitivity based on the volatility of the price.
     """
-    sma_col = f'sma_{window}_close_bid'
-    df[sma_col] = df['close_bid'].rolling(window=window).mean()
-    rolling_std = df['close_bid'].rolling(window=window).std()
-    
-    df[f'bb_upper_{window}'] = df[sma_col] + (num_std_dev * rolling_std)
-    df[f'bb_lower_{window}'] = df[sma_col] - (num_std_dev * rolling_std)
+    # Calculate Directional Movement
+    change = abs(df[column] - df[column].shift(window))
+
+    # Calculate Volatility
+    volatility = (abs(df[column] - df[column].shift(1))).rolling(window=window).sum()
+
+    # Calculate Efficiency Ratio
+    er = change / volatility
+
+    # Calculate Smoothing Constant
+    fastest = 2 / (fast + 1)
+    slowest = 2 / (slow + 1)
+    sc = (er * (fastest - slowest) + slowest) ** 2
+
+    # Calculate KAMA
+    kama = pd.Series(index=df.index, dtype=float)
+    kama.iloc[window-1] = df[column].iloc[window-1] # Start with the price at period n
+
+    for i in range(window, len(df)):
+        kama.iloc[i] = kama.iloc[i-1] + sc.iloc[i] * (df[column].iloc[i] - kama.iloc[i-1])
+
+    df[f'kama_{window}_{column}'] = kama
+
+def vwap(df: pd.DataFrame, window: int = 14):
+    """
+    Calculate the Volume Weighted Average Price (VWAP) for a given column.
+    VWAP is the average price a security has traded at throughout the day, based on both volume and price.
+    """
+    cumulative_volume = df['volume'].cumsum()
+    cumulative_vwap = (df['close_bid'] * df['volume']).cumsum() / cumulative_volume
+    df[f'vwap_{window}'] = cumulative_vwap.rolling(window=window).mean()
+    df[f'vwap_{window}'] = df[f'vwap_{window}'].fillna(0)  # Fill NaN values with 0
+
+def adx(df: pd.DataFrame, window: int = 14):
+    """
+    Calculate the Average Directional Index (ADX) for trend strength.
+    """
+    high = df['high_bid']
+    low = df['low_bid']
+    close = df['close_bid']
+
+    # True Range
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(window=window).mean()
+
+    # Directional Movement
+    up_move = high.diff()
+    down_move = low.diff()
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0), index=df.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0), index=df.index)
+
+    plus_di = 100 * (plus_dm.rolling(window=window).sum() / atr)
+    minus_di = 100 * (minus_dm.rolling(window=window).sum() / atr)
+
+    dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di))
+    adx = dx.rolling(window=window).mean()
+
+    df['adx'] = adx
+
+def parabolic_sar(df: pd.DataFrame, acceleration_factor: float = 0.02, max_acceleration: float = 0.2):
+    """
+    Calculate the Parabolic SAR (Stop and Reverse) indicator.
+    """
+    # Use bid prices for calculation
+    high = df['high_bid']
+    low = df['low_bid']
+    close = df['close_bid']
+
+    # Initial values
+    initial_af = acceleration_factor
+    max_af = max_acceleration
+    sar = [close[0]]
+    ep = [high[0]]
+    af = [initial_af]
+    trend = [1]  # 1 for uptrend, -1 for downtrend
+
+    for i in range(1, len(df)):
+        # Determine current trend
+        if trend[-1] == 1:  # Uptrend
+            sar_i = sar[-1] + af[-1] * (ep[-1] - sar[-1])
+            if low[i] < sar_i:
+                # Switch to downtrend
+                trend.append(-1)
+                sar_i = ep[-1]
+                ep_i = low[i]
+                af_i = initial_af
+            else:
+                trend.append(1)
+                ep_i = max(ep[-1], high[i])
+                if ep_i > ep[-1]:
+                    af_i = min(max_af, af[-1] + initial_af)
+                else:
+                    af_i = af[-1]
+        else:  # Downtrend
+            sar_i = sar[-1] - af[-1] * (sar[-1] - ep[-1])
+            if high[i] > sar_i:
+                # Switch to uptrend
+                trend.append(1)
+                sar_i = ep[-1]
+                ep_i = high[i]
+                af_i = initial_af
+            else:
+                trend.append(-1)
+                ep_i = min(ep[-1], low[i])
+                if ep_i < ep[-1]:
+                    af_i = min(max_af, af[-1] + initial_af)
+                else:
+                    af_i = af[-1]
+
+        sar.append(sar_i)
+        ep.append(ep_i)
+        af.append(af_i)
+
+    df['sar'] = sar
+    return df
+
+# -------------------------- #
+# -- END TREND Indicators -- #
+# -------------------------- #
+
+#---------------------------------------#
+
+# ------------------------- #
+# -- MOMENTUM Indicators -- #
+# ------------------------- #
+
 
 def macd(df: pd.DataFrame, short_window: int = 12, long_window: int = 26, signal_window: int = 9):
     """
@@ -73,65 +273,6 @@ def macd(df: pd.DataFrame, short_window: int = 12, long_window: int = 26, signal
     df['macd'] = short_ema - long_ema
     df['macd_signal'] = df['macd'].ewm(span=signal_window, adjust=False).mean()
     df['macd_hist'] = df['macd'] - df['macd_signal']
-
-def adx(df: pd.DataFrame, window: int = 14):
-    """
-    Calculate the Average Directional Index (ADX) for trend strength.
-    """
-    high = df['high_bid']
-    low = df['low_bid']
-    close = df['close_bid']
-
-    tr = pd.concat([high - low, abs(high - close.shift()), abs(low - close.shift())], axis=1).max(axis=1)
-    atr = tr.rolling(window=window).mean()
-
-    plus_dm = np.where((high.diff() > low.diff()) & (high.diff() > 0), high.diff(), 0)
-    minus_dm = np.where((low.diff() > high.diff()) & (low.diff() > 0), low.diff(), 0)
-
-    plus_di = 100 * (plus_dm.rolling(window=window).sum() / atr)
-    minus_di = 100 * (minus_dm.rolling(window=window).sum() / atr)
-
-    df['adx'] = 100 * (abs(plus_di - minus_di) / (plus_di + minus_di)).rolling(window=window).mean()
-
-def parabolic_sar(df: pd.DataFrame, acceleration_factor: float = 0.02, max_acceleration: float = 0.2):
-    """
-    Calculate the Parabolic SAR (Stop and Reverse) indicator.
-    Gives either a -1 or 1 value indicating the trend direction.
-    """
-    df['sar'] = np.nan
-    df['sar_direction'] = 0  # 1 for uptrend, -1 for downtrend
-
-    # Initialize variables
-    af = acceleration_factor
-    ep = df['close_bid'].iloc[0]  # Extreme point
-    sar = df['close_bid'].iloc[0]  # Initial SAR
-
-    for i in range(1, len(df)):
-        if df['sar_direction'].iloc[i-1] == 1:  # Uptrend
-            sar = sar + af * (ep - sar)
-            if df['low_bid'].iloc[i] < sar:  # Trend reversal
-                df.at[i, 'sar_direction'] = -1
-                sar = ep  # Reset SAR to extreme point
-                ep = df['low_bid'].iloc[i]
-                af = acceleration_factor
-            else:
-                df.at[i, 'sar_direction'] = 1
-                ep = max(ep, df['high_bid'].iloc[i])
-        else:  # Downtrend
-            sar = sar + af * (ep - sar)
-            if df['high_bid'].iloc[i] > sar:  # Trend reversal
-                df.at[i, 'sar_direction'] = 1
-                sar = ep  # Reset SAR to extreme point
-                ep = df['high_bid'].iloc[i]
-                af = acceleration_factor
-            else:
-                df.at[i, 'sar_direction'] = -1
-                ep = min(ep, df['low_bid'].iloc[i])
-
-        df.at[i, 'sar'] = sar
-    
-
-# Momentum Indicators
 
 def rsi(df, window=14):
     """
@@ -161,7 +302,6 @@ def stochastic_oscillator(df: pd.DataFrame, window: int = 14):
     
     df['stoch_k'] = 100 * (df['close_bid'] - low_min) / (high_max - low_min)
     df['stoch_d'] = df['stoch_k'].rolling(window=3).mean()  # 3-period smoothing for %D
-
 
 def historic_pct_change(df: pd.DataFrame, window: int = 14):
     """
@@ -193,31 +333,6 @@ def williams_r(df: pd.DataFrame, window: int = 14):
     df[f'williams_r_{window}'] = -100 * (high_max - df['close_bid']) / (high_max - low_min)
     df[f'williams_r_{window}'] = df[f'williams_r_{window}'].fillna(0)  # Fill NaN values with 0
 
-# VOLUME Indicators
-def obv(df: pd.DataFrame):
-    """
-    Calculate the On-Balance Volume (OBV) indicator.
-    OBV is a cumulative volume indicator that adds volume on up days and subtracts volume on down days.
-    """
-    df['obv'] = 0
-    for i in range(1, len(df)):
-        if df['close_bid'].iloc[i] > df['close_bid'].iloc[i - 1]:
-            df.at[i, 'obv'] = df['obv'].iloc[i - 1] + df['volume'].iloc[i]
-        elif df['close_bid'].iloc[i] < df['close_bid'].iloc[i - 1]:
-            df.at[i, 'obv'] = df['obv'].iloc[i - 1] - df['volume'].iloc[i]
-        else:
-            df.at[i, 'obv'] = df['obv'].iloc[i - 1]
-
-def vwap(df: pd.DataFrame, window: int = 14):
-    """
-    Calculate the Volume Weighted Average Price (VWAP) for a given column.
-    VWAP is the average price a security has traded at throughout the day, based on both volume and price.
-    """
-    cumulative_volume = df['volume'].cumsum()
-    cumulative_vwap = (df['close_bid'] * df['volume']).cumsum() / cumulative_volume
-    df[f'vwap_{window}'] = cumulative_vwap.rolling(window=window).mean()
-    df[f'vwap_{window}'] = df[f'vwap_{window}'].fillna(0)  # Fill NaN values with 0
-
 def mfi(df: pd.DataFrame, window: int = 14):
     """
     Calculate the Money Flow Index (MFI) for a given column.
@@ -243,6 +358,20 @@ def cmf(df: pd.DataFrame, window: int = 20):
     df[f'cmf_{window}'] = money_flow_volume.rolling(window=window).sum() / df['volume'].rolling(window=window).sum()
     df[f'cmf_{window}'] = df[f'cmf_{window}'].fillna(0)  # Fill NaN values with 0
 
+def obv(df: pd.DataFrame):
+    """
+    Calculate the On-Balance Volume (OBV) indicator.
+    OBV is a cumulative volume indicator that adds volume on up days and subtracts volume on down days.
+    """
+    df['obv'] = 0
+    for i in range(1, len(df)):
+        if df['close_bid'].iloc[i] > df['close_bid'].iloc[i - 1]:
+            df.at[i, 'obv'] = df['obv'].iloc[i - 1] + df['volume'].iloc[i]
+        elif df['close_bid'].iloc[i] < df['close_bid'].iloc[i - 1]:
+            df.at[i, 'obv'] = df['obv'].iloc[i - 1] - df['volume'].iloc[i]
+        else:
+            df.at[i, 'obv'] = df['obv'].iloc[i - 1]
+
 def ad_line(df: pd.DataFrame):
     """
     Calculate the Accumulation/Distribution Line (AD Line) for a given column.
@@ -252,13 +381,81 @@ def ad_line(df: pd.DataFrame):
     df['ad_line'] = ad.cumsum()
 
 
+# ----------------------------- #
+# -- END MOMENTUM Indicators -- #
+# ----------------------------- #
 
-## NORMALIZATION FUNCTIONS
+#---------------------------------------#
+
+# --------------------------- #
+# -- VOLATILITY Indicators -- #
+# --------------------------- #
+
+def bollinger_bands(df: pd.DataFrame, window: int = 20, num_std_dev: float = 2.0):
+    """
+    Calculate Bollinger Bands for a given column.
+    """
+    sma_col = f'sma_{window}_close_bid'
+    df[sma_col] = df['close_bid'].rolling(window=window).mean()
+    rolling_std = df['close_bid'].rolling(window=window).std()
+    
+    df[f'bb_upper_{window}'] = df[sma_col] + (num_std_dev * rolling_std)
+    df[f'bb_lower_{window}'] = df[sma_col] - (num_std_dev * rolling_std)
+
+def atr(df: pd.DataFrame, window: int = 14, column_high: str = "high_bid", column_low: str = "low_bid", column_close: str = "close_bid"):
+    """
+    Adds an 'atr_{window}' column to df containing the rolling ATR.
+    ATR = rolling mean of True Range over `window` bars.
+    True Range = max(high - low, |high - prev_close|, |low - prev_close|).
+    """
+    high = df[column_high]
+    low = df[column_low]
+    close_shifted = df[column_close].shift(1).bfill()
+
+    # Compute True Range using np.maximum, then convert to Series
+    true_range_array = np.maximum.reduce([
+        high - low,
+        (high - close_shifted).abs(),
+        (low - close_shifted).abs()
+    ])
+
+    true_range = pd.Series(true_range_array, index=df.index)
+
+    df[f"atr_{window}"] = true_range.rolling(window=window, min_periods=1).mean().fillna(0)
+
+def chaikin_volatility(df: pd.DataFrame, ema_window: int = 10, roc_period: int = 10):
+    """
+    Calculate the Chaikin Volatility indicator.
+    It measures the rate of change of an EMA of the High-Low range.
+    """
+    # Step 1: Calculate the EMA of the High-Low difference
+    high_low_range = df['high_bid'] - df['low_bid']
+    ema_high_low = high_low_range.ewm(span=ema_window, adjust=False).mean()
+    
+    # Step 2: Calculate the rate of change of that EMA
+    roc_ema = ema_high_low.pct_change(periods=roc_period)
+    
+    df[f'chaikin_vol_{ema_window}_{roc_period}'] = roc_ema
+    df[f'chaikin_vol_{ema_window}_{roc_period}'].fillna(0, inplace=True)
+
+# ------------------------------- #
+# -- END VOLATILITY Indicators -- #
+# ------------------------------- #
+
+# ####################################### #
+# # End Technical Analysis              # #
+# ####################################### #
+
+
+# ############################################### #
+# # NORMALIZATION TRANSFORMATION SCALIUNG       # #
+# ############################################### #
+
 def as_pct_change(df: pd.DataFrame, column: str, periods: int = 1):
     """
     Normalize a column as percentage change.
     """
-    df[f'{column}'] = df[column].pct_change(periods=periods) * 100
+    df[f'{column}'] = df[column].pct_change(periods=periods)
     df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
 
 def as_ratio_of_other_column(df: pd.DataFrame, column: str, other_column: str):
@@ -266,10 +463,15 @@ def as_ratio_of_other_column(df: pd.DataFrame, column: str, other_column: str):
     Normalize a column as a ratio of another column.
     """
     df[f'{column}'] = df[column] / df[other_column]
-    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
-    df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
 
-def as_z_score(df: pd.DataFrame, column: str, window: int = 500):
+    # minus 1 to center around 0
+    df[f'{column}'] = df[f'{column}'] - 1
+
+    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
+    df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)
+      # Replace inf with 0
+
+def as_z_score(df: pd.DataFrame, column: str, window: int = 50):
     """
     Normalize a column as z-score with a window.
     To reduce NaNs, we use 0:index window for the rows where index<window.
@@ -279,11 +481,15 @@ def as_z_score(df: pd.DataFrame, column: str, window: int = 500):
     df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
     df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
 
-def as_min_max_window(df: pd.DataFrame, column: str, window: int = 500):
+def as_min_max_window(df: pd.DataFrame, column: str, window: int = 50):
     """
     Normalize a column as min-max scaling with a rolling window.
     """
     df[f'{column}'] = (df[column] - df[column].rolling(window=window, min_periods=1).min()) / (df[column].rolling(window=window, min_periods=1).max() - df[column].rolling(window=window, min_periods=1).min())
+    
+    # center around 0
+    df[f'{column}'] = 2 * df[f'{column}'] - 1
+    
     df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
     df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
 
@@ -293,8 +499,21 @@ def as_min_max_fixed(df: pd.DataFrame, column: str, min: int = 0, max: int = 100
     This is not recommended for training, but can be used for testing.
     """
     df[f'{column}'] = (df[column] - min) / (max - min)
+
+    # center around 0
+    df[f'{column}'] = 2 * df[f'{column}'] - 1
+
     df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
     df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
+
+def as_below_above_column(df: pd.DataFrame, column: str, other_column: str):
+    """
+    Normalize a column as below/above another column.
+    This will create a new column with 1 if the value is above the other column, -1 if below, and 0 if equal.
+    """
+    df[f'{column}'] = np.where(df[column] > df[other_column], 1, 
+                                                           np.where(df[column] < df[other_column], -1, 0))
+    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
 
 ## other
 def remove_columns(df: pd.DataFrame, columns: List[str]):
@@ -324,6 +543,12 @@ def history_lookback(df: pd.DataFrame, lookback_window_size: int, columns: List[
         for i in range(1, lookback_window_size + 1):
             df[f'{col}_shift_{i}'] = df[col].shift(i)
 
+def copy_columns(df: pd.DataFrame, source_columns: List[str], target_columns: List[str]):
+    if len(source_columns) != len(target_columns):
+        raise ValueError("len columns and target_columns are not the same.")
+    for source_column, target_column in zip(source_columns, target_columns):
+        copy_column(df, source_column, target_column)
+
 def copy_column(df: pd.DataFrame, source_column: str, target_column: str):
     """
     Copy a column from source to target.
@@ -331,3 +556,8 @@ def copy_column(df: pd.DataFrame, source_column: str, target_column: str):
     df[target_column] = df[source_column].copy()
     df[target_column] = df[target_column].fillna(0)  # Fill NaN values with 0
     df[target_column] = df[target_column].replace(np.inf, 0)  # Replace inf with 0
+
+# ############################################### #
+# # END NORMALIZATION TRANSFORMATION SCALIUNG   # #
+# ############################################### #
+

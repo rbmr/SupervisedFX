@@ -1,17 +1,122 @@
 """
 This file contains some simple scripts that can be useful anywhere during the project.
 """
-
+import json
+import math
+import os
 import random
+import signal
+import tempfile
+import time
 from datetime import datetime, timedelta
-from typing import Any, Dict
+from functools import partial
+from multiprocessing import cpu_count, get_context
+from pathlib import Path
+from typing import Any, Callable, Dict, Generator, TypeVar
 
 import numpy as np
 import pandas as pd
-from numpy.typing import NDArray
-from pathlib import Path
+import requests
 
-from common.constants import MarketDataCol
+K = TypeVar("K")
+V = TypeVar("V")
+
+def compute_sliding_window(arr: np.ndarray, window: int, fns: list[Callable[[np.ndarray], float]]):
+    """
+    Applies functions to a sliding window, caching the result.
+    """
+    T = arr.shape[0]
+    results = [np.zeros(T,dtype=np.float32) for _ in range(len(fns))]
+    for t in range(T):
+        start = max(0, t - window + 1)
+        window_slice = arr[start:t + 1]
+        for res, fn in zip(results, fns):
+            res[t] = fn(window_slice)
+    return results
+
+def index_wrapper(func: Callable[[K], V], pair: tuple[int, K]) -> tuple[int, V]:
+    i, x = pair
+    return i, func(x)
+
+def parallel_run(func: Callable[[K], V], inputs: list[K], num_workers: int) -> list[V]:
+    """
+    Applies a function to a list in parallel, returning results in proper order.
+    """
+    num_workers = max(min(cpu_count()-1, num_workers), 1)
+    results: list[V | None] = [None] * len(inputs)
+    ctx = get_context("spawn")
+    indexed_inps = enumerate(inputs)
+    indexed_fn = partial(index_wrapper, func)
+    original_sigint_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    with ctx.Pool(processes=num_workers) as pool:
+        signal.signal(signal.SIGINT, original_sigint_handler)
+        try:
+            for i, res in pool.imap_unordered(indexed_fn, indexed_inps):
+                results[i] = res
+        except Exception as e:
+            pool.terminate()
+            pool.join()
+            raise e
+        else:
+            pool.close()
+            pool.join()
+    return results
+
+def clean_numpy(obj):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            obj[k] = clean_numpy(v)
+    if isinstance(obj, list):
+        for i, v in enumerate(obj):
+            obj[i] = clean_numpy(v)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    return obj
+
+def fetch(session, url, retries: int = 16, raise_on_fail: bool = True) -> bytes | None:
+    delay = 1
+    for _ in range(retries):
+        try:
+            response = session.get(url)
+            response.raise_for_status()
+            return response.content
+        except Exception as e:
+            print(f"Error fetching {url}: {e}")
+            time.sleep(delay)
+            delay *= 2
+    if not raise_on_fail:
+        print(f"Failed to fetch {url} after {retries} retries")
+        return None
+    raise RuntimeError(f"Failed to fetch {url} after {retries} retries")
+
+def fetch_all(urls: list[str], raise_on_fail: bool = True) -> list:
+    results = []
+    with requests.Session() as session:
+        for url in urls:
+            result = fetch(session, url, raise_on_fail)
+            results.append(result)
+    return results
+
+def raise_value_error(msg):
+    raise ValueError(msg)
+
+def map_input(input_str: str, fns: list[Callable]):
+    while True:
+        try:
+            inp = input(input_str)
+            for fn in fns:
+                inp = fn(inp)
+            return inp
+        except BaseException as e:
+            print(f"Invalid input: {e}")
+
+def date_range(start: datetime, end: datetime, step: timedelta) -> Generator[datetime, None, None]:
+    current = start
+    while current < end:
+        yield current
+        current += step
 
 def has_nonempty_subdir(path: Path, subdir_name: str) -> bool:
     return has_subdir(path, subdir_name) and not is_empty(path / subdir_name)
@@ -73,23 +178,16 @@ def most_recent_modified(dir_path: Path):
         return None
     return max(entries, key=lambda p: p.stat().st_mtime)
 
-def calculate_equity(bid_price: float, ask_price: float, cash: float, shares: float) -> float:
+def shuffle(arr1: np.ndarray, arr2: np.ndarray, axis=0):
     """
-    Calculates the equity based on current cash, shares and prices.
+    Shuffles two arrays along axis1 preserving row matching.
     """
-    return cash + shares * (bid_price if shares >= 0 else ask_price)
+    assert arr1.shape[axis] == arr2.shape[axis]
 
-def calculate_ohlc_equity(current_prices: NDArray[np.float32], cash: float, shares: float) -> tuple[float, float, float, float]:
-    """
-    Calculates the equity based on current cash, shares and prices.
-    """
-    assert current_prices.ndim == 1
-    assert current_prices.shape[0] == len(MarketDataCol)
-    equity_open = calculate_equity(current_prices[MarketDataCol.open_bid], current_prices[MarketDataCol.open_ask], cash, shares)
-    equity_high = calculate_equity(current_prices[MarketDataCol.high_bid], current_prices[MarketDataCol.high_ask], cash, shares)
-    equity_low = calculate_equity(current_prices[MarketDataCol.low_bid], current_prices[MarketDataCol.low_ask], cash, shares)
-    equity_close = calculate_equity(current_prices[MarketDataCol.close_bid], current_prices[MarketDataCol.close_ask], cash, shares)
-    return equity_open, equity_high, equity_low, equity_close
+    indices = np.random.permutation(arr1.shape[axis])
+    arr1_shuffled = arr1[indices]
+    arr2_shuffled = arr2[indices]
+    return arr1_shuffled, arr2_shuffled
 
 def round_datetime(date_time: datetime, interval: int) -> datetime:
     """
@@ -108,8 +206,6 @@ def exact_divide(a: int, b: int) -> int:
     if a % b == 0:
         return a // b
     raise ValueError(f"{a} is not divisible by {b}")
-
-    blocks = []
 
 def render_horz_bar(height: float) -> str:
     """Renders a horizontal bar using fractional Unicode block characters"""
@@ -182,6 +278,18 @@ def set_seed(seed_value: int):
         torch.backends.cudnn.benchmark = False
 
     print(f"Seeds set to {seed_value} for Python, NumPy, TensorFlow, and PyTorch.")
+
+def write_atomic_json(data, path: Path):
+    """
+    Writes a JSON file guaranteeing atomicity.
+    """
+    dir_name = path.parent
+    with tempfile.NamedTemporaryFile("w", dir=dir_name, delete=False) as tf:
+        json.dump(data, tf)
+        tf.flush() # write python buffer to os buffer
+        os.fsync(tf.fileno()) # write os buffer to disk
+        temp_path = tf.name
+    os.replace(temp_path, path)
 
 def flatten_dict(d: Dict[str, Any], sep=".") -> Dict[str, Any]:
     """

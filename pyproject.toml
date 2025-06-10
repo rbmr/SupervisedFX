@@ -1,6 +1,6 @@
 [tool.poetry]
-name = "tud-cse-rp-rlinfinance"
-version = "0.1.0"
+name = "cse3000"
+version = "1.0.0"
 description = ""
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
@@ -11,7 +11,6 @@ license = ""  # Optional, can be removed if undesired
 
 [tool.poetry.dependencies]
 python = ">=3.12"
-finrl = ">=0.3.5,<0.4.0"
 stable-baselines3 = { version = ">=2.0.0,<3.0.0", extras = ["extra"] }
 matplotlib = ">=3.6.0,<4.0.0"
 seaborn = ">=0.12.0,<0.13.0"
@@ -31,6 +30,11 @@ logging = ">=0.4.9.6,<0.5.0.0"
 torch = { version = ">=2.0.0,<3.0.0", source = "torch" }
 torchvision = { version = ">=0.15.0,<0.23.0", source = "torch" }
 torchaudio = { version = ">=2.0.0,<3.0.0", source = "torch" }
+aiohttp = "^3.12.9"
+sb3-contrib = "^2.6.0"
+autoflake = "^2.3.1"
+tensorboard = "^2.19.0"
+tdigest = "^0.5.2.2"
 
 [tool.poetry.group.dev.dependencies]
 isort = "^6.0.1"

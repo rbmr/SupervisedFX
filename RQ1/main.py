@@ -1,125 +1,47 @@
+import os
+os.environ['TPU_NAME'] = ''
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Avoid GPU detection if unneeded
+
 import logging
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(levelname)s] %(message)s')
+logging.info("Loading imports...")
 from datetime import datetime
 from pathlib import Path
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from common.envs.callbacks import ActionHistogramCallback, SaveCallback, RolloutLogger, SneakyLogger
+from common.models.train_eval import (analyse_results, evaluate_models, train_model)
+from common.models.utils import save_model_with_metadata
+from common.scripts import has_nonempty_subdir, n_children, picker
+from RQ1.constants import EXPERIMENT_NAME_FORMAT, RQ1_EXPERIMENTS_DIR, TENSORBOARD_DIR
+from RQ1.parameters import get_environments, get_model, cleanup_tensorboard
 
-
-def get_feature_engineer():
-    from common.data.feature_engineer import FeatureEngineer, as_pct_change, ema, rsi, copy_column, as_ratio_of_other_column, as_min_max_fixed
-
-    feature_engineer = FeatureEngineer()
-
-    # Suggestion: Use fewer features and no history_lookback at first.
-    # Let the agent's recurrent policy (if you use one) or the network itself find temporal patterns.
-
-    # 1. Price Change (Momentum)
-    def feature_1(df):
-        copy_column(df, "close_bid", "close_pct_change_1")
-        as_pct_change(df, "close_pct_change_1", periods=1)
-        copy_column(df, "close_bid", "close_pct_change_5")
-        as_pct_change(df, "close_pct_change_5", periods=5)  # Look at change over 5 periods
-
-    feature_engineer.add(feature_1)
-
-    # 2. Trend (EMA)
-    def feature_2(df):
-        ema(df, window=20)
-        as_ratio_of_other_column(df, "ema_20_close_bid", "close_bid")  # How far is the price from the EMA?
-        ema(df, window=50)
-        as_ratio_of_other_column(df, "ema_50_close_bid", "close_bid")
-
-    feature_engineer.add(feature_2)
-
-    # 3. Oscillator (RSI)
-    def feature_3(df):
-        rsi(df, window=14)
-        as_min_max_fixed(df, "rsi_14", 0, 100)  # Normalize between 0 and 1
-
-    feature_engineer.add(feature_3)
-
-    return feature_engineer
-
-def get_environments():
-    from common.data.data import ForexCandleData, Timeframe
-    from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_current_exposure
-    from common.envs.forex_env import ForexEnv, log_equity_diff
-
-    logging.info("Loading market data...")
-    forex_candle_data = ForexCandleData.load(
-        source="dukascopy",
-        instrument="EURUSD",
-        granularity=Timeframe.M15,
-        start_time=datetime(2022, 1, 2, 22, 0, 0, 0),
-        end_time=datetime(2025, 5, 16, 20, 45, 0, 0),
-    )
-
-    logging.info("Setting up feature engineer...")
-    market_feature_engineer = get_feature_engineer()
-
-    logging.info("Setting up stepwise feature engineer...")
-    agent_feature_engineer = StepwiseFeatureEngineer()
-    agent_feature_engineer.add(["current_exposure"], calculate_current_exposure)
-
-    logging.info("Creating environments...")
-    train_env, eval_env = ForexEnv.create_train_eval_envs(
-        split_ratio=0.7,
-        forex_candle_data=forex_candle_data,
-        market_feature_engineer=market_feature_engineer,
-        agent_feature_engineer=agent_feature_engineer,
-        initial_capital=10_000.0,
-        transaction_cost_pct=0.0,
-        n_actions=0,
-        custom_reward_function=log_equity_diff,
-    )
-    logging.info("Environments created.")
-
-    return train_env, eval_env
+logging.info("Done.")
 
 def train():
-    from stable_baselines3 import A2C
-    from RQ1.constants import EXPERIMENTS_DIR, EXPERIMENT_NAME_FORMAT
-    from common.constants import SEED
-    from common.envs.callbacks import SaveOnEpisodeEndCallback, ActionHistogramCallback, CoolStatsCallback
-    from common.models.train_eval import train_model
-    from common.models.utils import save_model_with_metadata
-
-    train_env, _ = get_environments()
-
-    logging.info("Creating model...")
-
-    model = A2C(
-        policy="MlpPolicy",
-        env=train_env,
-        learning_rate=1e-4,
-        n_steps=512,
-        gamma=0.99,
-        gae_lambda=0.95,
-        ent_coef=0.01,
-        vf_coef=0.5,
-        max_grad_norm=0.5,
-        policy_kwargs=dict(net_arch=[dict(pi=[64, 64], vf=[64, 64])]),
-        seed=SEED,
-        verbose=1,
-        device="cpu"
-    )
-
-    logging.info("Model created.")
 
     experiment_name = datetime.now().strftime(EXPERIMENT_NAME_FORMAT)
-    experiment_dir = EXPERIMENTS_DIR / experiment_name
+    tensorboard_log = TENSORBOARD_DIR / experiment_name
+
+    train_env, _ = get_environments(custom_reward=True, shuffled=True)
+    save_freq = train_env.episode_len
+
+    model = get_model(train_env, tb_log=tensorboard_log)
+
+    experiment_dir = RQ1_EXPERIMENTS_DIR / experiment_name
     models_dir = experiment_dir / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    callback = [SaveOnEpisodeEndCallback(models_dir),
-                ActionHistogramCallback(train_env, log_freq=train_env.total_steps),
-                CoolStatsCallback(train_env, log_freq=train_env.total_steps)]
-    train_model(model, train_env, train_episodes=200, callback=callback)
+    callback = [SaveCallback(models_dir, save_freq=save_freq),
+                ActionHistogramCallback(train_env, log_freq=save_freq),
+                RolloutLogger(verbose=1),
+                SneakyLogger(verbose=1)]
+    train_model(model, train_env, train_episodes=20, callback=callback)
     save_model_with_metadata(model, models_dir / "model_final.zip")
 
 def evaluate(experiments_dir, limit = 10):
-    from common.models.train_eval import evaluate_models
-    from common.scripts import picker, has_nonempty_subdir, n_children
 
     experiment_dirs: list[Path] = list(experiments_dir.iterdir())
     experiment_dirs = list(f for f in experiment_dirs if has_nonempty_subdir(f, "models"))
@@ -132,17 +54,15 @@ def evaluate(experiments_dir, limit = 10):
     results_dir = experiment_dir / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    train_env, eval_env = get_environments()
+    train_env, eval_env = get_environments(shuffled=False)
     eval_envs = {
         "train": train_env,
         "eval": eval_env,
     }
 
-    evaluate_models(models_dir, results_dir, eval_envs, eval_episodes=1)
+    evaluate_models(models_dir, results_dir, eval_envs, eval_episodes=1, num_workers=3)
 
 def analyze(experiments_dir, limit = 10):
-    from common.scripts import picker, has_nonempty_subdir, n_children
-    from common.models.train_eval import analyse_results
 
     experiment_dirs: list[Path] = list(experiments_dir.iterdir())
     experiment_dirs = list(f for f in experiment_dirs if has_nonempty_subdir(f, "results"))
@@ -156,13 +76,11 @@ def analyze(experiments_dir, limit = 10):
     analyse_results(results_dir)
 
 if __name__ == "__main__":
-    from RQ1.constants import EXPERIMENTS_DIR
-    from common.scripts import picker
-
+    cleanup_tensorboard()
     options = [
         ("train", train),
-        ("eval", lambda: evaluate(EXPERIMENTS_DIR, 10)),
-        ("analyze", lambda: analyze(EXPERIMENTS_DIR, 10)),
+        ("eval", lambda: evaluate(RQ1_EXPERIMENTS_DIR, 10)),
+        ("analyze", lambda: analyze(RQ1_EXPERIMENTS_DIR, 10)),
     ]
     picker(options, default=None)()
 

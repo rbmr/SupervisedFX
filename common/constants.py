@@ -1,9 +1,7 @@
-from datetime import datetime, timedelta, timezone
 from enum import IntEnum
 from pathlib import Path
 
-import pytz
-from torch.cuda import is_available
+from torch.cuda import is_available as is_cuda_available
 
 COMMON_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = COMMON_DIR.parent
@@ -43,19 +41,7 @@ class AgentDataCol(ColumnCollection):
     equity_high = 3
     equity_low = 4
     equity_close = 5
-    action = 6
+    target_exposure = 6
+    pre_action_equity = 7
 
-class RawDataCol:
-    """
-    Class with static attributes to group column names in one place,
-    helps prevent typos, and makes refactoring easier.
-    """
-
-    TIME = "date_gmt"
-    VOL = "volume"
-    OPEN = "open"
-    HIGH = "high"
-    LOW = "low"
-    CLOSE = "close"
-
-DEVICE = "cuda" if is_available() else "cpu"
+DEVICE = "cuda" if is_cuda_available() else "cpu"

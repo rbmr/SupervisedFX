@@ -1,11 +1,11 @@
-import importlib
 import json
+import logging
 import zipfile
 from pathlib import Path
-from typing import Generator
+from typing import Generator, Type
 
-import logging
-from stable_baselines3 import PPO, DQN, SAC, TD3, DDPG, A2C
+from sb3_contrib import RecurrentPPO
+from stable_baselines3 import A2C, DDPG, DQN, PPO, SAC, TD3
 from stable_baselines3.common.base_class import BaseAlgorithm
 
 ALGORITHM_MAP = {
@@ -15,6 +15,7 @@ ALGORITHM_MAP = {
     'TD3': TD3,
     'DQN': DQN,
     'DDPG': DDPG,
+    'RECURRENTPPO': RecurrentPPO
 }
 METADATA_FILE = "custom_metadata.json"
 
@@ -24,6 +25,11 @@ def get_device(model: BaseAlgorithm) -> str:
     if hasattr(model, 'policy') and hasattr(model.policy, 'device'):
         return str(model.policy.device)
     return "auto"
+
+def get_algorithm_class(algorithm: str | None) -> Type[BaseAlgorithm] | None:
+    if algorithm is None:
+        return None
+    return ALGORITHM_MAP.get(algorithm.upper(), None)
 
 def save_model_with_metadata(model: BaseAlgorithm, path: Path, **metadata) -> None:
     """
@@ -48,13 +54,11 @@ def save_model_with_metadata(model: BaseAlgorithm, path: Path, **metadata) -> No
     with zipfile.ZipFile(f"{path}", 'a') as zip_file:
         zip_file.writestr(METADATA_FILE, json.dumps(custom_metadata, indent=4))
 
-def load_model_with_metadata(path: Path) -> BaseAlgorithm:
+def load_model_with_metadata(path: Path, default_algorithm_class: Type[BaseAlgorithm] | None = None) -> BaseAlgorithm:
     """
     Dynamically load any model using additional metadata.
     """
-    # Validat input
-    if not path.exists():
-        raise ValueError(f"{path} does not exist")
+    # Validate input
     if not path.is_file():
         raise ValueError(f"{path} is not a file")
     if path.suffix != ".zip":
@@ -67,14 +71,15 @@ def load_model_with_metadata(path: Path) -> BaseAlgorithm:
         with zip_file.open(METADATA_FILE) as f:
             metadata = json.load(f)
 
+    # Get algorithm class
     algorithm = metadata.get("algorithm", None)
-    if algorithm is None:
-        raise ValueError(f"{metadata} does not contain algorithm metadata")
-
-    algorithm_class = ALGORITHM_MAP.get(algorithm.upper(), None)
+    algorithm_class = get_algorithm_class(algorithm)
     if algorithm_class is None:
-        raise ValueError(f"{algorithm} is not a recognized algorithm")
+        if default_algorithm_class is None:
+            raise ValueError(f"{algorithm} in {path} is not a recognized algorithm")
+        algorithm_class = default_algorithm_class
 
+    # Load model
     device = metadata.get("device", "auto")
     model = algorithm_class.load(path, device=device)
     return model
