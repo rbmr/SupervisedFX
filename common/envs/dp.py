@@ -16,10 +16,9 @@ import numpy as np
 import pandas as pd
 from tqdm import trange
 
-from common.constants import AgentDataCol, MarketDataCol
+from common.constants import MarketDataCol
 from common.envs.forex_env import ForexEnv
 from common.envs.trade import calculate_equity, execute_trade, reverse_equity
-from common.scripts import ZScoreNormalizer
 
 DATA_HASH_LENGTH = 16
 
@@ -269,60 +268,4 @@ def interp(v_row: np.ndarray, exposure: float, n_actions: int):
         return v_row[i0]
     a = (exposure - x0) / (x1 - x0)
     return (1 - a) * v_row[i0] + a * v_row[i1]
-
-class DPRewardFunction:
-
-    def __init__(self, table: DPTable):
-        # Reward computation
-        self.v = table.value_table
-        self.pi = table.policy_table
-        self.q_min = table.q_min_table
-        self.n_actions = table.n_actions
-        self.actions = get_exposure_levels(table.n_actions)
-        self.T = self.v.shape[0]
-        self.c = table.transaction_cost_pct
-        self.normalizer = ZScoreNormalizer()
-
-    def __call__(self, env) -> float:
-        t = env.n_steps
-        if t >= self.T - 1:
-            return 0.0
-
-        # Unwrap env.agent_data for exposures and equities
-        curr_cash = env.agent_data[t-1, AgentDataCol.cash]
-        curr_equity = env.agent_data[t, AgentDataCol.pre_action_equity]
-        curr_exposure = (curr_equity - curr_cash) / curr_equity
-
-        next_cash = env.agent_data[t, AgentDataCol.cash]
-        next_equity = env.agent_data[t+1, AgentDataCol.pre_action_equity]
-        next_exposure = (next_equity - next_cash) / next_equity
-
-        # True one-step log-return
-        true_log_return = np.log(next_equity / curr_equity)
-
-        # Interpolated DP expected cumulative log-equity from current/next state
-        exp_log_next = interp(self.v[t+1], next_exposure, self.n_actions)
-        exp_log_curr = interp(self.v[t], curr_exposure, self.n_actions)
-
-        # Baseline shaped reward (potential-based shaping)
-        r = true_log_return + exp_log_next - exp_log_curr
-        r_log = np.sign(r) * np.log1p(np.abs(r))  # Compress spikes
-
-        # Z-score Normalization
-        normalized_r = self.normalizer.normalize(r_log)
-
-        # Clipping
-        final_r = np.clip(normalized_r, -0.75, 0.75) # clipping is chosen empirically
-
-        # Log to sneaky buffer if it is being used
-        sneaky_buf: dict = getattr(env, "sneaky_buffer", None)
-        if sneaky_buf is not None:
-            sneaky_buf.setdefault("reward/raw", []).append(r)
-            sneaky_buf.setdefault("reward/log", []).append(r_log)
-            sneaky_buf.setdefault("reward/normalized", []).append(normalized_r)
-            sneaky_buf.setdefault("reward/final", []).append(final_r)
-            sneaky_buf.setdefault("reward/running_log_mean", []).append(self.normalizer.mean)
-            sneaky_buf.setdefault("reward/running_log_M2", []).append(self.normalizer.std())
-        return final_r
-
 
