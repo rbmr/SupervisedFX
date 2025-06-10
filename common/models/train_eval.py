@@ -298,26 +298,27 @@ def analyse_results(results_dir: Path, model_name_suffix: str = "", num_workers 
 
 def run_model(model: BaseAlgorithm,
               env: ForexEnv,
-              data_path: Path,
+              data_path: Path | None,
               total_steps: int,
               deterministic: bool,
               progress_bar: bool = True
-              ) -> None:
+              ) -> pd.DataFrame:
     """
     Run a model on a ForexEnv for a number of episodes.
     Results are saved to data_path.
     """
     # Validate input
-    if data_path.suffix != ".csv":
-        raise ValueError(f"{data_path} is not a CSV file")
-    if total_steps <= 0:
-        raise ValueError("Total steps must be greater than 0.")
+    if data_path is not None:
+        if data_path.suffix != ".csv":
+            raise ValueError(f"{data_path} is not a CSV file")
+        if total_steps <= 0:
+            raise ValueError("Total steps must be greater than 0.")
+        data_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Function setup
-    data_path.parent.mkdir(parents=True, exist_ok=True)
     env = DummyVecEnv([lambda: env])
     steps = iter(tqdm(range(total_steps)) if progress_bar else range(total_steps))
-    logs_df = None
+    logs_df: None | pd.DataFrame = None
 
     # Start first episode
     obs = env.reset()
@@ -337,7 +338,7 @@ def run_model(model: BaseAlgorithm,
         obs, rewards, dones, infos = env.step(action)
         episode_log.append({
             "step": step,
-            "action": action[0].tolist(),
+            "action": action[0] if isinstance(action[0], (int, float)) else action[0].item(),
             "reward": rewards[0],
             "done": dones[0],
         })
@@ -373,4 +374,6 @@ def run_model(model: BaseAlgorithm,
             }]
 
     # Save collected logs to JSON file
-    logs_df.to_csv(data_path, index=False)
+    if data_path is not None:
+        logs_df.to_csv(data_path, index=False)
+    return logs_df

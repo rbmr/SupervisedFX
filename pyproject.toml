@@ -1,6 +1,6 @@
 [tool.poetry]
-name = "tud-cse-rp-rlinfinance"
-version = "0.1.0"
+name = "cse3000"
+version = "1.0.0"
 description = ""
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
@@ -34,6 +34,7 @@ aiohttp = "^3.12.9"
 sb3-contrib = "^2.6.0"
 autoflake = "^2.3.1"
 tensorboard = "^2.19.0"
+tdigest = "^0.5.2.2"
 
 [tool.poetry.group.dev.dependencies]
 isort = "^6.0.1"

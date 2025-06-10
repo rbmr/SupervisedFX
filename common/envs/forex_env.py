@@ -152,7 +152,7 @@ class ForexEnv(gym.Env):
 
         # Shuffling logic
         if shuffled:
-            logging.warning("shuffling has been temporarily been removed, no shuffling has occurred.")
+            logging.warning("shuffling has been temporarily removed, no shuffling has occurred.")
 
         # Use numpy arrays for speed
         self.market_data = market_data_df.to_numpy(dtype=np.float32)

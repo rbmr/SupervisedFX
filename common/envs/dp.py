@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from tqdm import trange
 
-from common.constants import AgentDataCol, MarketDataCol
+from common.constants import MarketDataCol
 from common.envs.forex_env import ForexEnv
 from common.envs.trade import calculate_equity, execute_trade, reverse_equity
 
@@ -269,62 +269,3 @@ def interp(v_row: np.ndarray, exposure: float, n_actions: int):
     a = (exposure - x0) / (x1 - x0)
     return (1 - a) * v_row[i0] + a * v_row[i1]
 
-class DPRewardFunction:
-
-    def __init__(self, table: DPTable, lam: int = 0.1, alpha_mu: float = 0.001, alpha_std: float = 0.001, clip: float = 5.0):
-        # Reward computation
-        self.v = table.value_table
-        self.pi = table.policy_table
-        self.q_min = table.q_min_table
-        self.n_actions = table.n_actions
-        self.actions = get_exposure_levels(table.n_actions)
-        self.T = self.v.shape[0]
-        self.c = table.transaction_cost_pct
-        self.lam = lam # penalty weight
-
-        # Z-score tracking (normalization)
-        self.mu = 0.0
-        self.var = 1.0  # Track variance, not std directly (for numerical stability)
-        self.alpha_mu = alpha_mu
-        self.alpha_std = alpha_std
-        self.clip = clip
-
-    def __call__(self, env) -> float:
-        t = env.n_steps
-        if t >= self.T - 1:
-            return 0.0
-
-        # Unwrap env.agent_data for exposures and equities
-        curr_cash = env.agent_data[t-1, AgentDataCol.cash]
-        curr_equity = env.agent_data[t, AgentDataCol.pre_action_equity]
-        curr_exposure = (curr_equity - curr_cash) / curr_equity
-
-        next_cash = env.agent_data[t, AgentDataCol.cash]
-        next_equity = env.agent_data[t+1, AgentDataCol.pre_action_equity]
-        next_exposure = (next_equity - next_cash) / next_equity
-
-        # True one-step log-return
-        true_log_return = np.log(next_equity / curr_equity)
-
-        # Interpolated DP expected cumulative log-equity from current/next state
-        exp_next = interp(self.v[t+1], next_exposure, self.n_actions)
-        exp_curr = interp(self.v[t], curr_exposure, self.n_actions)
-
-        # Baseline shaped reward (potential-based shaping)
-        r = true_log_return + exp_next - exp_curr
-
-        # Downside penalty: Difference to the worst DP action.
-        i_curr = get_exposure_idx(curr_exposure, self.n_actions)
-        q_dp = true_log_return + exp_next
-        q_min_curr = self.q_min[t, i_curr]
-        r += self.lam * (q_dp - q_min_curr)
-
-        # Update running mean and variance
-        delta = r - self.mu
-        self.mu += self.alpha_mu * delta
-        self.var = (1 - self.alpha_std) * self.var + self.alpha_std * delta**2
-        std = np.sqrt(self.var + 1e-8)
-
-        # Z-score scaling and clipping
-        r = (r - self.mu) / std
-        return np.clip(r, -self.clip, self.clip)

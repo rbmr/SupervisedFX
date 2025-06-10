@@ -43,7 +43,7 @@ def get_feature_engineers() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
     def feat_vwap(df):
         vwap(df)
         as_ratio_of_other_column(df, 'vwap_14', 'close_bid')
-        history_lookback(df, looky_backy, ["sar"])
+        history_lookback(df, looky_backy, ["vwap_14"])
     feature_engineer.add(feat_vwap) # 1 * looky_backy
 
     # -------------------------------- #
@@ -55,11 +55,12 @@ def get_feature_engineers() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
         remove_columns(df, ["macd_signal", "macd"])
         as_z_score(df, 'macd_hist', window=50)
         history_lookback(df, looky_backy, ["macd_hist"])
-    feature_engineer.add(feat_macd) # 1
+    feature_engineer.add(feat_macd) # 1 * looky_backy
 
     def feat_mfi(df):
         mfi(df)
         as_min_max_fixed(df, 'mfi_14', 0, 100)
+        history_lookback(df, looky_backy, ["mfi_14"])
     feature_engineer.add(feat_mfi) # 1 * looky_backy
 
     # ---------------------------------- #
