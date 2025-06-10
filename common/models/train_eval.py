@@ -52,11 +52,22 @@ def run_experiment(train_env: ForexEnv,
     # set tensorboard logging if enabled
     if tensorboard_logging:
         model.tensorboard_log = str(experiment_path / "tensorboard_logs")
-        
+
+    starting_episode = 0
+    # in the models dir, find the latest model and load it if it exists (latest model is the newest by modification time)
+    latest_model = max(models_path.glob("*.zip"), key=lambda p: p.stat().st_mtime, default=None)
+    if latest_model and latest_model.is_file():
+        logging.info(f"Loading latest model from {latest_model}")
+        model = load_model_with_metadata(latest_model)
+        starting_episode = int(latest_model.stem.split('_')[1])
+        train_episodes -= starting_episode
+
 
     callbacks = []
     if checkpoints:
-        callbacks.append(SaveOnEpisodeEndCallback(models_dir=models_path))
+        save_on_episode_callback = SaveOnEpisodeEndCallback(models_dir=models_path)
+        save_on_episode_callback.episode_num = starting_episode
+        callbacks.append(save_on_episode_callback)
 
     train_model(model, train_env=train_env, train_episodes=train_episodes, callback=callbacks)
 
@@ -70,13 +81,15 @@ def run_experiment(train_env: ForexEnv,
                     results_dir=results_path,
                     eval_envs={"train": train_env,
                                "eval": eval_env},
-                    eval_episodes=eval_episodes)
+                    eval_episodes=eval_episodes,
+                    num_workers=1)
 
     # ANALYZING RESULTS
 
     analyse_results(
         results_dir=results_path,
-        model_name_suffix=f"[{experiment_group_name}::{experiment_name}]"
+        model_name_suffix=f"[{experiment_group_name}::{experiment_name}]",
+        num_workers=1
     )
 
 def train_model(model: BaseAlgorithm,
@@ -245,7 +258,7 @@ def analyze_result(data_csv: Path, model_name_suffix: str = ""):
     """
     analyse_individual_run(data_csv, f"{data_csv.parent.parent.name}{model_name_suffix}")
 
-def analyse_results(results_dir: Path, model_name_suffix: str = "") -> None:
+def analyse_results(results_dir: Path, model_name_suffix: str = "", num_workers = 4) -> None:
     """
     Searches a directory for data.csv files, and performs analysis.
     Expected directory structure: /{model_name}/{env_name}/data.csv
@@ -262,7 +275,7 @@ def analyse_results(results_dir: Path, model_name_suffix: str = "") -> None:
     func = partial(analyze_result, model_name_suffix=model_name_suffix)
     result_files = list(results_dir.rglob("data.csv"))
     result_files.sort(key=lambda x: x.stat().st_mtime) # Old to new
-    parallel_run(func, result_files, num_workers=6)
+    parallel_run(func, result_files, num_workers=num_workers)
 
     # Aggregate environment results
     logging.info("Aggregating analysis results...")
