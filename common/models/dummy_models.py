@@ -1,12 +1,14 @@
 from typing import Any, Callable, Union
 
 import numpy as np
-from gymnasium import Space, spaces
+from gymnasium import spaces
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.policies import BasePolicy
-from common.envs.dp import DPTable, get_optimal_action, get_exposure_idx, get_dp_table_from_env
-from common.envs.forex_env import ForexEnv, AgentDataCol
+
 from common.constants import PROJECT_DIR
+from common.envs.dp import get_optimal_action, get_exposure_idx, get_dp_table_from_env
+from common.envs.forex_env import ForexEnv, AgentDataCol
+
 
 def constant_fn(x: Any) -> Callable[[Any], Any]:
     """Creates a single argument function that returns a constant value."""
@@ -133,4 +135,4 @@ def dp_perfect_model(env: ForexEnv) -> DummyModel:
     return DummyModel(pred_fn=prediction_logic)
 
 
-DUMMY_MODELS: list[Callable[[Space], DummyModel]] = [short_model, long_model, hold_model, random_model]
+DUMMY_MODELS: list[Callable[[ForexEnv], DummyModel]] = [short_model, long_model, hold_model, random_model]
