@@ -1,11 +1,13 @@
 import logging
+import os
+import shutil
 from datetime import datetime
-from pathlib import Path
 
 from stable_baselines3 import A2C
+from stable_baselines3.common.logger import configure
 from torch import nn
 
-from RQ1.constants import RQ1_DP_CACHE_DIR
+from RQ1.constants import RQ1_DP_CACHE_DIR, TENSORBOARD_DIR
 from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import (FeatureEngineer, adx,
                                           as_min_max_fixed, as_min_max_window,
@@ -19,6 +21,7 @@ from common.data.stepwise_feature_engineer import (StepwiseFeatureEngineer,
                                                    calculate_current_exposure)
 from common.envs.dp import get_dp_table_from_env, DPRewardFunction
 from common.envs.forex_env import ForexEnv
+from common.models.train_eval import empirical_rewards
 
 
 def get_environments(shuffled: bool = False):
@@ -156,9 +159,11 @@ def get_feature_engineer():
 
     return fe
 
-def get_model(env: ForexEnv, tensorboard_log: Path = None):
+def get_model(env: ForexEnv, tb_name: str = None):
 
     logging.info("Creating model...")
+
+    tensorboard_log = TENSORBOARD_DIR / tb_name if tb_name else None
 
     def linear_lr(start: float, end: float):
         diff = start - end
@@ -174,23 +179,48 @@ def get_model(env: ForexEnv, tensorboard_log: Path = None):
     hyperparams = dict(
         policy="MlpPolicy",
         env=env,
-        learning_rate=linear_lr(7e-4, 1e-5),
-        n_steps=32,
-        gamma=0.99,
+        learning_rate=linear_lr(1e-3, 1e-5), # Rate of policy updates
+        n_steps=128,
+        gamma=1.0, # We just want maximal equity. No inflation.
         gae_lambda=0.95,
-        ent_coef=0.01,
+        ent_coef=0.04,
         vf_coef=0.5,
-        max_grad_norm=0.5,
+        max_grad_norm=0.8,
         rms_prop_eps=1e-5,
         normalize_advantage=True,
         policy_kwargs=policy_kwargs,
-        verbose=1,
+        verbose=0,
+        tensorboard_log=tensorboard_log,
         device="cpu",
-        tensorboard_log=tensorboard_log
     )
+    if tensorboard_log is not None:
+        logging.info(f"Logging to tensorboard at {tensorboard_log}")
 
     model = A2C(**hyperparams)
 
     logging.info("Model created.")
 
     return model
+
+def cleanup_tensorboard():
+
+    run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_dir = os.path.join(TENSORBOARD_DIR, run_id)
+    os.makedirs(log_dir, exist_ok=True)
+
+    experiments = TENSORBOARD_DIR.iterdir()
+    experiments = list(filter(lambda f: not f.name.startswith("_") and f.is_dir(), experiments))
+    n_experiments = len(experiments)
+    max_experiments = 8
+
+    logging.info(f"Found {n_experiments} experiments in the tensorboard directory (max {max_experiments})")
+
+    experiments.sort(key= lambda x: x.stat().st_mtime)
+    if n_experiments > max_experiments:
+        n_rem_experiments = n_experiments - max_experiments
+        logging.info(f"Cleanup: deleting {n_rem_experiments} oldest experiments.")
+        old_experiments = experiments[:n_rem_experiments]
+        for experiment in old_experiments:
+            shutil.rmtree(experiment)
+        logging.info(f"Removed {n_rem_experiments} old experiments")
+

@@ -1,6 +1,9 @@
 import os
-
+os.environ['TPU_NAME'] = ''
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Avoid GPU detection if unneeded
+
 import logging
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -8,32 +11,33 @@ logging.info("Loading imports...")
 from datetime import datetime
 from pathlib import Path
 
-from common.envs.callbacks import ActionHistogramCallback, SaveCallback
-from common.models.train_eval import (analyse_results, evaluate_models,
-                                      train_model)
+from common.envs.callbacks import ActionHistogramCallback, SaveCallback, RolloutLogger, SneakyLogger
+from common.models.train_eval import (analyse_results, evaluate_models, train_model)
 from common.models.utils import save_model_with_metadata
 from common.scripts import has_nonempty_subdir, n_children, picker
 from RQ1.constants import EXPERIMENT_NAME_FORMAT, RQ1_EXPERIMENTS_DIR, TENSORBOARD_DIR
-from RQ1.parameters import get_environments, get_model
+from RQ1.parameters import get_environments, get_model, cleanup_tensorboard
 
 logging.info("Done.")
 
 def train():
 
-    train_env, _ = get_environments(shuffled=True)
-    save_freq = 50_000
-
     experiment_name = datetime.now().strftime(EXPERIMENT_NAME_FORMAT)
 
-    model = get_model(train_env, tensorboard_log=TENSORBOARD_DIR / experiment_name)
+    train_env, _ = get_environments(shuffled=True)
+    save_freq = train_env.episode_len
+
+    model = get_model(train_env, tb_name=experiment_name)
 
     experiment_dir = RQ1_EXPERIMENTS_DIR / experiment_name
     models_dir = experiment_dir / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
 
     callback = [SaveCallback(models_dir, save_freq=save_freq),
-                ActionHistogramCallback(train_env, log_freq=save_freq)]
-    train_model(model, train_env, train_episodes=200, callback=callback)
+                ActionHistogramCallback(train_env, log_freq=save_freq),
+                RolloutLogger(verbose=1),
+                SneakyLogger(verbose=1)]
+    train_model(model, train_env, train_episodes=20, callback=callback)
     save_model_with_metadata(model, models_dir / "model_final.zip")
 
 def evaluate(experiments_dir, limit = 10):
@@ -55,7 +59,7 @@ def evaluate(experiments_dir, limit = 10):
         "eval": eval_env,
     }
 
-    evaluate_models(models_dir, results_dir, eval_envs, eval_episodes=1, num_workers=4)
+    evaluate_models(models_dir, results_dir, eval_envs, eval_episodes=1, num_workers=3)
 
 def analyze(experiments_dir, limit = 10):
 
@@ -71,7 +75,7 @@ def analyze(experiments_dir, limit = 10):
     analyse_results(results_dir)
 
 if __name__ == "__main__":
-
+    cleanup_tensorboard()
     options = [
         ("train", train),
         ("eval", lambda: evaluate(RQ1_EXPERIMENTS_DIR, 10)),
