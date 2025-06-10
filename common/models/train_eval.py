@@ -5,6 +5,7 @@ from multiprocessing import Lock, Manager, Process
 from pathlib import Path
 from typing import Any, Callable
 
+import numpy as np
 import pandas as pd
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
@@ -14,7 +15,7 @@ from tqdm import tqdm
 from common.envs.callbacks import SaveOnEpisodeEndCallback
 from common.envs.forex_env import ForexEnv
 from common.models.analysis import analyse_finals, analyse_individual_run
-from common.models.dummy_models import DUMMY_MODELS
+from common.models.dummy_models import DUMMY_MODELS, random_model
 from common.models.utils import (load_model_with_metadata, save_model_with_metadata)
 from common.scripts import parallel_run
 
@@ -364,3 +365,32 @@ def run_model(model: BaseAlgorithm,
     if data_path is not None:
         logs_df.to_csv(data_path, index=False)
     return logs_df
+
+
+def empirical_rewards(env: ForexEnv) -> tuple[float, float]:
+    """
+    Runs the random model on the forex_env for a single episode (or some specified duration) to test mean and std rewards.
+    """
+
+    logging.info("Starting reward evaluation.")
+
+    model = random_model(env)
+
+    logs_df = run_model(
+        model=model,
+        env=env,
+        data_path=None,
+        total_steps=env.episode_len,
+        deterministic=False,
+        progress_bar=True,
+    )
+
+    rewards = logs_df["reward"][1:]  # Remove the null for first reward
+    reward_mean = np.mean(rewards)
+    reward_std = np.std(rewards)
+
+    env.reset() # Make sure environment is not impacted
+
+    logging.info(f"Finished reward evaluation. Reward mean: {reward_mean}, Reward std: {reward_std}.")
+
+    return reward_mean, reward_std
