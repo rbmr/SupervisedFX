@@ -2,6 +2,7 @@
 This file contains some simple scripts that can be useful anywhere during the project.
 """
 import json
+import math
 import os
 import random
 import signal
@@ -19,6 +20,29 @@ import requests
 
 K = TypeVar("K")
 V = TypeVar("V")
+
+class ZScoreNormalizer:
+
+    def __init__(self):
+        self.mean: float = 0.0
+        self.M2: float = 0.0
+        self.count: int = 0
+
+    def normalize(self, val):
+        """
+        Uses Welford's algorithm to normalize the value using the running mean and variance.
+        """
+        self.count += 1
+        delta = val - self.mean
+        self.mean += delta / self.count
+        delta2 = val - self.mean
+        self.M2 += delta * delta2
+        return (val - self.mean) / self.std()
+
+    def std(self):
+        var = self.M2 / (self.count - 1) if self.count > 1 else 1.0
+        return math.sqrt(var)
+
 
 def compute_sliding_window(arr: np.ndarray, window: int, fns: list[Callable[[np.ndarray], float]]):
     """
