@@ -99,9 +99,9 @@ def main():
 
     forex_data = ForexCandleData.load(source="dukascopy",
                                       instrument="EURUSD",
-                                      granularity=Timeframe.M30,
+                                      granularity=Timeframe.M15,
                                       start_time=RQ2_HYPERPARAMETERS_START_DATE,
-                                      end_time= RQ2_HYPERPARAMETERS_END_DATE_30M,
+                                      end_time= RQ2_HYPERPARAMETERS_END_DATE_15M,
                                     )
     
     # --- Feature Engineering ---
@@ -124,8 +124,8 @@ def main():
     temp_env = DummyVecEnv([lambda: train_env])
 
     experiment_funcs: List[Callable[[DummyVecEnv], DQN]] = [
-        # exprmt_aggresive,
-        # exprmt_balanced,
+        exprmt_aggresive,
+        exprmt_balanced,
         exprmt_cautious,
         exprmt_patient
     ]
@@ -139,7 +139,7 @@ def main():
             eval_env=eval_env,
             model=dqn_model,
             base_folder_path=RQ2_DIR,
-            experiment_group_name="[hyperparameters]-30m_data",
+            experiment_group_name="[hyperparameters]-15m_data",
             experiment_name=experiment_func.__name__,
             train_episodes=250,
             eval_episodes=1,
