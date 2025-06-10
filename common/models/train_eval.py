@@ -305,7 +305,7 @@ def run_model(model: BaseAlgorithm,
     # Function setup
     env = DummyVecEnv([lambda: env])
     steps = iter(tqdm(range(total_steps)) if progress_bar else range(total_steps))
-    logs_df = None
+    logs_df: None | pd.DataFrame = None
 
     # Start first episode
     obs = env.reset()
