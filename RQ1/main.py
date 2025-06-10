@@ -6,7 +6,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Avoid GPU detection if unneeded
 
 import logging
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(levelname)s] %(message)s')
 logging.info("Loading imports...")
 from datetime import datetime
 from pathlib import Path
@@ -23,11 +23,12 @@ logging.info("Done.")
 def train():
 
     experiment_name = datetime.now().strftime(EXPERIMENT_NAME_FORMAT)
+    tensorboard_log = TENSORBOARD_DIR / experiment_name
 
-    train_env, _ = get_environments(shuffled=True)
+    train_env, _ = get_environments(custom_reward=True, shuffled=True)
     save_freq = train_env.episode_len
 
-    model = get_model(train_env, tb_name=experiment_name)
+    model = get_model(train_env, tb_log=tensorboard_log)
 
     experiment_dir = RQ1_EXPERIMENTS_DIR / experiment_name
     models_dir = experiment_dir / "models"

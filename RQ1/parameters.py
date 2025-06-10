@@ -2,9 +2,10 @@ import logging
 import os
 import shutil
 from datetime import datetime
+from pathlib import Path
 
-from stable_baselines3 import A2C
-from stable_baselines3.common.logger import configure
+from stable_baselines3 import A2C, SAC
+from tdigest import TDigest
 from torch import nn
 
 from RQ1.constants import RQ1_DP_CACHE_DIR, TENSORBOARD_DIR
@@ -19,20 +20,20 @@ from common.data.feature_engineer import (FeatureEngineer, adx,
                                           stochastic_oscillator, complex_7d, complex_24h)
 from common.data.stepwise_feature_engineer import (StepwiseFeatureEngineer,
                                                    calculate_current_exposure)
-from common.envs.dp import get_dp_table_from_env, DPRewardFunction
+from common.envs.dp import get_dp_table_from_env
 from common.envs.forex_env import ForexEnv
-from common.models.train_eval import empirical_rewards
+from common.envs.rewards import TDigestNormalizer, DPRewardFunction, empirical_rewards
 
 
-def get_environments(shuffled: bool = False):
+def get_environments(custom_reward: bool = False, shuffled: bool = False):
 
     logging.info("Loading market data...")
     forex_candle_data = ForexCandleData.load(
         source="dukascopy",
         instrument="EURUSD",
-        granularity=Timeframe.M15,
-        start_time=datetime(2020, 1, 1, 22, 0, 0, 0),
-        end_time=datetime(2024, 12, 31, 21, 45, 0, 0),
+        granularity=Timeframe.H1,
+        start_time=datetime(2022, 1, 2, 22, 0, 0, 0),
+        end_time=datetime(2024, 12, 31, 21, 00, 0, 0),
     )
 
     logging.info("Setting up feature engineer...")
@@ -55,12 +56,23 @@ def get_environments(shuffled: bool = False):
         shuffled=shuffled,
     )
 
-    logging.info("Setting reward function...")
+    if custom_reward:
+        logging.info("Setting reward function...")
 
-    # Create and set custom reward function.
-    table = get_dp_table_from_env(train_env, RQ1_DP_CACHE_DIR, 7)
-    custom_reward_function = DPRewardFunction(table)
-    train_env.custom_reward_function = custom_reward_function
+        # Get db table.
+        table = get_dp_table_from_env(train_env, RQ1_DP_CACHE_DIR, 7)
+
+        # Generate TDigest
+        train_env.custom_reward_function = DPRewardFunction(table)
+        rewards = empirical_rewards(train_env)
+        shortened_rewards = rewards[::3]
+        logging.info(f"Taking a distributed {len(shortened_rewards)}")
+        digest = TDigest(delta = 0.05, K = 20)
+        digest.batch_update(shortened_rewards)
+        logging.info(f"This results in {len(digest)} clusters.")
+
+        # Create normalized rewards function
+        train_env.custom_reward_function = DPRewardFunction(table, normalizer=TDigestNormalizer(digest))
 
     logging.info("Environments created.")
 
@@ -159,11 +171,9 @@ def get_feature_engineer():
 
     return fe
 
-def get_model(env: ForexEnv, tb_name: str = None):
+def get_model(env: ForexEnv, tb_log: Path | None = None):
 
     logging.info("Creating model...")
-
-    tensorboard_log = TENSORBOARD_DIR / tb_name if tb_name else None
 
     def linear_lr(start: float, end: float):
         diff = start - end
@@ -171,32 +181,50 @@ def get_model(env: ForexEnv, tb_name: str = None):
             return diff * progress_remaining + end
         return func
 
-    policy_kwargs = dict(
-        activation_fn=nn.ReLU,
-        net_arch=dict(pi=[64, 64], vf=[64, 64]),
-    )
+    # a2c_hyperparams = dict(
+    #     policy="MlpPolicy",
+    #     env=env,
+    #     learning_rate=linear_lr(1e-3, 1e-5), # Rate of policy updates
+    #     n_steps=128,
+    #     gamma=1.0,
+    #     gae_lambda=0.95,
+    #     ent_coef=0.05,
+    #     vf_coef=0.5,
+    #     max_grad_norm=0.5,
+    #     rms_prop_eps=1e-5,
+    #     normalize_advantage=True,
+    #     policy_kwargs=dict(
+    #         activation_fn=nn.ReLU,
+    #         net_arch=dict(pi=[64, 64], vf=[64, 64]),
+    #     ),
+    #     verbose=0,
+    #     tensorboard_log=tb_log,
+    #     device="cpu",
+    # )
 
-    hyperparams = dict(
+    sac_hyperparams = dict(
         policy="MlpPolicy",
         env=env,
-        learning_rate=linear_lr(1e-3, 1e-5), # Rate of policy updates
-        n_steps=128,
-        gamma=1.0, # We just want maximal equity. No inflation.
-        gae_lambda=0.95,
-        ent_coef=0.04,
-        vf_coef=0.5,
-        max_grad_norm=0.8,
-        rms_prop_eps=1e-5,
-        normalize_advantage=True,
-        policy_kwargs=policy_kwargs,
+        learning_rate=7.3e-4,
+        buffer_size=1_000_000,  # Size of the replay buffer
+        learning_starts=1000,  # Number of steps to collect before learning starts
+        batch_size=256,
+        tau=0.005,  # Soft update coefficient
+        gamma=0.99,  # Discount factor for future rewards
+        ent_coef='auto',  # Automatic entropy tuning
+        gradient_steps=-1, # Use a value of -1 to match the number of steps taken in the environment
+        policy_kwargs=dict(
+            activation_fn=nn.ReLU,
+            net_arch=dict(pi=[128, 128], vf=[128, 128]),
+        ),
         verbose=0,
-        tensorboard_log=tensorboard_log,
+        tensorboard_log=str(tb_log) if tb_log is not None else None,
         device="cpu",
     )
-    if tensorboard_log is not None:
-        logging.info(f"Logging to tensorboard at {tensorboard_log}")
+    if tb_log is not None:
+        logging.info(f"Logging to tensorboard at {tb_log}")
 
-    model = A2C(**hyperparams)
+    model = SAC(**sac_hyperparams)
 
     logging.info("Model created.")
 
@@ -204,9 +232,7 @@ def get_model(env: ForexEnv, tb_name: str = None):
 
 def cleanup_tensorboard():
 
-    run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_dir = os.path.join(TENSORBOARD_DIR, run_id)
-    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(TENSORBOARD_DIR, exist_ok=True)
 
     experiments = TENSORBOARD_DIR.iterdir()
     experiments = list(filter(lambda f: not f.name.startswith("_") and f.is_dir(), experiments))
