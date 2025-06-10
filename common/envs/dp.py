@@ -19,6 +19,7 @@ from tqdm import trange
 from common.constants import AgentDataCol, MarketDataCol
 from common.envs.forex_env import ForexEnv
 from common.envs.trade import calculate_equity, execute_trade, reverse_equity
+from common.scripts import ZScoreNormalizer
 
 DATA_HASH_LENGTH = 16
 
@@ -271,7 +272,7 @@ def interp(v_row: np.ndarray, exposure: float, n_actions: int):
 
 class DPRewardFunction:
 
-    def __init__(self, table: DPTable, lam: int = 0.1, alpha_mu: float = 0.001, alpha_std: float = 0.001, clip: float = 5.0):
+    def __init__(self, table: DPTable):
         # Reward computation
         self.v = table.value_table
         self.pi = table.policy_table
@@ -280,14 +281,7 @@ class DPRewardFunction:
         self.actions = get_exposure_levels(table.n_actions)
         self.T = self.v.shape[0]
         self.c = table.transaction_cost_pct
-        self.lam = lam # penalty weight
-
-        # Z-score tracking (normalization)
-        self.mu = 0.0
-        self.var = 1.0  # Track variance, not std directly (for numerical stability)
-        self.alpha_mu = alpha_mu
-        self.alpha_std = alpha_std
-        self.clip = clip
+        self.normalizer = ZScoreNormalizer()
 
     def __call__(self, env) -> float:
         t = env.n_steps
@@ -307,24 +301,28 @@ class DPRewardFunction:
         true_log_return = np.log(next_equity / curr_equity)
 
         # Interpolated DP expected cumulative log-equity from current/next state
-        exp_next = interp(self.v[t+1], next_exposure, self.n_actions)
-        exp_curr = interp(self.v[t], curr_exposure, self.n_actions)
+        exp_log_next = interp(self.v[t+1], next_exposure, self.n_actions)
+        exp_log_curr = interp(self.v[t], curr_exposure, self.n_actions)
 
         # Baseline shaped reward (potential-based shaping)
-        r = true_log_return + exp_next - exp_curr
+        r = true_log_return + exp_log_next - exp_log_curr
+        r_log = np.sign(r) * np.log1p(np.abs(r))  # Compress spikes
 
-        # Downside penalty: Difference to the worst DP action.
-        i_curr = get_exposure_idx(curr_exposure, self.n_actions)
-        q_dp = true_log_return + exp_next
-        q_min_curr = self.q_min[t, i_curr]
-        r += self.lam * (q_dp - q_min_curr)
+        # Z-score Normalization
+        normalized_r = self.normalizer.normalize(r_log)
 
-        # Update running mean and variance
-        delta = r - self.mu
-        self.mu += self.alpha_mu * delta
-        self.var = (1 - self.alpha_std) * self.var + self.alpha_std * delta**2
-        std = np.sqrt(self.var + 1e-8)
+        # Clipping
+        final_r = np.clip(normalized_r, -0.75, 0.75) # clipping is chosen empirically
 
-        # Z-score scaling and clipping
-        r = (r - self.mu) / std
-        return np.clip(r, -self.clip, self.clip)
+        # Log to sneaky buffer if it is being used
+        sneaky_buf: dict = getattr(env, "sneaky_buffer", None)
+        if sneaky_buf is not None:
+            sneaky_buf.setdefault("reward/raw", []).append(r)
+            sneaky_buf.setdefault("reward/log", []).append(r_log)
+            sneaky_buf.setdefault("reward/normalized", []).append(normalized_r)
+            sneaky_buf.setdefault("reward/final", []).append(final_r)
+            sneaky_buf.setdefault("reward/running_log_mean", []).append(self.normalizer.mean)
+            sneaky_buf.setdefault("reward/running_log_M2", []).append(self.normalizer.std())
+        return final_r
+
+
