@@ -13,6 +13,17 @@ files = [
 ]
 
 [[package]]
+name = "accumulation-tree"
+version = "0.6.4"
+description = "Red/black tree with support for fast accumulation of values in a key range"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "accumulation_tree-0.6.4.tar.gz", hash = "sha256:5f907667e4106b5ba140b6b871e1902eb2a93d429b92f8a9f7ddb2bee7704334"},
+]
+
+[[package]]
 name = "aiofiles"
 version = "22.1.0"
 description = "File support for asyncio."
@@ -3716,6 +3727,17 @@ files = [
 ]
 
 [[package]]
+name = "pyudorandom"
+version = "1.0.0"
+description = "Generate pseudorandom numbers by using algebra"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "pyudorandom-1.0.0.tar.gz", hash = "sha256:f30a093a0170c15f9c7f87eb29f71f0f5fde995528b7c6dc4606d389e8c37755"},
+]
+
+[[package]]
 name = "pywin32"
 version = "310"
 description = "Python for Window Extensions"
@@ -4466,6 +4488,26 @@ files = [
 [package.dependencies]
 numpy = "*"
 pandas = "*"
+
+[[package]]
+name = "tdigest"
+version = "0.5.2.2"
+description = "T-Digest data structure"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "tdigest-0.5.2.2-py2.py3-none-any.whl", hash = "sha256:e32ff6ab62e4defdb93b816c831080d94dfa1efb68a9fa1e7976c237fa9375cb"},
+    {file = "tdigest-0.5.2.2-py3-none-any.whl", hash = "sha256:dd25f8d6e6be002192bba9e4b8c16491d36c10b389f50637818603d1f67c6fb2"},
+    {file = "tdigest-0.5.2.2.tar.gz", hash = "sha256:8deffc8bac024761786f43d9444e3b6c91008cd690323e051f068820a7364d0e"},
+]
+
+[package.dependencies]
+accumulation-tree = "*"
+pyudorandom = "*"
+
+[package.extras]
+tests = ["numpy", "pytest", "pytest-cov", "pytest-timeout"]
 
 [[package]]
 name = "tenacity"
@@ -5357,4 +5399,4 @@ test = ["mypy", "pre-commit", "pytest", "pytest-asyncio", "websockets (>=10.0)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "754a841b379b6b2c25c2aaa1763e15389dc096bb85d8605d1f5e6268d7ddabef"
+content-hash = "79c03b6f2b0931865d07057331600cdf9ecd7daed7c11eeb282aca313bbf6695"
