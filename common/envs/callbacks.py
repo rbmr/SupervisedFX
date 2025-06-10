@@ -80,3 +80,46 @@ class ActionHistogramCallback(BaseCallback):
             bar = f"{render_horz_bar(height)} ({count})"
             logging.info(f"{label}: {bar}")
         return True
+
+class SneakyLogger(BaseCallback):
+    """
+    Adds a buffer to the training environment of which all values are logged at the end of each rollout.
+    """
+
+    def _on_rollout_start(self):
+        raw_env = self.training_env.envs[0] #type: ignore
+        raw_env.sneaky_buffer = {}
+
+    def _on_step(self) -> bool:
+        return True
+
+    def _on_rollout_end(self):
+        raw_env = self.training_env.envs[0] #type: ignore
+        for key, values in raw_env.sneaky_buffer.items():
+            if len(values) > 1:
+                self.logger.record(f"{key}_mean", np.mean(values))
+                self.logger.record(f"{key}_std", np.std(values))
+        raw_env.sneaky_buffer.clear()
+
+class RolloutLogger(BaseCallback):
+    """
+    Logs all the rollout values that are collected by default.
+    """
+    def _on_step(self) -> bool:
+        return True
+
+    def _on_rollout_end(self):
+        # Access the rollout buffer
+        buffer = self.model.rollout_buffer
+
+        self.logger.record("rollout/adv_mean", np.mean(buffer.advantages))
+        self.logger.record("rollout/adv_std", np.std(buffer.advantages))
+
+        self.logger.record("rollout/return_mean", np.mean(buffer.returns))
+        self.logger.record("rollout/return_std", np.std(buffer.returns))
+
+        self.logger.record("rollout/value_mean", np.mean(buffer.values))
+        self.logger.record("rollout/value_std", np.std(buffer.values))
+
+        self.logger.record("rollout/log_prob_mean", np.mean(buffer.log_probs))
+        self.logger.record("rollout/log_prob_std", np.std(buffer.log_probs))
