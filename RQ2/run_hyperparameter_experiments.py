@@ -39,7 +39,7 @@ def main():
         agent_feature_engineer=stepwise_feature_engineer,
         initial_capital=INITIAL_CAPITAL,
         transaction_cost_pct=TRANSACTION_COST_PCT,
-        n_actions=1,
+        n_actions=3,
         custom_reward_function=percentage_return
         )
     logging.info("Environments created.")

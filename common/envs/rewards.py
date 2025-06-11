@@ -1,16 +1,13 @@
 import logging
-import math
-from abc import ABC, abstractmethod
-from typing import Callable
 
 import numpy as np
-from tdigest import TDigest
 
 from common.constants import AgentDataCol
-from common.envs.dp import interp, get_exposure_levels, DPTable
+from common.envs.dp import interp, get_bins, DPTable
 from common.envs.forex_env import ForexEnv
-from common.models.dummy_models import hold_model, DummyModelFactory
+from common.models.dummy_models import cash_model, DummyModelFactory
 from common.models.train_eval import run_model
+
 
 def equity_change(env: ForexEnv) -> float:
     """
@@ -62,7 +59,7 @@ def empirical_rewards(env: ForexEnv, models: list[DummyModelFactory] | None = No
     logging.info("Starting reward evaluation.")
 
     if models is None:
-        models = [hold_model]
+        models = [cash_model]
 
     all_rewards = np.zeros((0,), dtype=np.int32)
 
@@ -96,7 +93,7 @@ class DPRewardFunction:
         self.pi = table.policy_table
         self.q_min = table.q_min_table
         self.n_actions = table.n_actions
-        self.actions = get_exposure_levels(table.n_actions)
+        self.actions = get_bins(table.n_actions)
         self.T = self.v.shape[0]
         self.c = table.transaction_cost_pct
         step_diffs = (self.v - self.q_min)[:-1].flatten() # Exclude terminal state, and flatten

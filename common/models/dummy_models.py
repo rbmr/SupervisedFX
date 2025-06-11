@@ -1,14 +1,12 @@
 from typing import Any, Callable, Union
 
-import logging
 import numpy as np
 from gymnasium import spaces
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.policies import BasePolicy
 
-from common.constants import PROJECT_DIR, DP_CACHE_DIR
-from common.envs.dp import get_optimal_action, get_exposure_idx, get_dp_table_from_env, get_optimal_action_fn
-from common.envs.forex_env import ForexEnv, AgentDataCol
+from common.envs.dp import get_dp_table_from_env, get_optimal_action_fn
+from common.envs.forex_env import ForexEnv
 
 
 def constant_fn(x: Any) -> Callable[[Any], Any]:
@@ -57,33 +55,46 @@ class DummyModel(BaseAlgorithm):
         raise NotImplementedError("DummyModel has no parameters.")
 
 def short_model(env: ForexEnv) -> DummyModel:
-    action_space = env.action_space
-    if isinstance(action_space, spaces.Discrete):
+    if env.action_low > 0:
+        raise ValueError("short model needs a short position in the action space.")
+    if isinstance(env.action_space, spaces.Discrete):
         return DummyModel(constant_fn(0))
-    if isinstance(action_space, spaces.Box):
-        return DummyModel(constant_fn(action_space.low))
+    if isinstance(env.action_space, spaces.Box):
+        return DummyModel(constant_fn(env.action_space.low))
     raise TypeError("Invalid action space.")
 
 def long_model(env: ForexEnv) -> DummyModel:
-    action_space = env.action_space
-    if isinstance(action_space, spaces.Discrete):
-        return DummyModel(constant_fn(action_space.n - 1))
-    if isinstance(action_space, spaces.Box):
-        return DummyModel(constant_fn(action_space.high))
+    if env.action_high < 0 or env.n_actions == 1 and env.action_low < 0:
+        raise ValueError("long model needs a long position in the action space.")
+    if isinstance(env.action_space, spaces.Discrete):
+        return DummyModel(constant_fn(env.action_space.n - 1))
+    if isinstance(env.action_space, spaces.Box):
+        return DummyModel(constant_fn(env.action_space.high))
     raise TypeError("Invalid action space.")
 
-def hold_model(env: ForexEnv) -> DummyModel:
-    action_space = env.action_space
-    if isinstance(action_space, spaces.Discrete):
-        return DummyModel(constant_fn(action_space.n // 2))
-    if isinstance(action_space, spaces.Box):
-        middle = (action_space.high - action_space.low) / 2
-        return DummyModel(constant_fn(middle))
+def is_zero_a_step(low: float, high: float, n: int) -> bool:
+    assert n > 0
+    assert low < high
+    if n == 1:
+        return low == 0
+    step = (high - low) / (n - 1)
+    k = (0 - low) / step
+    round_k = round(k)
+    return abs(k - round_k) < 1e-9 and 0 <= round_k < n
+
+def cash_model(env: ForexEnv) -> DummyModel:
+    if isinstance(env.action_space, spaces.Discrete):
+        if not is_zero_a_step(env.action_low, env.action_high, env.n_actions):
+            raise ValueError("cash model needs cash in the action space.")
+        return DummyModel(constant_fn(0.0))
+    if isinstance(env.action_space, spaces.Box):
+        if env.action_space.low > 0.0 or env.action_space.high < 0.0:
+            raise ValueError("cash model needs cash in the action space.")
+        return DummyModel(constant_fn(0.0))
     raise TypeError("Invalid action space.")
 
 def random_model(env: ForexEnv) -> DummyModel:
-    action_space = env.action_space
-    return DummyModel(lambda _: action_space.sample())
+    return DummyModel(lambda _: env.action_space.sample())
 
 def custom_comparison_model(env: ForexEnv) -> DummyModel:
     """
@@ -115,7 +126,6 @@ def custom_comparison_model(env: ForexEnv) -> DummyModel:
             if isinstance(action_space, spaces.Box):
                 return action_space.low
         raise TypeError("Invalid action space.")
-            
 
     return DummyModel(pred_fn=prediction_value)
 
@@ -125,4 +135,4 @@ def dp_perfect_model(env: ForexEnv) -> DummyModel:
     return DummyModel(pred_fn=get_optimal_action_fn(dp_table, env))
 
 DummyModelFactory = Callable[[ForexEnv], DummyModel]
-DUMMY_MODELS: list[DummyModelFactory] = [short_model, long_model, hold_model, random_model]
+DUMMY_MODELS: list[DummyModelFactory] = [short_model, long_model, cash_model, random_model]

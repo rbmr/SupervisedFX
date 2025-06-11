@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Optional
+from typing import Callable, Optional, Self
 
 import gymnasium as gym
 import numpy as np
@@ -23,9 +23,9 @@ class ForexEnv(gym.Env):
         agent_feature_engineer: StepwiseFeatureEngineer,
         initial_capital: float = 10000.0,
         transaction_cost_pct: float = 0.0,
-        n_actions: int = 1,
-        allow_short: bool = True,
-        allow_long: bool = True,
+        n_actions: int = 3,
+        action_low: float = -1.0,
+        action_high: float = 1.0,
         custom_reward_function: Optional[Callable[['ForexEnv'], float]] = None,
         shuffled = False,
     ) -> tuple['ForexEnv', 'ForexEnv']:
@@ -33,6 +33,7 @@ class ForexEnv(gym.Env):
         Creates training and evaluation environments from ForexCandleData and FeatureEngineers.
         Splits the data into 70% training and 30% evaluation.
         """
+        # Validate input
         if split_ratio <= 0.0 or split_ratio >= 1.0:
             raise ValueError(f"split_ratio must be between 0.0 and 1.0, was {split_ratio}. For 70% training, use 0.7.")
         if not isinstance(forex_candle_data, ForexCandleData):
@@ -64,8 +65,8 @@ class ForexEnv(gym.Env):
             initial_capital=initial_capital,
             transaction_cost_pct=transaction_cost_pct,
             n_actions=n_actions,
-            allow_short=allow_short,
-            allow_long=allow_long,
+            action_low=action_low,
+            action_high=action_high,
             custom_reward_function=custom_reward_function,
             shuffled=shuffled,
         )
@@ -78,8 +79,8 @@ class ForexEnv(gym.Env):
             initial_capital=initial_capital,
             transaction_cost_pct=transaction_cost_pct,
             n_actions=n_actions,
-            allow_short=allow_short,
-            allow_long=allow_long,
+            action_low=action_low,
+            action_high=action_high,
             custom_reward_function=custom_reward_function,
             shuffled=shuffled,
         )
@@ -92,17 +93,19 @@ class ForexEnv(gym.Env):
                  agent_feature_engineer: StepwiseFeatureEngineer,
                  initial_capital: float = 10_000.0,
                  transaction_cost_pct: float = 0.0,
-                 n_actions: int = 1,
-                 allow_short: bool = True,
-                 allow_long: bool = True,
-                 custom_reward_function: Callable[['ForexEnv'], float] | None = None,
+                 n_actions: int = 3,
+                 action_low: float = -1.0,
+                 action_high: float = 1.0,
+                 custom_reward_function: Callable[[Self], float] | None = None,
                  shuffled: bool = False,
                  ):
         super(ForexEnv, self).__init__()
 
         # Validate input
-        if not allow_short and not allow_long:
-            raise ValueError(f"either allow_short or allow_long must be True, no simulation should allow only holding.")
+        if action_low > action_high:
+            raise ValueError(f"action_low must be less than or equal to action_high, was low: {action_low}, high: {action_high}.")
+        if action_low < -1.0 or action_high > 1.0:
+            raise ValueError(f"actions must be within [-1, 1], action space was [{action_low}, {action_high}]")
         if not isinstance(market_data_df, pd.DataFrame):
             raise ValueError(f"market_data_df must be a pandas DataFrame, was {type(market_data_df)}.")
         if not isinstance(market_feature_df, pd.DataFrame):
@@ -117,7 +120,7 @@ class ForexEnv(gym.Env):
         if transaction_cost_pct < 0.0 or transaction_cost_pct > 1.0:
             raise ValueError(f"transaction_cost_pct must be between 0.0 and 1.0, was {transaction_cost_pct}. For 0.1%, use 0.001.")
         if n_actions < 0:
-            raise ValueError(f"n_actions must be >= 0. If n_actions == 0, then the action space is continuous between -1 and 1.")
+            raise ValueError(f"n_actions must be >= 0. If n_actions == 0, then the action space is continuous.")
 
         # Environment parameters
         self.initial_capital = initial_capital
@@ -176,23 +179,25 @@ class ForexEnv(gym.Env):
         assert self.agent_data.shape == (self.data_len, len(AgentDataCol))
 
         # Action space
+        self.action_low = action_low
+        self.action_high = action_high
         self.n_actions = n_actions
+        self.action_range = self.action_high - self.action_low # Cache value
         if self.n_actions == 0:
-            logging.info(f"n_actions is zero, using continuous action space")
-            low = -1.0 if allow_short else 0.0
-            high = 1.0 if allow_long else 0.0
-            self.action_space = spaces.Box(low=low, high=high, shape=(1,), dtype=np.float32)
+            logging.info(f"n_actions is zero, using continuous action space, over the range [{self.action_low}, {self.action_high}]")
+            self.action_space = spaces.Box(low=self.action_low, high=self.action_high, shape=(1,), dtype=np.float32)
+        elif self.n_actions == 1:
+            logging.warning(f"n_actions is one, the action will always be {self.action_low}")
+            self.action_space = spaces.Discrete(self.n_actions)
         else:
-            self.short_actions = n_actions * allow_short
-            long_actions = n_actions * allow_short
-            logging.info(f"n_actions is larger than zero, using discrete action space with {long_actions} action(s) for long, {self.short_actions} for short, and 1 for no_participation.")
-            self.action_space = spaces.Discrete(self.short_actions + 1 + long_actions)
+            logging.info(f"n_actions is larger than one, using discrete action space with {n_actions} actions, evenly distributed over [{self.action_low}, {self.action_high}]")
+            self.action_space = spaces.Discrete(self.n_actions)
 
         # Define observation space
         num_market_features = len(market_feature_df.columns)
         num_state_features = self.agent_feature_engineer.num_of_features()
         observation_space_shape = num_market_features + num_state_features
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(observation_space_shape,), dtype=np.float32)   
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(observation_space_shape,), dtype=np.float32)
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -280,7 +285,9 @@ class ForexEnv(gym.Env):
         """
         Standardizes actions by converting them to the target exposure.
         """
-        action = action.item()
-        if self.n_actions == 0:
+        action = np.asarray(action).item() # ensure scalar float
+        if self.n_actions == 0: # Actions are already continuous
             return action
-        return (action - self.short_actions) / self.n_actions
+        if self.n_actions == 1: # Prevent div by zero
+            return self.action_low
+        return action / (self.n_actions - 1) * self.action_range + self.action_low

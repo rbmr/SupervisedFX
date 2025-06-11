@@ -112,7 +112,7 @@ def get_train_env():
         agent_feature_engineer=agent_feature_engineer,
         initial_capital=10_000.0,
         transaction_cost_pct=0.005,
-        n_actions=0, # [-1, 1]
+        n_actions=0,
         custom_reward_function=None, # None for now, set later
         shuffled=True,
     )
@@ -142,7 +142,7 @@ def get_eval_envs():
         agent_feature_engineer=agent_feature_engineer,
         initial_capital=10_000.0,
         transaction_cost_pct=0.0,
-        n_actions=0, # [-1, 1]
+        n_actions=0,
         custom_reward_function=None, # None for now, set later
         shuffled=False,
     )
