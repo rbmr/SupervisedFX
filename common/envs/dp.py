@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from tqdm import trange
 
-from common.constants import MarketDataCol
+from common.constants import MarketDataCol, DP_CACHE_DIR
 from common.envs.forex_env import ForexEnv
 from common.envs.trade import calculate_equity, execute_trade, reverse_equity
 
@@ -75,7 +75,7 @@ def get_optimal_action(table: DPTable, t: int, current_exposure: float) -> float
     action_idx = table.policy_table[t, exposure_idx]
     return get_exposure_val(action_idx, table.n_actions) # type: ignore
 
-def get_dp_table_from_env(env: ForexEnv, cache_dir, n_actions: int | None = None) -> DPTable:
+def get_dp_table_from_env(env: ForexEnv, cache_dir = DP_CACHE_DIR, n_actions: int | None = None) -> DPTable:
     if n_actions is None:
         n_actions = env.n_actions if env.n_actions > 0 else 7
     return get_dp_table(
