@@ -43,7 +43,7 @@ def get_feature_engineers() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
     def feat_vwap(df):
         vwap(df)
         as_ratio_of_other_column(df, 'vwap_14', 'close_bid')
-        history_lookback(df, looky_backy, ["vwap_14"])
+        history_lookback(df, looky_backy, ["sar"])
     feature_engineer.add(feat_vwap) # 1 * looky_backy
 
     # -------------------------------- #
@@ -55,12 +55,11 @@ def get_feature_engineers() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
         remove_columns(df, ["macd_signal", "macd"])
         as_z_score(df, 'macd_hist', window=50)
         history_lookback(df, looky_backy, ["macd_hist"])
-    feature_engineer.add(feat_macd) # 1 * looky_backy
+    feature_engineer.add(feat_macd) # 1
 
     def feat_mfi(df):
         mfi(df)
         as_min_max_fixed(df, 'mfi_14', 0, 100)
-        history_lookback(df, looky_backy, ["mfi_14"])
     feature_engineer.add(feat_mfi) # 1 * looky_backy
 
     # ---------------------------------- #
@@ -100,9 +99,9 @@ def main():
 
     forex_data = ForexCandleData.load(source="dukascopy",
                                       instrument="EURUSD",
-                                      granularity=Timeframe.M30,
+                                      granularity=Timeframe.M15,
                                       start_time=RQ2_HYPERPARAMETERS_START_DATE,
-                                      end_time= RQ2_HYPERPARAMETERS_END_DATE_30M,
+                                      end_time= RQ2_HYPERPARAMETERS_END_DATE_15M,
                                     )
     
     # --- Feature Engineering ---
@@ -125,8 +124,8 @@ def main():
     temp_env = DummyVecEnv([lambda: train_env])
 
     experiment_funcs: List[Callable[[DummyVecEnv], DQN]] = [
-        # exprmt_aggresive,
-        # exprmt_balanced,
+        exprmt_aggresive,
+        exprmt_balanced,
         exprmt_cautious,
         exprmt_patient
     ]
@@ -140,7 +139,7 @@ def main():
             eval_env=eval_env,
             model=dqn_model,
             base_folder_path=RQ2_DIR,
-            experiment_group_name="[hyperparameters]-30m_data",
+            experiment_group_name="[hyperparameters]-15m_data",
             experiment_name=experiment_func.__name__,
             train_episodes=250,
             eval_episodes=1,
