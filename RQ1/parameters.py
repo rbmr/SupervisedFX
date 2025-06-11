@@ -17,31 +17,122 @@ from common.data.feature_engineer import (FeatureEngineer, adx,
                                           atr, bollinger_bands, cci,
                                           copy_column, ema,
                                           historic_pct_change, macd, rsi,
-                                          stochastic_oscillator, complex_7d, complex_24h)
+                                          stochastic_oscillator, complex_7d, complex_24h, history_lookback,
+                                          remove_ohlcv)
 from common.data.stepwise_feature_engineer import (StepwiseFeatureEngineer,
-                                                   calculate_current_exposure)
+                                                   calculate_current_exposure, duration_of_current_trade)
 from common.envs.dp import get_dp_table_from_env
 from common.envs.forex_env import ForexEnv
 from common.envs.rewards import TDigestNormalizer, DPRewardFunction, empirical_rewards
 
 
-def get_environments(custom_reward: bool = False, shuffled: bool = False):
+def get_train_model(env: ForexEnv, tb_log: Path | None = None):
 
+    logging.info("Creating model...")
+
+    # def linear_lr(start: float, end: float):
+    #     diff = start - end
+    #     def func(progress_remaining):
+    #         return diff * progress_remaining + end
+    #     return func
+
+    # a2c_hyperparams = dict(
+    #     policy="MlpPolicy",
+    #     env=env,
+    #     learning_rate=linear_lr(1e-3, 1e-5), # Rate of policy updates
+    #     n_steps=128,
+    #     gamma=1.0,
+    #     gae_lambda=0.95,
+    #     ent_coef=0.05,
+    #     vf_coef=0.5,
+    #     max_grad_norm=0.5,
+    #     rms_prop_eps=1e-5,
+    #     normalize_advantage=True,
+    #     policy_kwargs=dict(
+    #         activation_fn=nn.ReLU,
+    #         net_arch=dict(pi=[64, 64], vf=[64, 64]),
+    #     ),
+    #     verbose=0,
+    #     tensorboard_log=tb_log,
+    #     device="cpu",
+    # )
+
+    sac_hyperparams = dict(
+        policy="MlpPolicy",
+        env=env,
+        learning_rate=3.e-4,
+        buffer_size=200_000,
+        learning_starts=1000,
+        batch_size=256,
+        tau=0.005,
+        gamma=0.99,
+        ent_coef='auto',
+        gradient_steps=1,
+        train_freq=32,
+        policy_kwargs=dict(
+            activation_fn=nn.ReLU,
+            net_arch=dict(pi=[64, 64], qf=[64, 64]),
+        ),
+        verbose=0,
+        tensorboard_log=str(tb_log) if tb_log is not None else None,
+        device="cpu",
+    )
+    if tb_log is not None:
+        logging.info(f"Logging to tensorboard at {tb_log}")
+
+    model = SAC(**sac_hyperparams)
+    model.hyperparams = sac_hyperparams
+
+    logging.info("Model created.")
+
+    return model
+
+def get_data():
     logging.info("Loading market data...")
-    forex_candle_data = ForexCandleData.load(
+    return ForexCandleData.load(
         source="dukascopy",
         instrument="EURUSD",
-        granularity=Timeframe.H1,
-        start_time=datetime(2022, 1, 2, 22, 0, 0, 0),
-        end_time=datetime(2024, 12, 31, 21, 00, 0, 0),
+        granularity=Timeframe.M30,
+        start_time=datetime(2020, 1, 1, 22, 0, 0, 0),
+        end_time=datetime(2023, 12, 29, 21, 30, 0, 0),
     )
 
-    logging.info("Setting up feature engineer...")
-    market_feature_engineer = get_feature_engineer()
+def get_train_env():
 
-    logging.info("Setting up stepwise feature engineer...")
-    agent_feature_engineer = StepwiseFeatureEngineer()
-    agent_feature_engineer.add(["current_exposure"], calculate_current_exposure)
+    forex_candle_data = get_data()
+
+    logging.info("Setting up feature engineer...")
+    market_feature_engineer, agent_feature_engineer = get_feature_engineers()
+
+    logging.info("Creating environments...")
+    train_env, eval_env = ForexEnv.create_train_eval_envs(
+        split_ratio=0.7,
+        forex_candle_data=forex_candle_data,
+        market_feature_engineer=market_feature_engineer,
+        agent_feature_engineer=agent_feature_engineer,
+        initial_capital=10_000.0,
+        transaction_cost_pct=0.005,
+        n_actions=0, # [-1, 1]
+        custom_reward_function=None, # None for now, set later
+        shuffled=True,
+    )
+
+    logging.info("Setting reward function...")
+
+    # Get db table.
+    table = get_dp_table_from_env(train_env, RQ1_DP_CACHE_DIR, 7)
+    train_env.custom_reward_function = DPRewardFunction(table)
+
+    logging.info("Environments created.")
+
+    return train_env
+
+def get_eval_envs():
+
+    forex_candle_data = get_data()
+
+    logging.info("Setting up feature engineers...")
+    market_feature_engineer, agent_feature_engineer = get_feature_engineers()
 
     logging.info("Creating environments...")
     train_env, eval_env = ForexEnv.create_train_eval_envs(
@@ -53,32 +144,15 @@ def get_environments(custom_reward: bool = False, shuffled: bool = False):
         transaction_cost_pct=0.0,
         n_actions=0, # [-1, 1]
         custom_reward_function=None, # None for now, set later
-        shuffled=shuffled,
+        shuffled=False,
     )
 
-    if custom_reward:
-        logging.info("Setting reward function...")
+    return {
+        "train": train_env,
+        "eval": eval_env,
+    }
 
-        # Get db table.
-        table = get_dp_table_from_env(train_env, RQ1_DP_CACHE_DIR, 7)
-
-        # Generate TDigest
-        train_env.custom_reward_function = DPRewardFunction(table)
-        rewards = empirical_rewards(train_env)
-        shortened_rewards = rewards[::3]
-        logging.info(f"Taking a distributed {len(shortened_rewards)}")
-        digest = TDigest(delta = 0.05, K = 20)
-        digest.batch_update(shortened_rewards)
-        logging.info(f"This results in {len(digest)} clusters.")
-
-        # Create normalized rewards function
-        train_env.custom_reward_function = DPRewardFunction(table, normalizer=TDigestNormalizer(digest))
-
-    logging.info("Environments created.")
-
-    return train_env, eval_env
-
-def get_feature_engineer():
+def get_feature_engineers():
     """
     Returns a FeatureEngineer that constructs exactly the four groups of features used
     in Zhang et al. (2019):
@@ -169,66 +243,16 @@ def get_feature_engineer():
     fe.add(complex_7d)
     fe.add(complex_24h)
 
-    return fe
+    # 6) Add small lookback
+    fe.add(remove_ohlcv)
+    fe.add(lambda df: history_lookback(df, 4))
 
-def get_model(env: ForexEnv, tb_log: Path | None = None):
+    # Setup stepwise feature engineer
+    sfe = StepwiseFeatureEngineer()
+    sfe.add(["current_exposure"], calculate_current_exposure)
+    sfe.add(['current_trade_length'], duration_of_current_trade) # 1
 
-    logging.info("Creating model...")
-
-    def linear_lr(start: float, end: float):
-        diff = start - end
-        def func(progress_remaining):
-            return diff * progress_remaining + end
-        return func
-
-    # a2c_hyperparams = dict(
-    #     policy="MlpPolicy",
-    #     env=env,
-    #     learning_rate=linear_lr(1e-3, 1e-5), # Rate of policy updates
-    #     n_steps=128,
-    #     gamma=1.0,
-    #     gae_lambda=0.95,
-    #     ent_coef=0.05,
-    #     vf_coef=0.5,
-    #     max_grad_norm=0.5,
-    #     rms_prop_eps=1e-5,
-    #     normalize_advantage=True,
-    #     policy_kwargs=dict(
-    #         activation_fn=nn.ReLU,
-    #         net_arch=dict(pi=[64, 64], vf=[64, 64]),
-    #     ),
-    #     verbose=0,
-    #     tensorboard_log=tb_log,
-    #     device="cpu",
-    # )
-
-    sac_hyperparams = dict(
-        policy="MlpPolicy",
-        env=env,
-        learning_rate=7.3e-4,
-        buffer_size=1_000_000,  # Size of the replay buffer
-        learning_starts=1000,  # Number of steps to collect before learning starts
-        batch_size=256,
-        tau=0.005,  # Soft update coefficient
-        gamma=0.99,  # Discount factor for future rewards
-        ent_coef='auto',  # Automatic entropy tuning
-        gradient_steps=-1, # Use a value of -1 to match the number of steps taken in the environment
-        policy_kwargs=dict(
-            activation_fn=nn.ReLU,
-            net_arch=dict(pi=[128, 128], vf=[128, 128]),
-        ),
-        verbose=0,
-        tensorboard_log=str(tb_log) if tb_log is not None else None,
-        device="cpu",
-    )
-    if tb_log is not None:
-        logging.info(f"Logging to tensorboard at {tb_log}")
-
-    model = SAC(**sac_hyperparams)
-
-    logging.info("Model created.")
-
-    return model
+    return fe, sfe
 
 def cleanup_tensorboard():
 
