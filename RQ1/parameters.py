@@ -4,11 +4,11 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from stable_baselines3 import A2C, SAC
-from tdigest import TDigest
+from stable_baselines3 import SAC
 from torch import nn
 
-from RQ1.constants import RQ1_DP_CACHE_DIR, TENSORBOARD_DIR
+from RQ1.constants import TENSORBOARD_DIR
+from common.constants import DP_CACHE_DIR
 from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import (FeatureEngineer, adx,
                                           as_min_max_fixed, as_min_max_window,
@@ -23,7 +23,7 @@ from common.data.stepwise_feature_engineer import (StepwiseFeatureEngineer,
                                                    calculate_current_exposure, duration_of_current_trade)
 from common.envs.dp import get_dp_table_from_env
 from common.envs.forex_env import ForexEnv
-from common.envs.rewards import TDigestNormalizer, DPRewardFunction, empirical_rewards
+from common.envs.rewards import DPRewardFunction
 
 
 def get_train_model(env: ForexEnv, tb_log: Path | None = None):
@@ -120,7 +120,7 @@ def get_train_env():
     logging.info("Setting reward function...")
 
     # Get db table.
-    table = get_dp_table_from_env(train_env, RQ1_DP_CACHE_DIR, 7)
+    table = get_dp_table_from_env(train_env, DP_CACHE_DIR, 7)
     train_env.custom_reward_function = DPRewardFunction(table)
 
     logging.info("Environments created.")
