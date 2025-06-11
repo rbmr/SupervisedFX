@@ -11,6 +11,7 @@ from common.envs.rewards import risk_adjusted_return
 from common.models.dummy_models import DummyModel, long_model, short_model, custom_comparison_model, dp_perfect_model
 from common.models.train_eval import run_experiment, evaluate_dummy, analyse_results
 from common.scripts import *
+from RQ2.parameters import *
 
 
 def get_baselines() -> List[Tuple[str, Callable[[ForexEnv], DummyModel], FeatureEngineer, StepwiseFeatureEngineer]]:
