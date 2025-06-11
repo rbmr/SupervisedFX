@@ -17,8 +17,12 @@ from common.scripts import *
 
 
 SEED = 42
+set_seed(SEED)
+
 INITIAL_CAPITAL = 10000.0
 TRANSACTION_COST_PCT = 5/100_000
+
+TRAIN_EPISODES = 100
 
 def get_baseline_feature_engineers() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
     """
@@ -96,7 +100,11 @@ def get_baseline_feature_engineers() -> tuple[FeatureEngineer, StepwiseFeatureEn
     return feature_engineer, stepwise_feature_engineer
 
 def base_dqn_kwargs(temp_env: DummyVecEnv) -> Dict[str, Any]:
-    policy_kwargs = dict(net_arch=[32, 16], optimizer_class=optim.Adam, activation_fn=LeakyReLU)
+    policy_kwargs = dict(
+        net_arch=[32, 16], 
+        optimizer_class=optim.Adam, 
+        activation_fn=LeakyReLU
+    )
 
     kwargs = dict(
         policy="MlpPolicy",
