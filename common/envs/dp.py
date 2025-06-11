@@ -53,9 +53,6 @@ def get_low_high_exposure_idx(x: float, n: int) -> tuple[int, int]:
     exact_idx = (x + 1) * n
     low_idx = math.floor(exact_idx)
     high_idx = math.ceil(exact_idx)
-    max_idx = 2 * n
-    low_idx = np.clip(low_idx, 0, max_idx)
-    high_idx = np.clip(high_idx, 0, max_idx)
     return low_idx, high_idx
 
 def get_exposure_val(i: int, n: int) -> float:
