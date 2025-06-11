@@ -14,7 +14,7 @@ from common.scripts import *
 from RQ2.parameters import *
 
 
-def get_baselines() -> List[Tuple[str, Callable[[ForexEnv], DummyModel], FeatureEngineer, StepwiseFeatureEngineer]]:
+def get_benchmarks() -> List[Tuple[str, Callable[[ForexEnv], DummyModel], FeatureEngineer, StepwiseFeatureEngineer]]:
 
     baselines = []
 
@@ -68,7 +68,7 @@ def main():
                                       end_time= RQ2_EXPERIMENTS_END_DATE,
                                     )
     
-    for (name, model, feature_engineer, stepwise_feature_engineer) in get_baselines():
+    for (name, model, feature_engineer, stepwise_feature_engineer) in get_benchmarks():
         logging.info(f"Running baseline model: {model.__name__}")
 
         # Create environments
@@ -89,7 +89,7 @@ def main():
             "eval": eval_env
         }
 
-        results_dir = RQ2_DIR / "experiments" / "baselines"
+        results_dir = RQ2_DIR / "experiments" / "benchmarks"
         results_dir.mkdir(parents=True, exist_ok=True)
 
         for env_name, env in eval_envs.items():
@@ -105,7 +105,7 @@ def main():
     
     analyse_results(
         results_dir=results_dir,
-        model_name_suffix= "[Baseline Models]",
+        model_name_suffix= "[Benchmark Models]",
     )
 
         

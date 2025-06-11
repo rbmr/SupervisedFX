@@ -11,6 +11,7 @@ from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, get_c
 from common.envs.forex_env import ForexEnv
 from common.models.train_eval import run_experiment
 from common.scripts import *
+from RQ2.parameters import *
 
 
 def main():

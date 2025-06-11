@@ -14,6 +14,7 @@ from common.envs.forex_env import ForexEnv
 from common.envs.rewards import percentage_return
 from common.models.train_eval import run_experiment
 from common.scripts import *
+from RQ2.parameters import *
 
 
 def get_feature_engineer() -> FeatureEngineer:
@@ -126,29 +127,15 @@ def main():
     set_seed(42)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-    # forex_data = ForexCandleData.load(source="dukascopy",
-    #                                   instrument="EURUSD",
-    #                                   granularity=Timeframe.M15,
-    #                                   start_time=RQ2_HYPERPARAMETERS_START_DATE,
-    #                                   end_time= RQ2_HYPERPARAMETERS_END_DATE,
-    #                                 )
-    
-    
-
     forex_data = ForexCandleData.load(source="dukascopy",
                                       instrument="EURUSD",
                                       granularity=Timeframe.M30,
-                                      start_time=datetime(2022, 1, 2, 22, 0, 0, 0),
-                                      end_time=datetime(2023, 6, 30, 20, 30, 0, 0),
+                                      start_time=RQ2_HYPERPARAMETERS_START_DATE,
+                                      end_time= RQ2_HYPERPARAMETERS_END_DATE_30M,
                                     )
     
     # --- Feature Engineering ---
-    # Create a feature engineer object
-    feature_engineer = get_feature_engineer()
-
-    # Add stepwise feature engineering
-    stepwise_feature_engineer = StepwiseFeatureEngineer()
-    stepwise_feature_engineer.add(['cash_percentage'], get_current_exposure)
+    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
 
     logging.info("Creating environments...")
     train_env, eval_env = ForexEnv.create_train_eval_envs(
@@ -162,27 +149,24 @@ def main():
         custom_reward_function=percentage_return)
     logging.info("Environments created.")
 
-    policy_kwargs = dict(net_arch=[16, 8], optimizer_class=optim.Adam, activation_fn=LeakyReLU)
     temp_env = DummyVecEnv([lambda: train_env])
-    model = DQN(
-        policy="MlpPolicy",
-        env=temp_env,
-        learning_rate=0.0001,
-        buffer_size=10000,
-        learning_starts=5000,
-        batch_size=32,
-        tau=0.05,
-        gamma=0.95,
-        train_freq=4,
-        target_update_interval=16,
-        exploration_fraction=0.5,
-        exploration_initial_eps=1.0,
-        exploration_final_eps=0.05,
-        policy_kwargs=policy_kwargs,
-        verbose=0,
-        seed=42,
-        device=DEVICE
-    )
+    dqn_kwargs = base_dqn_kwargs(temp_env)
+    dqn_kwargs['learning_rate'] = 0.00005
+    dqn_kwargs['buffer_size'] = 60_000
+    dqn_kwargs['batch_size'] = 512
+    dqn_kwargs['tau'] = 0.0025
+    dqn_kwargs['train_freq'] = 128
+    dqn_kwargs['gradient_steps'] = 1
+    dqn_kwargs['target_update_interval'] = 2500
+    dqn_kwargs['exploration_fraction'] = 0.2
+    dqn_kwargs['exploration_initial_eps'] = 1.0
+    dqn_kwargs['exploration_final_eps'] = 0.02
+
+    dqn_kwargs['policy_kwargs'] = {
+        'net_arch': [8],
+    }
+
+    model = DQN(**dqn_kwargs)
 
     logging.info("Model created.")
     logging.info("Model architecture:" + str(model.policy))
@@ -193,9 +177,9 @@ def main():
         eval_env=eval_env,
         model=model,
         base_folder_path=RQ2_DIR,
-        experiment_group_name="hyperparameters",
-        experiment_name="30m_test",
-        train_episodes=30,
+        experiment_group_name="testytest",
+        experiment_name="test_policy_1",
+        train_episodes=125,
         eval_episodes=1,
         checkpoints=True,
         tensorboard_logging=True
