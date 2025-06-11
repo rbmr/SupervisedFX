@@ -18,7 +18,7 @@ from common.scripts import *
 
 SEED = 42
 INITIAL_CAPITAL = 10000.0
-TRANSACTION_COST_PCT = 0.0
+TRANSACTION_COST_PCT = 5/100_000
 
 def get_baseline_feature_engineers() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
     """
