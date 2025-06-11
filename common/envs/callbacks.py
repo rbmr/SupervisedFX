@@ -103,7 +103,7 @@ class SneakyLogger(BaseCallback):
                 self.logger.record(f"{key}_std", np.std(values))
         raw_env.sneaky_buffer.clear()
 
-class RolloutLogger(BaseCallback):
+class A2CRolloutLogger(BaseCallback):
     """
     Logs all the rollout values that are collected by default.
     """
@@ -125,6 +125,35 @@ class RolloutLogger(BaseCallback):
 
         self.logger.record("rollout/log_prob_mean", np.mean(buffer.log_probs))
         self.logger.record("rollout/log_prob_std", np.std(buffer.log_probs))
+
+class BasicCallback(BaseCallback):
+
+    def __init__(self, verbose: int = 0, log_freq: int = 5_000):
+        super().__init__(verbose)
+        self.log_freq = log_freq
+        self._reset()
+
+    def _on_step(self) -> bool:
+        self._collect()
+        if self.num_timesteps % self.log_freq == 0:
+            self._log()
+            self._reset()
+        return True
+
+    def _collect(self):
+        self.rewards.extend(self.locals["rewards"])
+        self.actions.extend(self.locals['actions'])
+
+    def _log(self):
+        self.logger.record("custom/reward_mean", np.mean(self.rewards))
+        self.logger.record("custom/reward_std", np.std(self.rewards))
+        self.logger.record("custom/action_mean", np.mean(self.actions))
+        self.logger.record("custom/action_std", np.std(self.actions))
+        self.logger.dump()
+
+    def _reset(self) -> None:
+        self.rewards = []
+        self.actions = []
 
 class SACMetricsLogger(BaseCallback):
     """

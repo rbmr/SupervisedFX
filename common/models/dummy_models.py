@@ -1,12 +1,13 @@
 from typing import Any, Callable, Union
 
+import logging
 import numpy as np
 from gymnasium import spaces
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.policies import BasePolicy
 
-from common.constants import PROJECT_DIR
-from common.envs.dp import get_optimal_action, get_exposure_idx, get_dp_table_from_env
+from common.constants import PROJECT_DIR, DP_CACHE_DIR
+from common.envs.dp import get_optimal_action, get_exposure_idx, get_dp_table_from_env, get_optimal_action_fn
 from common.envs.forex_env import ForexEnv, AgentDataCol
 
 
@@ -120,19 +121,8 @@ def custom_comparison_model(env: ForexEnv) -> DummyModel:
 
 def dp_perfect_model(env: ForexEnv) -> DummyModel:
     # cache dir is a Path from
-    cache_dir = PROJECT_DIR / "temp_cache"
-    dp_table = get_dp_table_from_env(env, cache_dir, None)
-
-    def prediction_logic(obs: np.ndarray) -> Any:
-
-        cash = env.agent_data[env.n_steps-1, AgentDataCol.cash]
-        pre_action_equity = env.agent_data[env.n_steps, AgentDataCol.pre_action_equity]
-        exposure = (pre_action_equity - cash) / pre_action_equity
-        optimal_exposure = get_optimal_action(dp_table, env.n_steps, exposure)
-        action = get_exposure_idx(optimal_exposure, dp_table.n_actions)
-        return action
-    
-    return DummyModel(pred_fn=prediction_logic)
+    dp_table = get_dp_table_from_env(env)
+    return DummyModel(pred_fn=get_optimal_action_fn(dp_table, env))
 
 DummyModelFactory = Callable[[ForexEnv], DummyModel]
 DUMMY_MODELS: list[DummyModelFactory] = [short_model, long_model, hold_model, random_model]

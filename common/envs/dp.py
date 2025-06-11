@@ -11,12 +11,13 @@ import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 import pandas as pd
 from tqdm import trange
 
-from common.constants import MarketDataCol
+from common.constants import MarketDataCol, DP_CACHE_DIR, AgentDataCol
 from common.envs.forex_env import ForexEnv
 from common.envs.trade import calculate_equity, execute_trade, reverse_equity
 
@@ -53,9 +54,6 @@ def get_low_high_exposure_idx(x: float, n: int) -> tuple[int, int]:
     exact_idx = (x + 1) * n
     low_idx = math.floor(exact_idx)
     high_idx = math.ceil(exact_idx)
-    max_idx = 2 * n
-    low_idx = np.clip(low_idx, 0, max_idx)
-    high_idx = np.clip(high_idx, 0, max_idx)
     return low_idx, high_idx
 
 def get_exposure_val(i: int, n: int) -> float:
@@ -65,17 +63,30 @@ def get_exposure_val(i: int, n: int) -> float:
     """
     return (i / n) - 1
 
+def get_optimal_action_fn(table: DPTable, env: ForexEnv) -> Callable[[...], float]:
+    """
+    Given a DPTable and a ForexEnv, creates a function that gets the state from the env,
+    and uses it to get the optimal action from the table.
+    """
+    assert table.policy_table.shape[0] == env.data_len
+    def predict(*args) -> float:
+        cash = env.agent_data[env.n_steps, AgentDataCol.cash]
+        pre_action_equity = env.agent_data[env.n_steps + 1, AgentDataCol.pre_action_equity]
+        exposure = (pre_action_equity - cash) / pre_action_equity
+        return get_optimal_action(table, env.n_steps + 1, exposure)
+    return predict
+
 def get_optimal_action(table: DPTable, t: int, current_exposure: float) -> float:
     """
     Get optimal action from a table given a timestep t and current exposure value.
     """
     if t >= table.policy_table.shape[0]:
-        return current_exposure  # No action at terminal state
+        raise ValueError("Index out of bounds.")
     exposure_idx = get_exposure_idx(current_exposure, table.n_actions)
     action_idx = table.policy_table[t, exposure_idx]
     return get_exposure_val(action_idx, table.n_actions) # type: ignore
 
-def get_dp_table_from_env(env: ForexEnv, cache_dir, n_actions: int | None = None) -> DPTable:
+def get_dp_table_from_env(env: ForexEnv, cache_dir = DP_CACHE_DIR, n_actions: int | None = None) -> DPTable:
     if n_actions is None:
         n_actions = env.n_actions if env.n_actions > 0 else 7
     return get_dp_table(

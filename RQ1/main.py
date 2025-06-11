@@ -11,12 +11,13 @@ logging.info("Loading imports...")
 from datetime import datetime
 from pathlib import Path
 
-from common.envs.callbacks import ActionHistogramCallback, SaveCallback, RolloutLogger, SneakyLogger
+from common.envs.callbacks import ActionHistogramCallback, SaveCallback, A2CRolloutLogger, SneakyLogger, \
+    SACMetricsLogger, BasicCallback
 from common.models.train_eval import (analyse_results, evaluate_models, train_model)
 from common.models.utils import save_model_with_metadata
 from common.scripts import has_nonempty_subdir, n_children, picker
 from RQ1.constants import EXPERIMENT_NAME_FORMAT, RQ1_EXPERIMENTS_DIR, TENSORBOARD_DIR
-from RQ1.parameters import get_environments, get_model, cleanup_tensorboard
+from RQ1.parameters import get_train_env, get_eval_envs, get_train_model, cleanup_tensorboard
 
 logging.info("Done.")
 
@@ -25,20 +26,19 @@ def train():
     experiment_name = datetime.now().strftime(EXPERIMENT_NAME_FORMAT)
     tensorboard_log = TENSORBOARD_DIR / experiment_name
 
-    train_env, _ = get_environments(custom_reward=True, shuffled=True)
-    save_freq = train_env.episode_len
+    train_env = get_train_env()
 
-    model = get_model(train_env, tb_log=tensorboard_log)
+    model = get_train_model(train_env, tb_log=tensorboard_log)
 
     experiment_dir = RQ1_EXPERIMENTS_DIR / experiment_name
     models_dir = experiment_dir / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    callback = [SaveCallback(models_dir, save_freq=save_freq),
-                ActionHistogramCallback(train_env, log_freq=save_freq),
-                RolloutLogger(verbose=1),
-                SneakyLogger(verbose=1)]
-    train_model(model, train_env, train_episodes=20, callback=callback)
+    callback = [SaveCallback(models_dir, save_freq=train_env.episode_len),
+                ActionHistogramCallback(train_env, log_freq=train_env.episode_len),
+                SACMetricsLogger(verbose=1, log_freq=500),
+                BasicCallback(verbose=1, log_freq=500)]
+    train_model(model, train_env, train_episodes=50, callback=callback)
     save_model_with_metadata(model, models_dir / "model_final.zip")
 
 def evaluate(experiments_dir, limit = 10):
@@ -54,11 +54,7 @@ def evaluate(experiments_dir, limit = 10):
     results_dir = experiment_dir / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    train_env, eval_env = get_environments(shuffled=False)
-    eval_envs = {
-        "train": train_env,
-        "eval": eval_env,
-    }
+    eval_envs = get_eval_envs()
 
     evaluate_models(models_dir, results_dir, eval_envs, eval_episodes=1, num_workers=3)
 
