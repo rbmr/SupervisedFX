@@ -11,8 +11,7 @@ logging.info("Loading imports...")
 from datetime import datetime
 from pathlib import Path
 
-from common.envs.callbacks import ActionHistogramCallback, SaveCallback, A2CRolloutLogger, SneakyLogger, \
-    SACMetricsLogger, BasicCallback
+from common.envs.callbacks import ActionHistogramCallback, SaveCallback, SACMetricsLogger, BasicCallback
 from common.models.train_eval import (analyse_results, evaluate_models, train_model)
 from common.models.utils import save_model_with_metadata
 from common.scripts import has_nonempty_subdir, n_children, picker

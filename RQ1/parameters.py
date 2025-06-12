@@ -8,7 +8,6 @@ from stable_baselines3 import SAC
 from torch import nn
 
 from RQ1.constants import TENSORBOARD_DIR
-from common.constants import DP_CACHE_DIR
 from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import (FeatureEngineer, adx,
                                           as_min_max_fixed, as_min_max_window,
@@ -120,8 +119,8 @@ def get_train_env():
     logging.info("Setting reward function...")
 
     # Get db table.
-    table = get_dp_table_from_env(train_env, DP_CACHE_DIR, 7)
-    train_env.custom_reward_function = DPRewardFunction(table)
+    table = get_dp_table_from_env(train_env)
+    train_env.custom_reward_fn = DPRewardFunction(table)
 
     logging.info("Environments created.")
 
@@ -245,7 +244,7 @@ def get_feature_engineers():
 
     # 6) Add small lookback
     fe.add(remove_ohlcv)
-    fe.add(lambda df: history_lookback(df, 4))
+    fe.add(lambda df: history_lookback(df, 2))
 
     # Setup stepwise feature engineer
     sfe = StepwiseFeatureEngineer()
