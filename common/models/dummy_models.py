@@ -1,3 +1,4 @@
+import math
 from typing import Any, Callable, Union
 
 import numpy as np
@@ -55,8 +56,6 @@ class DummyModel(BaseAlgorithm):
         raise NotImplementedError("DummyModel has no parameters.")
 
 def short_model(env: ForexEnv) -> DummyModel:
-    if env.action_low > 0:
-        raise ValueError("short model needs a short position in the action space.")
     if isinstance(env.action_space, spaces.Discrete):
         return DummyModel(constant_fn(0))
     if isinstance(env.action_space, spaces.Box):
@@ -64,29 +63,18 @@ def short_model(env: ForexEnv) -> DummyModel:
     raise TypeError("Invalid action space.")
 
 def long_model(env: ForexEnv) -> DummyModel:
-    if env.action_high < 0 or env.n_actions == 1 and env.action_low < 0:
-        raise ValueError("long model needs a long position in the action space.")
     if isinstance(env.action_space, spaces.Discrete):
         return DummyModel(constant_fn(env.action_space.n - 1))
     if isinstance(env.action_space, spaces.Box):
         return DummyModel(constant_fn(env.action_space.high))
     raise TypeError("Invalid action space.")
 
-def is_zero_a_step(low: float, high: float, n: int) -> bool:
-    assert n > 0
-    assert low < high
-    if n == 1:
-        return low == 0
-    step = (high - low) / (n - 1)
-    k = (0 - low) / step
-    round_k = round(k)
-    return abs(k - round_k) < 1e-9 and 0 <= round_k < n
-
 def cash_model(env: ForexEnv) -> DummyModel:
     if isinstance(env.action_space, spaces.Discrete):
-        if not is_zero_a_step(env.action_low, env.action_high, env.n_actions):
-            raise ValueError("cash model needs cash in the action space.")
-        return DummyModel(constant_fn(0.0))
+        for x in env.actions:
+            if math.isclose(x, 0.0, abs_tol=1e-8):
+                return DummyModel(constant_fn(0.0))
+        raise ValueError("cash model needs cash in the action space.")
     if isinstance(env.action_space, spaces.Box):
         if env.action_space.low > 0.0 or env.action_space.high < 0.0:
             raise ValueError("cash model needs cash in the action space.")

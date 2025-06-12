@@ -179,18 +179,13 @@ class ForexEnv(gym.Env):
         assert self.agent_data.shape == (self.data_len, len(AgentDataCol))
 
         # Action space
-        self.action_low = action_low
-        self.action_high = action_high
         self.n_actions = n_actions
-        self.action_range = self.action_high - self.action_low # Cache value
+        self.actions = np.linspace(action_low, action_high, self.n_actions)
         if self.n_actions == 0:
-            logging.info(f"n_actions is zero, using continuous action space, over the range [{self.action_low}, {self.action_high}]")
-            self.action_space = spaces.Box(low=self.action_low, high=self.action_high, shape=(1,), dtype=np.float32)
-        elif self.n_actions == 1:
-            logging.warning(f"n_actions is one, the action will always be {self.action_low}")
-            self.action_space = spaces.Discrete(self.n_actions)
+            logging.info(f"n_actions is zero, using continuous action space, over the range [{action_low}, {action_high}]")
+            self.action_space = spaces.Box(low=action_low, high=action_high, shape=(1,), dtype=np.float32)
         else:
-            logging.info(f"n_actions is larger than one, using discrete action space with {n_actions} actions, evenly distributed over [{self.action_low}, {self.action_high}]")
+            logging.info(f"n_actions is larger than zero, using discrete actions {self.actions}")
             self.action_space = spaces.Discrete(self.n_actions)
 
         # Define observation space
@@ -285,9 +280,7 @@ class ForexEnv(gym.Env):
         """
         Standardizes actions by converting them to the target exposure.
         """
-        action = np.asarray(action).item() # ensure scalar float
+        action = np.asarray(action).item() # ensure native python scalars
         if self.n_actions == 0: # Actions are already continuous
             return action
-        if self.n_actions == 1: # Prevent div by zero
-            return self.action_low
-        return action / (self.n_actions - 1) * self.action_range + self.action_low
+        return self.actions[int(action)] # type: ignore
