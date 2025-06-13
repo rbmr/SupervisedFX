@@ -78,38 +78,34 @@ def apply_aggressive_parameters(dqn_kwargs: dict) -> dict:
     dqn_kwargs['exploration_final_eps'] = 0.1
     return dqn_kwargs
 
-def HP_P1_patient(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P1_patient(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_patient_parameters(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P1_cautious(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P1_cautious(temp_env: DummyVecEnv) -> DQN:
     """
     Initializes a 'cautious' DQN model.
     """
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_cautious_parameters(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P1_balanced(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P1_balanced(temp_env: DummyVecEnv) -> DQN:
     """
     Initializes a 'balanced' DQN model.
     """
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_balanced_parameters(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P1_aggressive(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P1_aggressive(temp_env: DummyVecEnv) -> DQN:
     """
     Initializes an 'aggressive' DQN model.
     """
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_aggressive_parameters(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
 # #################################
 # # -- HyperParameters Phase 2 -- #
@@ -138,99 +134,85 @@ def apply_high_capacity_network(dqn_kwargs: dict) -> dict:
     dqn_kwargs['policy_kwargs']['net_arch'] = [128, 64]
     return dqn_kwargs
 
-def HP_P2_cautious_reduced(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P2_cautious_reduced(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_cautious_parameters(dqn_kwargs)
     dqn_kwargs = apply_reduced_capacity_network(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P2_cautious_minimalist(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P2_cautious_minimalist(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_cautious_parameters(dqn_kwargs)
     dqn_kwargs = apply_minimalist_capacity_network(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P2_cautious_baseline(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P2_cautious_baseline(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_cautious_parameters(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P2_cautious_medium_symmetric(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P2_cautious_medium_symmetric(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_cautious_parameters(dqn_kwargs)
     dqn_kwargs = apply_medium_symmetric_capacity_network(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P2_cautious_increased(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P2_cautious_increased(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_cautious_parameters(dqn_kwargs)
     dqn_kwargs = apply_increased_capacity_network(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P2_cautious_symmetric(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P2_cautious_symmetric(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_cautious_parameters(dqn_kwargs)
     dqn_kwargs = apply_symmetric_capacity_network(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P2_cautious_high(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P2_cautious_high(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_cautious_parameters(dqn_kwargs)
     dqn_kwargs = apply_high_capacity_network(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P2_balanced_reduced(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P2_balanced_reduced(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_balanced_parameters(dqn_kwargs)
     dqn_kwargs = apply_reduced_capacity_network(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P2_balanced_minimalist(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P2_balanced_minimalist(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_balanced_parameters(dqn_kwargs)
     dqn_kwargs = apply_minimalist_capacity_network(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P2_balanced_baseline(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P2_balanced_baseline(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_balanced_parameters(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P2_balanced_medium_symmetric(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P2_balanced_medium_symmetric(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_balanced_parameters(dqn_kwargs)
     dqn_kwargs = apply_medium_symmetric_capacity_network(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P2_balanced_increased(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P2_balanced_increased(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_balanced_parameters(dqn_kwargs)
     dqn_kwargs = apply_increased_capacity_network(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P2_balanced_symmetric(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P2_balanced_symmetric(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_balanced_parameters(dqn_kwargs)
     dqn_kwargs = apply_symmetric_capacity_network(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
-def HP_P2_balanced_high(temp_env: DummyVecEnv) -> Tuple[DQN, FeatureEngineer, StepwiseFeatureEngineer]:
+def HP_P2_balanced_high(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_balanced_parameters(dqn_kwargs)
     dqn_kwargs = apply_high_capacity_network(dqn_kwargs)
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
-    return DQN(**dqn_kwargs), feature_engineer, stepwise_feature_engineer
+    return DQN(**dqn_kwargs)
 
