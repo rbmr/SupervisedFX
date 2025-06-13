@@ -1,13 +1,9 @@
 import logging
-from typing import Callable, List, Tuple
 
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from RQ2.parameters import *
-from common.data.feature_engineer import FeatureEngineer
-from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
-from common.scripts import *
+from RQ2.parameters import base_dqn_kwargs
 
 
 # #################################

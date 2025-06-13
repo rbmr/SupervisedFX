@@ -178,8 +178,8 @@ def main():
         model=model,
         base_folder_path=RQ2_DIR,
         experiment_group_name="testytest",
-        experiment_name="test_policy_1",
-        train_episodes=125,
+        experiment_name="test_policy_187987",
+        train_episodes=0,
         eval_episodes=1,
         checkpoints=True,
         tensorboard_logging=True

@@ -25,9 +25,9 @@ def main():
 
     forex_data = ForexCandleData.load(source="dukascopy",
                                       instrument="EURUSD",
-                                      granularity=Timeframe.M15,
+                                      granularity=Timeframe.H1,
                                       start_time=RQ2_HYPERPARAMETERS_START_DATE,
-                                      end_time= RQ2_HYPERPARAMETERS_END_DATE_15M,
+                                      end_time= RQ2_HYPERPARAMETERS_END_DATE_1H,
                                     )
     
     experiments: List[Callable[[DummyVecEnv], DQN]] = [
@@ -73,7 +73,7 @@ def main():
         logging.info("Model architecture:" + str(model.policy))
         logging.info("Running Experiment parts...")
 
-        group_name = "[hyperparameters-P2]-15m_data"
+        group_name = "[hyperparameters-P2]-1h_data"
         run_experiment(
             train_env=train_env,
             eval_env=eval_env,

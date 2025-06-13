@@ -7,12 +7,8 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from torch.nn import LeakyReLU
 
 from RQ2.constants import *
-from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import *
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, get_current_exposure, duration_of_current_trade 
-from common.envs.forex_env import ForexEnv
-from common.models.train_eval import run_experiment
-from common.envs.rewards import percentage_return
 from common.scripts import *
 
 import matplotlib
