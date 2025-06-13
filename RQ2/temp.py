@@ -1,5 +1,4 @@
 import logging
-from typing import Callable, List
 
 import torch.optim as optim
 from stable_baselines3 import DQN
@@ -7,6 +6,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from torch.nn import LeakyReLU
 
 from RQ2.constants import *
+from RQ2.parameters import INITIAL_CAPITAL, TRANSACTION_COST_PCT, SEED
 from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import *
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, get_current_exposure, duration_of_current_trade 
@@ -116,7 +116,7 @@ def main():
         agent_feature_engineer=stepwise_feature_engineer,
         initial_capital=INITIAL_CAPITAL,
         transaction_cost_pct=TRANSACTION_COST_PCT,
-        n_actions=1,
+        n_actions=3,
         custom_reward_function=percentage_return
         )
     logging.info("Environments created.")

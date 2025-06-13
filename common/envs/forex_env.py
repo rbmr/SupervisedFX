@@ -1,5 +1,6 @@
 import logging
-from typing import Callable, Optional
+from dataclasses import dataclass
+from typing import Callable, Optional, Self
 
 import gymnasium as gym
 import numpy as np
@@ -13,151 +14,277 @@ from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
 from common.envs.trade import calculate_ohlc_equity, execute_trade, calculate_equity
 from common.scripts import find_first_row_with_nan, find_first_row_without_nan
 
-class ForexEnv(gym.Env):
+class ActionConfig:
+    """
+    Class responsible for preparing and validating action info for ForexEnv.
+    """
 
-    @staticmethod
-    def create_train_eval_envs(
-        split_ratio: float,
-        forex_candle_data: ForexCandleData,
-        market_feature_engineer: FeatureEngineer,
-        agent_feature_engineer: StepwiseFeatureEngineer,
-        initial_capital: float = 10000.0,
-        transaction_cost_pct: float = 0.0,
-        n_actions: int = 1,
-        allow_short: bool = True,
-        allow_long: bool = True,
-        custom_reward_function: Optional[Callable[['ForexEnv'], float]] = None,
-        shuffled = False,
-    ) -> tuple['ForexEnv', 'ForexEnv']:
-        """
-        Creates training and evaluation environments from ForexCandleData and FeatureEngineers.
-        Splits the data into 70% training and 30% evaluation.
-        """
-        if split_ratio <= 0.0 or split_ratio >= 1.0:
-            raise ValueError(f"split_ratio must be between 0.0 and 1.0, was {split_ratio}. For 70% training, use 0.7.")
-        if not isinstance(forex_candle_data, ForexCandleData):
-            raise ValueError(f"forex_candle_data must be an instance of ForexCandleData, was {type(forex_candle_data)}.")
-        if not isinstance(market_feature_engineer, FeatureEngineer):
-            raise ValueError(f"market_feature_engineer must be an instance of FeatureEngineer, was {type(market_feature_engineer)}.")
+    __slots__ = ("n_actions", "actions", "action_space")
 
-        # Retrieve market data and features.
-        market_data_df = forex_candle_data.df.copy(deep=True)
-        market_features_df = market_feature_engineer.run(market_data_df, remove_original_columns=True)
+    def __init__(self, n: int = 3, low: float = -1.0, high: float = 1.0):
 
-        # log the amount of features, and the specific column names
-        logging.info(f"Market data contains {len(market_data_df)} rows and {len(market_data_df.columns)} columns.")
-        logging.info(f"Market features contain {len(market_features_df)} rows and {len(market_features_df.columns)} columns: {market_features_df.columns.tolist()}.")
-        logging.info(f"Agent feature engineer contains {agent_feature_engineer.num_of_features()} features: {agent_feature_engineer.get_features()}.")
+        assert n >= 0, f"n must be >= 0. If n == 0, then the action space is continuous."
+        assert low <= high, f"low ({low}) must be less than or equal to high ({high})."
+        assert low >= -1.0 and high <= 1.0, f"actions must be within [-1, 1], was [{low}, {high}]."
+
+        self.n_actions = n
+        self.actions = np.linspace(low, high, n)
+        if self.n_actions == 0:
+            logging.info(f"n_actions is zero, using continuous action space, over the range [{low}, {high}]")
+            self.action_space = spaces.Box(low=low, high=high, shape=(1,), dtype=np.float32)
+        else:
+            logging.info(f"n_actions is larger than zero, using discrete actions {self.actions}")
+            self.action_space = spaces.Discrete(self.n_actions)
+
+@dataclass(frozen=True)
+class EnvConfig:
+    """
+    Class responsible for validating and storing the general parameters for ForexEnv.
+    """
+
+    initial_capital: float = 10_000.0
+    transaction_cost_pct: float = 0.0
+    shuffled: bool = False
+    reward_function: Optional[Callable[[gym.Env], float]] = None
+
+    def __post_init__(self):
+        if self.initial_capital <= 0.0:
+            raise ValueError(f"initial_capital must be positive, was {self.initial_capital}.")
+        if self.transaction_cost_pct < 0.0 or self.transaction_cost_pct > 1.0:
+            raise ValueError(f"transaction_cost_pct must in [0.0, 1.0], was {self.transaction_cost_pct}.")
+        if self.shuffled:
+            logging.warning("shuffling has been temporarily removed. Shuffled parameter has no effect.")
+
+@dataclass(frozen=True)
+class ObsConfig:
+    """
+    Immutable configuration for a single observation component.
+    """
+    name: str
+    fe: Optional[FeatureEngineer] = None
+    sfe: Optional[StepwiseFeatureEngineer] = None
+    window: int = 1
+
+    def __post_init__(self):
+        if self.window <= 0:
+            raise ValueError(f"window_size must be > 0, was {self.window}")
+        if self.fe is None and self.sfe is None:
+            raise ValueError("At least one of feature_engineer or stepwise_feature_engineer must be provided")
+        if self.window > 1 and self.sfe is not None:
+            raise ValueError("stepwise_feature_engineer cannot be used with window_size > 1")
+
+@dataclass(frozen=True)
+class EnvObs:
+
+    config: ObsConfig
+    features_data: np.ndarray
+    feature_names: list[str]
+
+    @classmethod
+    def from_config(cls, config: ObsConfig, market_data: pd.DataFrame):
+        """Create EnvObs from ObsConfig and market data."""
+        if config.fe is not None:
+            features_df = config.fe.run(market_data.copy(deep=True), remove_original_columns=True)
+            features_data = features_df.to_numpy(dtype=np.float32)
+            feature_names = features_df.columns.tolist()
+        else:
+            # No feature engineer, create empty features
+            features_data = np.empty((len(market_data), 0), dtype=np.float32)
+            feature_names = []
+
+        logging.info(f"'{config.name}' features ({len(features_data)}, {len(feature_names)}): {feature_names})")
+        logging.info(f"'{config.name}' stepwise features ({config.sfe.num_of_features()}): {config.sfe.get_features()})")
+
+        return cls(config, features_data, feature_names)
+
+    def get_observation_space(self) -> spaces.Space:
+        """Get the observation space for this observation."""
+        num_features = self.features_data.shape[1]
+        if self.config.sfe is not None:
+            num_features += self.config.sfe.num_of_features()
+        if self.config.window == 1:
+            return spaces.Box(low=-np.inf, high=np.inf, shape=(num_features,), dtype=np.float32)
+        return spaces.Box(low=-np.inf, high=np.inf, shape=(self.config.window, num_features), dtype=np.float32)
+
+    def get_observation(self, n_steps: int, agent_data: np.ndarray) -> np.ndarray:
+        """Get observation for the current step."""
+
+        # Get static features
+        static_features = None
+        if len(self.feature_names) > 0:
+            if self.config.window == 1:
+                static_features = self.features_data[n_steps]
+            else:
+                start_idx = max(0, n_steps - self.config.window + 1)
+                end_idx = n_steps + 1
+                static_features = self.features_data[start_idx:end_idx]
+                if len(static_features) < self.config.window:
+                    pad_size = self.config.window - len(static_features)
+                    padding = np.zeros((pad_size, static_features.shape[1]), dtype=np.float32)
+                    static_features = np.vstack((padding, static_features))
+
+        # Get stepwise features
+        stepwise_features = None
+        if self.config.sfe is not None:
+            stepwise_features = self.config.sfe.run(agent_data, n_steps)
+
+        # Combine features
+        if static_features is None and stepwise_features is None:
+            return np.empty((1,), dtype=np.float32)
+        elif static_features is None:
+            return stepwise_features
+        elif stepwise_features is None:
+            return static_features
+        return np.concatenate((static_features, stepwise_features))
+
+class DataConfig:
+    """
+    Class responsible for preparing and validating the data for ForexEnv.
+    """
+
+    __slots__ = ("market_data", "observations")
+
+    @classmethod
+    def get_configs(cls,
+                    forex_candle_data: ForexCandleData,
+                    split_ratio: float,
+                    obs_configs: list[ObsConfig]):
+
+        # Standardize input
+        assert 0.0 <= split_ratio <= 1.0, f"split_ratio ({split_ratio}) must be in [0.0, 1.0]."
+
+        # Retrieve market data.
+        market_data = forex_candle_data.df.copy(deep=True)
+        logging.info(f"Market data ({len(market_data)}, {len(market_data.columns)}): {market_data.columns.tolist()}.")
+
+        # Retrieve observations
+        observations = [EnvObs.from_config(config, market_data) for config in obs_configs]
 
         # Split data
-        split_index = int(len(market_data_df) * split_ratio)
-        train_market_data = market_data_df.iloc[:split_index]
-        eval_market_data = market_data_df.iloc[split_index:]
-        train_market_features = market_features_df.iloc[:split_index]
-        eval_market_features = market_features_df.iloc[split_index:]
+        split_index = int(len(market_data) * split_ratio)
+        train_market_data = market_data.iloc[:split_index]
+        eval_market_data = market_data.iloc[split_index:]
 
-        # Create training environment
-        train_env = ForexEnv(
-            market_data_df=train_market_data,
-            market_feature_df=train_market_features,
-            agent_feature_engineer=agent_feature_engineer,
-            initial_capital=initial_capital,
-            transaction_cost_pct=transaction_cost_pct,
-            n_actions=n_actions,
-            allow_short=allow_short,
-            allow_long=allow_long,
-            custom_reward_function=custom_reward_function,
-            shuffled=shuffled,
+        # Split observation data
+        train_env_obs = []
+        eval_env_obs = []
+        for env_ob in observations:
+            train_env_obs.append(EnvObs(
+                config = env_ob.config,
+                features_data = env_ob.features_data[:split_index],
+                feature_names = env_ob.feature_names,
+            ))
+            eval_env_obs.append(EnvObs(
+                config = env_ob.config,
+                features_data = env_ob.features_data[split_index:],
+                feature_names = env_ob.feature_names,
+            ))
+
+        # Get configs
+        train_config = cls(
+            market_data=train_market_data,
+            observations=train_env_obs,
         )
-
-        # Create evaluation environment
-        eval_env = ForexEnv(
-            market_data_df=eval_market_data,
-            market_feature_df=eval_market_features,
-            agent_feature_engineer=agent_feature_engineer,
-            initial_capital=initial_capital,
-            transaction_cost_pct=transaction_cost_pct,
-            n_actions=n_actions,
-            allow_short=allow_short,
-            allow_long=allow_long,
-            custom_reward_function=custom_reward_function,
-            shuffled=shuffled,
+        eval_config = cls(
+            market_data=eval_market_data,
+            observations=eval_env_obs,
         )
+        return train_config, eval_config
 
-        return train_env, eval_env
-
-    def __init__(self,
-                 market_data_df: pd.DataFrame,
-                 market_feature_df: pd.DataFrame,
-                 agent_feature_engineer: StepwiseFeatureEngineer,
-                 initial_capital: float = 10_000.0,
-                 transaction_cost_pct: float = 0.0,
-                 n_actions: int = 1,
-                 allow_short: bool = True,
-                 allow_long: bool = True,
-                 custom_reward_function: Callable[['ForexEnv'], float] | None = None,
-                 shuffled: bool = False,
-                 ):
-        super(ForexEnv, self).__init__()
+    def __init__(self, market_data: pd.DataFrame, observations: list[EnvObs]):
 
         # Validate input
-        if not allow_short and not allow_long:
-            raise ValueError(f"either allow_short or allow_long must be True, no simulation should allow only holding.")
-        if not isinstance(market_data_df, pd.DataFrame):
-            raise ValueError(f"market_data_df must be a pandas DataFrame, was {type(market_data_df)}.")
-        if not isinstance(market_feature_df, pd.DataFrame):
-            raise ValueError(f"market_feature_df must be a pandas DataFrame, was {type(market_feature_df)}.")
-        actual_columns = set(market_data_df.columns)
         expected_columns = set(MarketDataCol.all_names())
-        if not expected_columns.issubset(actual_columns):
-            missing_columns = expected_columns - actual_columns
-            raise ValueError(f"market_data_df is missing columns {missing_columns}.")
-        if initial_capital <= 0.0:
-            raise ValueError(f"initial_capital must be positive, was {initial_capital}.")
-        if transaction_cost_pct < 0.0 or transaction_cost_pct > 1.0:
-            raise ValueError(f"transaction_cost_pct must be between 0.0 and 1.0, was {transaction_cost_pct}. For 0.1%, use 0.001.")
-        if n_actions < 0:
-            raise ValueError(f"n_actions must be >= 0. If n_actions == 0, then the action space is continuous between -1 and 1.")
+        actual_columns = set(market_data.columns)
+        assert expected_columns.issubset(actual_columns), f"market_data is missing columns: {expected_columns - actual_columns}."
+
+        # Find initial NaNs in market data.
+        market_data = market_data.copy(deep=True)[MarketDataCol.all_names()]
+        start_index = find_first_row_without_nan(market_data)
+
+        # Find initial NaNs in features.
+        for env_ob in observations:
+            if len(env_ob.feature_names) > 0:
+                temp_df = pd.DataFrame(env_ob.features_data, columns=env_ob.feature_names)
+                start_index = max(start_index, find_first_row_without_nan(temp_df))
+
+        # Clean and market data.
+        market_data = market_data.iloc[start_index:]
+        market_data.reset_index(drop=True, inplace=True)
+        assert not market_data.isna().any().any(), f"market_data contains NaN values at index {find_first_row_with_nan(market_data)}"
+
+        # Clean and validate features.
+        final_env_obs = []
+        for env_ob in observations:
+            adjusted_features_data = env_ob.features_data[start_index:]
+            temp_df = pd.DataFrame(adjusted_features_data, columns=env_ob.feature_names)
+            assert not temp_df.isna().any().any(), f"market_data contains NaN values at index {find_first_row_with_nan(market_data)}"
+            assert len(market_data) == len(adjusted_features_data), f"len market_data ({len(market_data)}) != len features for '{env_ob.config.name}' ({len(adjusted_features_data)})"
+            final_env_obs.append(EnvObs(env_ob.config, adjusted_features_data, env_ob.feature_names))
+
+        # Set parameters
+        self.market_data = market_data
+        self.observations = final_env_obs
+
+class ForexEnv(gym.Env):
+
+    @classmethod
+    def create_train_eval_envs(cls,
+                               split_ratio: float,
+                               forex_candle_data: ForexCandleData,
+                               market_feature_engineer: FeatureEngineer,
+                               agent_feature_engineer: StepwiseFeatureEngineer,
+                               initial_capital: float = 10000.0,
+                               transaction_cost_pct: float = 0.0,
+                               n_actions: int = 3,
+                               action_low: float = -1.0,
+                               action_high: float = 1.0,
+                               custom_reward_function: Optional[Callable[[Self], float]] = None,
+                               shuffled = False) -> tuple[Self, Self]:
+        obs_configs = [ObsConfig(
+            name = 'market_features',
+            fe = market_feature_engineer,
+            sfe = agent_feature_engineer,
+            window = 1
+        )]
+        env_config = EnvConfig(
+            initial_capital = initial_capital,
+            transaction_cost_pct = transaction_cost_pct,
+            shuffled = shuffled,
+            reward_function = custom_reward_function,
+        )
+        action_config = ActionConfig(
+            n = n_actions,
+            low = action_low,
+            high = action_high,
+        )
+        train_config, eval_config = DataConfig.get_configs(
+            forex_candle_data=forex_candle_data,
+            split_ratio=split_ratio,
+            obs_configs=obs_configs,
+        )
+        train_env = ForexEnv(action_config, env_config, train_config)
+        eval_env = ForexEnv(action_config, env_config, eval_config)
+        return train_env, eval_env
+
+    def __init__(self, action_config: ActionConfig, env_config: EnvConfig, data_config: DataConfig):
+        super(ForexEnv, self).__init__()
 
         # Environment parameters
-        self.initial_capital = initial_capital
-        self.transaction_cost_pct = transaction_cost_pct
-        self.agent_feature_engineer = agent_feature_engineer
-        self.custom_reward_function = custom_reward_function
+        self.initial_capital = env_config.initial_capital
+        self.transaction_cost_pct = env_config.transaction_cost_pct
+        self.custom_reward_fn = env_config.reward_function
+        self.observations = data_config.observations
 
-        # Market data and Market features
-        market_data_df = market_data_df.copy(deep=True)[MarketDataCol.all_names()]
-        market_feature_df = market_feature_df.copy(deep=True)
-        start_index = find_first_row_without_nan(market_data_df)
-        start_index = max(start_index, find_first_row_without_nan(market_feature_df))
-        market_data_df = market_data_df.iloc[start_index:]
-        market_feature_df = market_feature_df.iloc[start_index:]
-        market_data_df.reset_index(drop=True, inplace=True)
-        market_feature_df.reset_index(drop=True, inplace=True)
-
-        # Processed data validation
-        if len(market_data_df) != len(market_feature_df):
-            raise ValueError(f"market_data, and market_features must be the same length, was {len(market_data_df)}, and {len(market_feature_df)}.")
-        if market_data_df.isna().any().any():
-            first_nan_index = find_first_row_with_nan(market_data_df)
-            raise ValueError(f"market_data_df contains NaN values. First NaN index: {first_nan_index}. Row: {market_data_df.iloc[first_nan_index]}.")
-        if market_feature_df.isna().any().any():
-            first_nan_index = find_first_row_with_nan(market_feature_df)
-            raise ValueError(f"market_feature_df contains NaN values. First NaN index: {first_nan_index}. Row: {market_feature_df.iloc[first_nan_index]}.")
+        # Market data
+        self.market_data = data_config.market_data.to_numpy(dtype=np.float32)
 
         # Step counter
         self.n_steps = 0 # the current step index
-        self.episode_len = len(market_data_df) - 1 # the total #steps in an episode
-        self.data_len = len(market_data_df)
+        self.episode_len = len(self.market_data) - 1 # the total #steps in an episode
+        self.data_len = len(self.market_data)
 
-        # Shuffling logic
-        if shuffled:
-            logging.warning("shuffling has been temporarily removed, no shuffling has occurred.")
-
-        # Use numpy arrays for speed
-        self.market_data = market_data_df.to_numpy(dtype=np.float32)
-        self.market_features = market_feature_df.to_numpy(dtype=np.float32)
-        self.market_feature_names = market_feature_df.columns.tolist()
+        # Agent data
         self.agent_data = np.zeros(shape = (self.data_len, len(AgentDataCol.all_names())), dtype=np.float32)
         self.agent_data[0, :] = (
             self.initial_capital, # cash
@@ -172,27 +299,15 @@ class ForexEnv(gym.Env):
         self.agent_data[1, AgentDataCol.pre_action_equity] = self.initial_capital
 
         assert self.market_data.shape == (self.data_len, len(MarketDataCol))
-        assert self.market_features.shape == (self.data_len, len(self.market_feature_names))
         assert self.agent_data.shape == (self.data_len, len(AgentDataCol))
 
-        # Action space
-        self.n_actions = n_actions
-        if self.n_actions == 0:
-            logging.info(f"n_actions is zero, using continuous action space")
-            low = -1.0 if allow_short else 0.0
-            high = 1.0 if allow_long else 0.0
-            self.action_space = spaces.Box(low=low, high=high, shape=(1,), dtype=np.float32)
-        else:
-            self.short_actions = n_actions * allow_short
-            long_actions = n_actions * allow_short
-            logging.info(f"n_actions is larger than zero, using discrete action space with {long_actions} action(s) for long, {self.short_actions} for short, and 1 for no_participation.")
-            self.action_space = spaces.Discrete(self.short_actions + 1 + long_actions)
+        # Define action space
+        self.n_actions = action_config.n_actions
+        self.actions = action_config.actions
+        self.action_space = action_config.action_space
 
         # Define observation space
-        num_market_features = len(market_feature_df.columns)
-        num_state_features = self.agent_feature_engineer.num_of_features()
-        observation_space_shape = num_market_features + num_state_features
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(observation_space_shape,), dtype=np.float32)   
+        self.observation_space = self._create_observation_space()
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -243,16 +358,16 @@ class ForexEnv(gym.Env):
             # Episode is ending, put relevant final info here
             number_of_steps = self.n_steps + 1
             market_data = self.market_data[:number_of_steps]
-            market_features = self.market_features[:number_of_steps]
             agent_data = self.agent_data[:number_of_steps]
 
             market_data_df = pd.DataFrame(market_data, columns=MarketDataCol.all_names())
-            market_features_df = pd.DataFrame(market_features, columns=self.market_feature_names)
             agent_data_df = pd.DataFrame(agent_data, columns=AgentDataCol.all_names())
 
             info['market_data'] = market_data_df
-            info['market_features'] = market_features_df
             info['agent_data'] = agent_data_df
+
+            for obs in self.observations:
+                info[obs.config.name] = pd.DataFrame(obs.features_data, columns=obs.feature_names)
 
         return self._get_observation(), self._get_reward(), terminated, truncated, info
 
@@ -261,26 +376,52 @@ class ForexEnv(gym.Env):
         Calculates the reward based on the current equity.
         Uses a custom reward function if provided, otherwise defaults to equity change.
         """
-        if self.custom_reward_function is not None:
-            return self.custom_reward_function(self)
+        if self.custom_reward_fn is not None:
+            return self.custom_reward_fn(self)
         prev_equity = self.agent_data[self.n_steps, AgentDataCol.pre_action_equity]
         next_equity = self.agent_data[self.n_steps + 1, AgentDataCol.pre_action_equity]
         return next_equity - prev_equity
+
+    def _get_target_exposure(self, action: np.ndarray | np.generic) -> float:
+        """
+        Standardizes actions by converting them to the target exposure.
+        """
+        action = np.asarray(action).item() # ensure native python scalars
+        if self.n_actions == 0: # Actions are already continuous
+            return action
+        return self.actions[int(action)] # type: ignore
 
     def _get_observation(self):
         """
         Returns the current observation of the environment.
         The observation is a combination of market features and state features.
         """
-        market_features = self.market_features[self.n_steps]
-        state_features = self.agent_feature_engineer.run(self.agent_data, self.n_steps)
-        return np.concatenate((market_features, state_features), axis=0)
+        if len(self.observations) == 0:
+            market_features = self.market_data[self.n_steps]
+            agent_features = self.agent_data[self.n_steps]
+            return np.concatenate((market_features, agent_features))
+        elif len(self.observations) == 1:
+            return self.observations[0].get_observation(self.n_steps, self.agent_data)
+        return {
+            obs.config.name: obs.get_observation(self.n_steps, self.agent_data)
+            for obs in self.observations
+        }
 
-    def _get_target_exposure(self, action: np.ndarray | np.generic) -> float:
-        """
-        Standardizes actions by converting them to the target exposure.
-        """
-        action = action.item()
-        if self.n_actions == 0:
-            return action
-        return (action - self.short_actions) / self.n_actions
+    def _create_observation_space(self):
+        """Create the observation space using the individual observations"""
+        if len(self.observations) == 0:
+            # Default case: concatenate market data and agent data (raw, no processing)
+            num_market_features = len(MarketDataCol)
+            num_agent_features = len(AgentDataCol)
+            total_features = num_market_features + num_agent_features
+            return spaces.Box(low=-np.inf, high=np.inf, shape=(total_features,), dtype=np.float32)
+
+        elif len(self.observations) == 1:
+            # Single observation: return Box space
+            return self.observations[0].get_observation_space()
+
+        # Multiple observations: return Dict space
+        return spaces.Dict({
+            obs.config.name: obs.get_observation_space()
+            for obs in self.observations
+        })

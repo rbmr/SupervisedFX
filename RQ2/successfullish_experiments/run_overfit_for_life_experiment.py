@@ -6,6 +6,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from torch.nn import LeakyReLU
 
 from RQ2.constants import *
+from RQ2.parameters import INITIAL_CAPITAL, TRANSACTION_COST_PCT
 from common.constants import *
 from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import *
@@ -158,7 +159,7 @@ def main():
         agent_feature_engineer=stepwise_feature_engineer,
         initial_capital=INITIAL_CAPITAL,
         transaction_cost_pct=TRANSACTION_COST_PCT,
-        n_actions=1,
+        n_actions=3,
         custom_reward_function=percentage_return)
     logging.info("Environments created.")
 
