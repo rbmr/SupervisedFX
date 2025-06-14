@@ -31,7 +31,8 @@ def run_experiment(train_env: ForexEnv,
                        eval_episodes: int = 1,
                        checkpoints: bool = False,
                        tensorboard_logging: bool = False,
-                       seed = 42
+                       seed = 42,
+                       num_workers: int = 1
                        ) -> None:
     """
     Train the model on the training DataFrame, test it on the test DataFrame, and export the results.
@@ -87,14 +88,14 @@ def run_experiment(train_env: ForexEnv,
                     eval_envs={"train": train_env,
                                "eval": eval_env},
                     eval_episodes=eval_episodes,
-                    num_workers=1)
+                    num_workers=num_workers)
 
     # ANALYZING RESULTS
 
     analyse_results(
         results_dir=results_path,
         model_name_suffix=f"[{experiment_group_name}::{experiment_name}]",
-        num_workers=1
+        num_workers=num_workers
     )
 
 def train_model(model: BaseAlgorithm,

@@ -1,7 +1,7 @@
 import logging
 
 import torch.optim as optim
-from stable_baselines3 import DQN
+from stable_baselines3 import DQN, SAC
 from stable_baselines3.common.vec_env import DummyVecEnv
 from torch.nn import LeakyReLU
 
@@ -15,111 +15,6 @@ from common.envs.rewards import percentage_return
 from common.models.train_eval import run_experiment
 from common.scripts import *
 from RQ2.parameters import *
-
-
-def get_feature_engineer() -> FeatureEngineer:
-    """
-    Create a feature engineer object with the required features.
-    """
-    feature_engineer = FeatureEngineer()
-
-    feature_engineer.add(complex_7d)
-    feature_engineer.add(complex_24h)
-    
-    # Add basic features
-    # FEATURE 0 - CLOSE_PCT_CHANGE - 12 features
-    def feature_0(df):
-        copy_column(df, "close_bid", "close_pct_change")
-        as_pct_change(df, "close_pct_change")
-        #history_lookback(df, 11, ["close_pct_change"])
-    feature_engineer.add(feature_0)
-
-    # -- TREND FEATURES --
-
-    # FEATURE 1 - EMA_20 - 12 features 
-    def feature_1(df):
-        ema(df, window=20)
-        as_ratio_of_other_column(df, "ema_20_close_bid", "close_bid")
-        #history_lookback(df, 11, ["ema_20_close_bid"])
-    feature_engineer.add(feature_1)
-
-    # FEATURE 2 - BOLLINGER_BANDS - 24 features
-    def feature_2(df):
-        bollinger_bands(df, window=20, num_std_dev=2)
-        as_ratio_of_other_column(df, "bb_upper_20", "close_bid")
-        as_ratio_of_other_column(df, "bb_lower_20", "close_bid")
-        #history_lookback(df, 11, ["bb_upper_20"])
-        #history_lookback(df, 11, ["bb_lower_20"])
-    feature_engineer.add(feature_2)
-
-    # FEATURE 3 - MACD - 12 features
-    def feature_3(df):
-        macd(df, short_window=12, long_window=26, signal_window=9)
-        remove_columns(df, ["macd_signal", "macd"])
-        #history_lookback(df, 11, ["macd_hist"])
-    feature_engineer.add(feature_3)
-
-    # -- TREND FEATURES END --
-
-    # -- MOMENTUM FEATURES --
-    # FEATURE 4 - RSI - 12 features
-    def feature_4(df):
-        rsi(df, window=14)
-        as_min_max_fixed(df, "rsi_14", 0, 100)
-        #history_lookback(df, 11, ["rsi_14"])
-    feature_engineer.add(feature_4)
-
-    # FEATURE 5 - STOCHASTIC_OSCILLATOR - 12 features
-    def feature_5(df):
-        stochastic_oscillator(df, window=3)
-        as_min_max_fixed(df, "stoch_k", 0, 100)
-        as_min_max_fixed(df, "stoch_d", 0, 100)
-        #history_lookback(df, 11, ["stoch_k"])
-        #history_lookback(df, 11, ["stoch_d"])
-    feature_engineer.add(feature_5)
-
-    # FEATURE 6 - CCI - 12 features
-    def feature_6(df):
-        cci(df, window=20)
-        as_min_max_fixed(df, "cci_20", -100, 100)
-        #history_lookback(df, 11, ["cci_20"])
-    feature_engineer.add(feature_6)
-
-    # -- MOMENTUM FEATURES END --=
-
-    # -- VOLUME FEATURES --
-    # FEATURE 7 - MFI - 12 features
-    def feature_7(df):
-        mfi(df, window=14)
-        as_min_max_fixed(df, "mfi_14", 0, 100)
-        #history_lookback(df, 11, ["mfi_14"])
-    feature_engineer.add(feature_7)
-
-    def feature_8(df):
-        # FEATURE 8 - OBV - 12 features
-        obv(df)
-        as_ratio_of_other_column(df, "obv", "volume")
-        #history_lookback(df, 11, ["obv"])
-    feature_engineer.add(feature_8)
-    
-    def feature_9(df):
-        # FEATURE 9 - CMF - 12 features
-        cmf(df, window=20)
-        as_min_max_fixed(df, "cmf_20", -1, 1)
-        #history_lookback(df, 11, ["cmf_20"])
-    feature_engineer.add(feature_9)
-
-    # -- VOLUME FEATURES END --
-
-    # -- EXTRA TEST FEATURES --
-    def feature_10(df):
-        # FEATURE 10 - KAMA
-        kama(df, window=10)
-        as_ratio_of_other_column(df, "kama_10_close_bid", "close_bid")
-        #history_lookback(df, 11, ["kama_10_close_bid"])
-    feature_engineer.add(feature_10)
-
-    return feature_engineer
 
 
 def main():
@@ -145,28 +40,34 @@ def main():
         agent_feature_engineer=stepwise_feature_engineer,
         initial_capital=INITIAL_CAPITAL,
         transaction_cost_pct=TRANSACTION_COST_PCT,
-        n_actions=3,
+        n_actions=0,
         custom_reward_function=percentage_return)
     logging.info("Environments created.")
 
     temp_env = DummyVecEnv([lambda: train_env])
-    dqn_kwargs = base_dqn_kwargs(temp_env)
-    dqn_kwargs['learning_rate'] = 0.00005
-    dqn_kwargs['buffer_size'] = 60_000
-    dqn_kwargs['batch_size'] = 512
-    dqn_kwargs['tau'] = 0.0025
-    dqn_kwargs['train_freq'] = 128
-    dqn_kwargs['gradient_steps'] = 1
-    dqn_kwargs['target_update_interval'] = 2500
-    dqn_kwargs['exploration_fraction'] = 0.2
-    dqn_kwargs['exploration_initial_eps'] = 1.0
-    dqn_kwargs['exploration_final_eps'] = 0.02
 
-    dqn_kwargs['policy_kwargs'] = {
-        'net_arch': [8],
-    }
 
-    model = DQN(**dqn_kwargs)
+    model = SAC(
+        policy="MlpPolicy",
+        env=temp_env,
+        learning_rate=0.0005,
+        buffer_size=60_000,
+        learning_starts=1000,
+        batch_size=512,
+        tau=0.005,
+        gamma=0.95,
+        train_freq=1,
+        gradient_steps=1,
+        target_update_interval=1,
+        ent_coef='auto',
+        policy_kwargs=dict(
+            net_arch=[32, 16],
+            activation_fn=LeakyReLU,
+            optimizer_class=optim.Adam,
+        ),
+        verbose=1
+    )
+
 
     logging.info("Model created.")
     logging.info("Model architecture:" + str(model.policy))
@@ -177,12 +78,14 @@ def main():
         eval_env=eval_env,
         model=model,
         base_folder_path=RQ2_DIR,
-        experiment_group_name="testytest",
-        experiment_name="test_policy_187987",
-        train_episodes=0,
+        experiment_group_name="sac",
+        experiment_name="1",
+        train_episodes=50,
         eval_episodes=1,
         checkpoints=True,
-        tensorboard_logging=True
+        tensorboard_logging=True,
+        seed=SEED,
+        num_workers=3,
     )
     
 
