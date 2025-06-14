@@ -102,6 +102,7 @@ def interp(vs: np.ndarray, x: float, n: int):
     """
     Calculates a bi-linear interpolation of a row from the value table using an exposure x.
     """
+    x = np.clip(x, -1.0, 1.0) # Could exit -1.0, to 1.0 because of floating point inaccuracies.
     pos = (x + 1) * 0.5 * (n - 1)
     i0 = math.floor(pos)
     i1 = math.ceil(pos)
