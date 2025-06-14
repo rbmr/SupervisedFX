@@ -357,9 +357,9 @@ def run_model(model: BaseAlgorithm,
             market_features_df.columns = [f"info.market_features.{col}" for col in market_features_df.columns]
             agent_data_df.columns = [f"info.agent_data.{col}" for col in agent_data_df.columns]
 
-            assert len(episode_log) == len(market_data_df)
-            assert len(episode_log) == len(market_features_df)
-            assert len(episode_log) == len(agent_data_df)
+            assert len(episode_log) == len(market_data_df), f"len episode_log ({len(episode_log)}) != len agent_data_df ({len(market_data_df)})"
+            assert len(episode_log) == len(market_features_df), f"len episode_log ({len(episode_log)}) != len agent_data_df ({len(market_features_df)})"
+            assert len(episode_log) == len(agent_data_df), f"len episode_log ({len(episode_log)}) != len agent_data_df ({len(agent_data_df)})"
 
             temp_df = pd.DataFrame(episode_log)
             temp_df = pd.concat([temp_df, agent_data_df, market_data_df, market_features_df], axis=1)

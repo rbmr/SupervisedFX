@@ -76,9 +76,11 @@ class ObsConfig:
 @dataclass(frozen=True)
 class EnvObs:
 
-    config: ObsConfig
     features_data: np.ndarray
     feature_names: list[str]
+    sfe: StepwiseFeatureEngineer
+    name: str
+    window: int
 
     @classmethod
     def from_config(cls, config: ObsConfig, market_data: pd.DataFrame):
@@ -95,16 +97,16 @@ class EnvObs:
         logging.info(f"'{config.name}' features ({len(features_data)}, {len(feature_names)}): {feature_names})")
         logging.info(f"'{config.name}' stepwise features ({config.sfe.num_of_features()}): {config.sfe.get_features()})")
 
-        return cls(config, features_data, feature_names)
+        return cls(features_data, feature_names, config.sfe, config.name, config.window)
 
     def get_observation_space(self) -> spaces.Space:
         """Get the observation space for this observation."""
         num_features = self.features_data.shape[1]
-        if self.config.sfe is not None:
-            num_features += self.config.sfe.num_of_features()
-        if self.config.window == 1:
+        if self.sfe is not None:
+            num_features += self.sfe.num_of_features()
+        if self.window == 1:
             return spaces.Box(low=-np.inf, high=np.inf, shape=(num_features,), dtype=np.float32)
-        return spaces.Box(low=-np.inf, high=np.inf, shape=(self.config.window, num_features), dtype=np.float32)
+        return spaces.Box(low=-np.inf, high=np.inf, shape=(self.window, num_features), dtype=np.float32)
 
     def get_observation(self, n_steps: int, agent_data: np.ndarray) -> np.ndarray:
         """Get observation for the current step."""
@@ -112,21 +114,21 @@ class EnvObs:
         # Get static features
         static_features = None
         if len(self.feature_names) > 0:
-            if self.config.window == 1:
+            if self.window == 1:
                 static_features = self.features_data[n_steps]
             else:
-                start_idx = max(0, n_steps - self.config.window + 1)
+                start_idx = max(0, n_steps - self.window + 1)
                 end_idx = n_steps + 1
                 static_features = self.features_data[start_idx:end_idx]
-                if len(static_features) < self.config.window:
-                    pad_size = self.config.window - len(static_features)
+                if len(static_features) < self.window:
+                    pad_size = self.window - len(static_features)
                     padding = np.zeros((pad_size, static_features.shape[1]), dtype=np.float32)
                     static_features = np.vstack((padding, static_features))
 
         # Get stepwise features
         stepwise_features = None
-        if self.config.sfe is not None:
-            stepwise_features = self.config.sfe.run(agent_data, n_steps)
+        if self.sfe is not None:
+            stepwise_features = self.sfe.run(agent_data, n_steps)
 
         # Combine features
         if static_features is None and stepwise_features is None:
@@ -170,14 +172,18 @@ class DataConfig:
         eval_env_obs = []
         for env_ob in observations:
             train_env_obs.append(EnvObs(
-                config = env_ob.config,
                 features_data = env_ob.features_data[:split_index],
                 feature_names = env_ob.feature_names,
+                sfe = env_ob.sfe,
+                name = env_ob.name,
+                window = env_ob.window
             ))
             eval_env_obs.append(EnvObs(
-                config = env_ob.config,
                 features_data = env_ob.features_data[split_index:],
                 feature_names = env_ob.feature_names,
+                sfe = env_ob.sfe,
+                name = env_ob.name,
+                window = env_ob.window
             ))
 
         # Get configs
@@ -219,8 +225,8 @@ class DataConfig:
             adjusted_features_data = env_ob.features_data[start_index:]
             temp_df = pd.DataFrame(adjusted_features_data, columns=env_ob.feature_names)
             assert not temp_df.isna().any().any(), f"market_data contains NaN values at index {find_first_row_with_nan(market_data)}"
-            assert len(market_data) == len(adjusted_features_data), f"len market_data ({len(market_data)}) != len features for '{env_ob.config.name}' ({len(adjusted_features_data)})"
-            final_env_obs.append(EnvObs(env_ob.config, adjusted_features_data, env_ob.feature_names))
+            assert len(market_data) == len(adjusted_features_data), f"len market_data ({len(market_data)}) != len features for '{env_ob.name}' ({len(adjusted_features_data)})"
+            final_env_obs.append(EnvObs(adjusted_features_data, env_ob.feature_names, env_ob.sfe, env_ob.name, env_ob.window))
 
         # Set parameters
         self.market_data = market_data
@@ -307,7 +313,15 @@ class ForexEnv(gym.Env):
         self.action_space = action_config.action_space
 
         # Define observation space
-        self.observation_space = self._create_observation_space()
+        if len(self.observations) == 0:
+            self.observation_space = self._create_default_obs_space()
+            self._get_observation = self._get_default_obs
+        elif len(self.observations) == 1:
+            self.observation_space = self._create_single_obs_space()
+            self._get_observation = self._get_single_obs
+        else:
+            self.observation_space = self._create_multi_obs_space()
+            self._get_observation = self._get_multi_obs
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -367,7 +381,7 @@ class ForexEnv(gym.Env):
             info['agent_data'] = agent_data_df
 
             for obs in self.observations:
-                info[obs.config.name] = pd.DataFrame(obs.features_data, columns=obs.feature_names)
+                info[obs.name] = pd.DataFrame(obs.features_data[:number_of_steps], columns=obs.feature_names)
 
         return self._get_observation(), self._get_reward(), terminated, truncated, info
 
@@ -391,37 +405,35 @@ class ForexEnv(gym.Env):
             return action
         return self.actions[int(action)] # type: ignore
 
-    def _get_observation(self):
-        """
-        Returns the current observation of the environment.
-        The observation is a combination of market features and state features.
-        """
-        if len(self.observations) == 0:
-            market_features = self.market_data[self.n_steps]
-            agent_features = self.agent_data[self.n_steps]
-            return np.concatenate((market_features, agent_features))
-        elif len(self.observations) == 1:
-            return self.observations[0].get_observation(self.n_steps, self.agent_data)
+    def _get_default_obs(self):
+        market_features = self.market_data[self.n_steps]
+        agent_features = self.agent_data[self.n_steps]
+        return np.concatenate((market_features, agent_features))
+
+    @staticmethod
+    def _create_default_obs_space():
+        # Default case: concatenate market data and agent data (raw, no processing)
+        num_market_features = len(MarketDataCol)
+        num_agent_features = len(AgentDataCol)
+        total_features = num_market_features + num_agent_features
+        return spaces.Box(low=-np.inf, high=np.inf, shape=(total_features,), dtype=np.float32)
+
+    def _get_single_obs(self):
+        return self.observations[0].get_observation(self.n_steps, self.agent_data)
+
+    def _create_single_obs_space(self):
+        # Single observation: return Box space
+        return self.observations[0].get_observation_space()
+
+    def _get_multi_obs(self):
         return {
-            obs.config.name: obs.get_observation(self.n_steps, self.agent_data)
+            obs.name: obs.get_observation(self.n_steps, self.agent_data)
             for obs in self.observations
         }
 
-    def _create_observation_space(self):
-        """Create the observation space using the individual observations"""
-        if len(self.observations) == 0:
-            # Default case: concatenate market data and agent data (raw, no processing)
-            num_market_features = len(MarketDataCol)
-            num_agent_features = len(AgentDataCol)
-            total_features = num_market_features + num_agent_features
-            return spaces.Box(low=-np.inf, high=np.inf, shape=(total_features,), dtype=np.float32)
-
-        elif len(self.observations) == 1:
-            # Single observation: return Box space
-            return self.observations[0].get_observation_space()
-
+    def _create_multi_obs_space(self):
         # Multiple observations: return Dict space
         return spaces.Dict({
-            obs.config.name: obs.get_observation_space()
+            obs.name: obs.get_observation_space()
             for obs in self.observations
         })
