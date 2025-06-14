@@ -61,6 +61,7 @@ def run_experiment(train_env: ForexEnv,
         model = load_model_with_metadata(latest_model)
         starting_episode = int(latest_model.stem.split('_')[1])
         train_episodes -= starting_episode
+        train_episodes = max(train_episodes, 0)  # Ensure non-negative episodes
 
 
     callbacks = []
