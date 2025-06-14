@@ -16,7 +16,7 @@ from common.envs.forex_env import ForexEnv
 from common.models.analysis import analyse_finals, analyse_individual_run
 from common.models.dummy_models import DUMMY_MODELS
 from common.models.utils import (load_model_with_metadata, save_model_with_metadata)
-from common.scripts import parallel_run
+from common.scripts import parallel_run, set_seed
 
 from common.models.dummy_models import DummyModel
 
@@ -30,11 +30,15 @@ def run_experiment(train_env: ForexEnv,
                        train_episodes: int = 10,
                        eval_episodes: int = 1,
                        checkpoints: bool = False,
-                       tensorboard_logging: bool = False
+                       tensorboard_logging: bool = False,
+                       seed = 42
                        ) -> None:
     """
     Train the model on the training DataFrame, test it on the test DataFrame, and export the results.
     """
+
+    set_seed(seed)
+
     # Set up folders
     experiment_path = base_folder_path / "experiments" / experiment_group_name / experiment_name
     results_path = experiment_path / "results"
@@ -61,6 +65,7 @@ def run_experiment(train_env: ForexEnv,
         model = load_model_with_metadata(latest_model)
         starting_episode = int(latest_model.stem.split('_')[1])
         train_episodes -= starting_episode
+        train_episodes = max(train_episodes, 0)  # Ensure non-negative episodes
 
 
     callbacks = []

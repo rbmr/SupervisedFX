@@ -15,7 +15,6 @@ import matplotlib
 matplotlib.use('Agg')
 
 SEED = 42
-set_seed(SEED)
 
 INITIAL_CAPITAL = 10000.0
 TRANSACTION_COST_PCT = 5/100_000

@@ -84,7 +84,8 @@ def main():
             train_episodes=TRAIN_EPISODES,
             eval_episodes=1,
             checkpoints=True,
-            tensorboard_logging=True
+            tensorboard_logging=True,
+            seed=SEED
         )
 
         logging.info(f"Experiment {experiment.__name__} completed.\n")
