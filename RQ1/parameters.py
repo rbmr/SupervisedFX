@@ -1,14 +1,16 @@
 import logging
 import os
 import shutil
+from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
 from pathlib import Path
+from typing import Optional, Callable
 
 from stable_baselines3 import SAC
 from torch import nn
 
-from RQ1.constants import TENSORBOARD_DIR
+from RQ1.constants import TENSORBOARD_DIR, EXPERIMENT_NAME_FORMAT
 from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import (FeatureEngineer, adx,
                                           as_min_max_fixed, as_min_max_window,
@@ -25,37 +27,21 @@ from common.envs.dp import get_dp_table_from_env
 from common.envs.forex_env import ForexEnv
 from common.envs.rewards import DPRewardFunction
 
+@dataclass(frozen=True)
+class ExperimentConfig:
+    name: str = field(default_factory=lambda: datetime.now().strftime(EXPERIMENT_NAME_FORMAT))
+    net_arch: dict = field(default_factory=lambda: dict(pi=[64, 64], vf=[64, 64]))
+    activation_fn: Callable = nn.ReLU
+    lookback: int = 0 # features = 23 + 19 * lookback
 
-def get_train_model(env: ForexEnv, tb_log: Path | None = None):
+def get_train_model(env: ForexEnv, net_arch: Optional[dict] = None, activation_fn = None, tb_log: Path | None = None):
 
     logging.info("Creating model...")
 
-    # def linear_lr(start: float, end: float):
-    #     diff = start - end
-    #     def func(progress_remaining):
-    #         return diff * progress_remaining + end
-    #     return func
-
-    # a2c_hyperparams = dict(
-    #     policy="MlpPolicy",
-    #     env=env,
-    #     learning_rate=linear_lr(1e-3, 1e-5), # Rate of policy updates
-    #     n_steps=128,
-    #     gamma=1.0,
-    #     gae_lambda=0.95,
-    #     ent_coef=0.05,
-    #     vf_coef=0.5,
-    #     max_grad_norm=0.5,
-    #     rms_prop_eps=1e-5,
-    #     normalize_advantage=True,
-    #     policy_kwargs=dict(
-    #         activation_fn=nn.ReLU,
-    #         net_arch=dict(pi=[64, 64], vf=[64, 64]),
-    #     ),
-    #     verbose=0,
-    #     tensorboard_log=tb_log,
-    #     device="cpu",
-    # )
+    if net_arch is None:
+        net_arch = dict(pi=[64, 64], qf=[64, 64])
+    if activation_fn is None:
+        activation_fn = nn.ReLU
 
     sac_hyperparams = dict(
         policy="MlpPolicy",
@@ -67,11 +53,11 @@ def get_train_model(env: ForexEnv, tb_log: Path | None = None):
         tau=0.005,
         gamma=0.99,
         ent_coef='auto',
-        gradient_steps=1,
-        train_freq=32,
+        gradient_steps=2,
+        train_freq=48,
         policy_kwargs=dict(
-            activation_fn=nn.ReLU,
-            net_arch=dict(pi=[64, 64], qf=[64, 64]),
+            activation_fn=activation_fn,
+            net_arch=net_arch,
         ),
         verbose=0,
         tensorboard_log=str(tb_log) if tb_log is not None else None,
@@ -94,15 +80,15 @@ def get_data():
         instrument="EURUSD",
         granularity=Timeframe.M30,
         start_time=datetime(2020, 1, 1, 22, 0, 0, 0),
-        end_time=datetime(2023, 12, 29, 21, 30, 0, 0),
+        end_time=datetime(2024, 12, 31, 21, 30, 0, 0),
     )
 
-def get_train_env():
+def get_train_env(lookback: int = 0):
 
     forex_candle_data = get_data()
 
     logging.info("Setting up feature engineer...")
-    market_feature_engineer, agent_feature_engineer = get_feature_engineers()
+    market_feature_engineer, agent_feature_engineer = get_feature_engineers(lookback=lookback)
 
     logging.info("Creating environments...")
     train_env, eval_env = ForexEnv.create_train_eval_envs(
@@ -127,12 +113,12 @@ def get_train_env():
 
     return train_env
 
-def get_eval_envs():
+def get_eval_envs(lookback: int = 0):
 
     forex_candle_data = get_data()
 
     logging.info("Setting up feature engineers...")
-    market_feature_engineer, agent_feature_engineer = get_feature_engineers()
+    market_feature_engineer, agent_feature_engineer = get_feature_engineers(lookback=lookback)
 
     logging.info("Creating environments...")
     train_env, eval_env = ForexEnv.create_train_eval_envs(
@@ -214,7 +200,7 @@ def _feat_volatility(df):
     as_z_score(df, "atr_ratio_14", window=500)
 
 
-def get_feature_engineers():
+def get_feature_engineers(lookback: int = 3):
     """
     Returns a FeatureEngineer that constructs exactly the four groups of features used
     in Zhang et al. (2019):
@@ -244,13 +230,15 @@ def get_feature_engineers():
 
     fe.add(_feat_volatility)
 
-    # 5) Time of day/week
+    # 5) Add small lookback
+    ohlcv_columns = ['volume', 'date_gmt',
+                     'open_bid', 'high_bid', 'low_bid', 'close_bid', 'volume_bid',
+                     'open_ask', 'high_ask', 'low_ask', 'close_ask', 'volume_ask']
+    fe.add(partial(history_lookback, lookback_window_size=lookback, not_columns=ohlcv_columns))
+
+    # 6) Time of day/week
     fe.add(complex_7d)
     fe.add(complex_24h)
-
-    # 6) Add small lookback
-    fe.add(remove_ohlcv)
-    fe.add(partial(history_lookback, lookback_window_size=2))
 
     # Setup stepwise feature engineer
     sfe = StepwiseFeatureEngineer()
