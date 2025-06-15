@@ -44,7 +44,6 @@ class EnvConfig:
 
     initial_capital: float = 10_000.0
     transaction_cost_pct: float = 0.0
-    shuffled: bool = False
     reward_function: Optional[Callable[[gym.Env], float]] = None
 
     def __post_init__(self):
@@ -52,8 +51,6 @@ class EnvConfig:
             raise ValueError(f"initial_capital must be positive, was {self.initial_capital}.")
         if self.transaction_cost_pct < 0.0 or self.transaction_cost_pct > 1.0:
             raise ValueError(f"transaction_cost_pct must in [0.0, 1.0], was {self.transaction_cost_pct}.")
-        if self.shuffled:
-            logging.warning("shuffling has been temporarily removed. Shuffled parameter has no effect.")
 
 @dataclass(frozen=True)
 class ObsConfig:
@@ -94,8 +91,15 @@ class EnvObs:
             features_data = np.empty((len(market_data), 0), dtype=np.float32)
             feature_names = []
 
+        if config.sfe is not None:
+            sfe_n_features = config.sfe.num_of_features()
+            sfe_features = config.sfe.get_features()
+        else:
+            sfe_n_features = 0
+            sfe_features = []
+
         logging.info(f"'{config.name}' features ({len(features_data)}, {len(feature_names)}): {feature_names})")
-        logging.info(f"'{config.name}' stepwise features ({config.sfe.num_of_features()}): {config.sfe.get_features()})")
+        logging.info(f"'{config.name}' stepwise features ({sfe_n_features}): {sfe_features})")
 
         return cls(features_data, feature_names, config.sfe, config.name, config.window)
 
@@ -106,7 +110,7 @@ class EnvObs:
             num_features += self.sfe.num_of_features()
         if self.window == 1:
             return spaces.Box(low=-np.inf, high=np.inf, shape=(num_features,), dtype=np.float32)
-        return spaces.Box(low=-np.inf, high=np.inf, shape=(self.window, num_features), dtype=np.float32)
+        return spaces.Box(low=-np.inf, high=np.inf, shape=(1, num_features, self.window), dtype=np.float32)
 
     def get_observation(self, n_steps: int, agent_data: np.ndarray) -> np.ndarray:
         """Get observation for the current step."""
@@ -124,6 +128,7 @@ class EnvObs:
                     pad_size = self.window - len(static_features)
                     padding = np.zeros((pad_size, static_features.shape[1]), dtype=np.float32)
                     static_features = np.vstack((padding, static_features))
+                static_features = static_features.transpose()[np.newaxis, ...]
 
         # Get stepwise features
         stepwise_features = None
