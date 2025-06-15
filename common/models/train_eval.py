@@ -3,7 +3,7 @@ import logging
 from functools import partial
 from multiprocessing import Lock, Manager, Process
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import pandas as pd
 from stable_baselines3.common.base_class import BaseAlgorithm
@@ -16,7 +16,7 @@ from common.envs.forex_env import ForexEnv
 from common.models.analysis import analyse_finals, analyse_individual_run
 from common.models.dummy_models import DUMMY_MODELS
 from common.models.utils import (load_model_with_metadata, save_model_with_metadata)
-from common.scripts import parallel_run, set_seed
+from common.scripts import parallel_run, set_seed, safe_int
 
 from common.models.dummy_models import DummyModel
 
@@ -263,6 +263,21 @@ def analyze_result(data_csv: Path, model_name_suffix: str = ""):
     """
     analyse_individual_run(data_csv, f"{data_csv.parent.parent.name}{model_name_suffix}")
 
+def extract_n(p: Path) -> Optional[int]:
+    """
+    Extracts n in the following structure:
+    .../results/model_<n>_<unit>/<env_name>/file
+    Returns None if it couldn't be extracted.
+    """
+    return safe_int(p.parent.parent.name.split("_")[1])
+
+def extract_key(p) -> tuple[bool, int]:
+    """
+    Used to sort by key, sorts by n if possible else puts it at the end.
+    """
+    n = extract_n(p)
+    return n is None, n
+
 def analyse_results(results_dir: Path, model_name_suffix: str = "", num_workers = 4) -> None:
     """
     Searches a directory for data.csv files, and performs analysis.
@@ -279,7 +294,7 @@ def analyse_results(results_dir: Path, model_name_suffix: str = "", num_workers 
     # Evaluate runs
     func = partial(analyze_result, model_name_suffix=model_name_suffix)
     result_files = list(results_dir.rglob("data.csv"))
-    result_files.sort(key=lambda x: x.stat().st_mtime) # Old to new
+    result_files.sort(key=extract_key) # Old to new
     parallel_run(func, result_files, num_workers=num_workers)
 
     # Aggregate environment results
