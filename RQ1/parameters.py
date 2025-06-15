@@ -7,10 +7,12 @@ from functools import partial
 from pathlib import Path
 from typing import Optional, Callable
 
+from matplotlib import pyplot as plt
 from stable_baselines3 import SAC
 from torch import nn
 
-from RQ1.constants import TENSORBOARD_DIR, EXPERIMENT_NAME_FORMAT
+from RQ1.constants import TENSORBOARD_DIR, EXPERIMENT_NAME_FORMAT, N_ACTIONS, INITIAL_CAPITAL, TRANSACTION_COST_PCT, \
+    SPLIT_RATIO, FOREX_CANDLE_DATA
 from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import (FeatureEngineer, adx,
                                           as_min_max_fixed, as_min_max_window,
@@ -27,12 +29,26 @@ from common.envs.dp import get_dp_table_from_env
 from common.envs.forex_env import ForexEnv
 from common.envs.rewards import DPRewardFunction
 
+cud_colors = ['#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', '#D55E00', '#CC79A7']
+markers = ["o", "v", "s", "*", "D", "P", "X"]
+
 @dataclass(frozen=True)
 class ExperimentConfig:
+
     name: str = field(default_factory=lambda: datetime.now().strftime(EXPERIMENT_NAME_FORMAT))
     net_arch: dict = field(default_factory=lambda: dict(pi=[64, 64], vf=[64, 64]))
     activation_fn: Callable = nn.ReLU
     lookback: int = 0 # features = 23 + 19 * lookback
+    line_color: str = "black"
+    line_style: str = "-"
+    line_marker: Optional[str] = None
+
+    def get_style(self):
+        return {
+            "color" : self.line_color,
+            "linestyle" : self.line_style,
+            "marker": self.line_marker,
+        }
 
 def get_train_model(env: ForexEnv, net_arch: Optional[dict] = None, activation_fn = None, tb_log: Path | None = None):
 
@@ -51,7 +67,7 @@ def get_train_model(env: ForexEnv, net_arch: Optional[dict] = None, activation_f
         learning_starts=1000,
         batch_size=256,
         tau=0.005,
-        gamma=0.99,
+        gamma=1.0,
         ent_coef='auto',
         gradient_steps=2,
         train_freq=48,
@@ -73,32 +89,20 @@ def get_train_model(env: ForexEnv, net_arch: Optional[dict] = None, activation_f
 
     return model
 
-def get_data():
-    logging.info("Loading market data...")
-    return ForexCandleData.load(
-        source="dukascopy",
-        instrument="EURUSD",
-        granularity=Timeframe.M30,
-        start_time=datetime(2020, 1, 1, 22, 0, 0, 0),
-        end_time=datetime(2024, 12, 31, 21, 30, 0, 0),
-    )
-
 def get_train_env(lookback: int = 0):
-
-    forex_candle_data = get_data()
 
     logging.info("Setting up feature engineer...")
     market_feature_engineer, agent_feature_engineer = get_feature_engineers(lookback=lookback)
 
     logging.info("Creating environments...")
     train_env, eval_env = ForexEnv.create_train_eval_envs(
-        split_ratio=0.7,
-        forex_candle_data=forex_candle_data,
+        split_ratio=SPLIT_RATIO,
+        forex_candle_data=FOREX_CANDLE_DATA,
         market_feature_engineer=market_feature_engineer,
         agent_feature_engineer=agent_feature_engineer,
-        initial_capital=10_000.0,
-        transaction_cost_pct=0.005,
-        n_actions=0,
+        initial_capital=INITIAL_CAPITAL,
+        transaction_cost_pct=TRANSACTION_COST_PCT,
+        n_actions=N_ACTIONS,
         custom_reward_function=None, # None for now, set later
         shuffled=True,
     )
@@ -115,21 +119,19 @@ def get_train_env(lookback: int = 0):
 
 def get_eval_envs(lookback: int = 0):
 
-    forex_candle_data = get_data()
-
     logging.info("Setting up feature engineers...")
     market_feature_engineer, agent_feature_engineer = get_feature_engineers(lookback=lookback)
 
     logging.info("Creating environments...")
     train_env, eval_env = ForexEnv.create_train_eval_envs(
-        split_ratio=0.7,
-        forex_candle_data=forex_candle_data,
+        split_ratio=SPLIT_RATIO,
+        forex_candle_data=FOREX_CANDLE_DATA,
         market_feature_engineer=market_feature_engineer,
         agent_feature_engineer=agent_feature_engineer,
-        initial_capital=10_000.0,
-        transaction_cost_pct=0.0,
-        n_actions=0,
-        custom_reward_function=None, # None for now, set later
+        initial_capital=INITIAL_CAPITAL,
+        transaction_cost_pct=TRANSACTION_COST_PCT,
+        n_actions=N_ACTIONS,
+        custom_reward_function=None,
         shuffled=False,
     )
 
@@ -243,7 +245,6 @@ def get_feature_engineers(lookback: int = 3):
     # Setup stepwise feature engineer
     sfe = StepwiseFeatureEngineer()
     sfe.add(["current_exposure"], calculate_current_exposure)
-    sfe.add(['current_trade_length'], duration_of_current_trade) # 1
 
     return fe, sfe
 
