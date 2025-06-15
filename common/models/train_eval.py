@@ -372,11 +372,17 @@ def run_model(model: BaseAlgorithm,
             info = infos[0] if infos else {}
 
             for obs_name, obs_df in info.items():
+                if not isinstance(obs_df, pd.DataFrame):
+                    logging.debug(f"Observation '{obs_name}' is not a DataFrame, skipping...")
+                    continue
                 obs_df.columns = [f"info.{obs_name}.{col}" for col in obs_df.columns]
                 assert len(episode_log) == len(obs_df), f"len episode_log ({len(episode_log)}) != len {obs_name}_df ({len(obs_df)})"
 
             temp_df = pd.DataFrame(episode_log)
-            temp_df = pd.concat([temp_df, *(obs_df for _, obs_df in info.items())], axis=1)
+            temp_df = pd.concat(
+                [temp_df] + [df for df in info.values() if isinstance(df, pd.DataFrame)],
+                axis=1
+            )
             logs_df = temp_df if logs_df is None else pd.concat([logs_df, temp_df], ignore_index=True, axis=0)
 
             # Start new episode
