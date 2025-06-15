@@ -21,6 +21,33 @@ from common.envs.dp import get_dp_table_from_env
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+PARAM_PRESETS = {
+    "M30_0.7": {
+        "granularity": Timeframe.M30,
+        "start_time": datetime(2020, 1, 1, 22),
+        "end_time": datetime(2024, 12, 31, 21, 30),
+        "split_ratio": 0.7
+    },
+    "M15_0.8": {
+        "granularity": Timeframe.M15,
+        "start_time": datetime(2017, 1, 1, 22),
+        "end_time": datetime(2024, 12, 31, 21, 45),
+        "split_ratio": 0.8
+    },
+    "M15_0.7": {
+        "granularity": Timeframe.M15,
+        "start_time": datetime(2017, 1, 1, 22),
+        "end_time": datetime(2024, 12, 31, 21, 45),
+        "split_ratio": 0.7
+    },
+    "M30_0.8": {
+        "granularity": Timeframe.M30,
+        "start_time": datetime(2020, 1, 1, 22),
+        "end_time": datetime(2024, 12, 31, 21, 30),
+        "split_ratio": 0.8
+    }
+}
+
 def get_feature_engineer():
     fe = FeatureEngineer()
 
@@ -45,14 +72,14 @@ def get_feature_engineer():
     fe.add(oscillator)
     return fe
 
-def get_environments(use_optimal_reward=False):
+def get_environments(data_config, use_optimal_reward=False):
     logging.info("Loading market data...")
     data = ForexCandleData.load(
         source="dukascopy",
         instrument="EURUSD",
-        granularity=Timeframe.M30,
-        start_time=datetime(2020, 1, 1, 22),
-        end_time=datetime(2024, 12, 31, 21, 30),
+        granularity=data_config["granularity"],
+        start_time=data_config["start_time"],
+        end_time=data_config["end_time"],
     )
 
     logging.info("Creating feature pipelines...")
@@ -60,11 +87,12 @@ def get_environments(use_optimal_reward=False):
     agent_fe = StepwiseFeatureEngineer()
     agent_fe.add(["current_exposure"], calculate_current_exposure)
 
+    split_ratio = data_config.get("split_ratio", 0.8)
+
     logging.info("Building environments...")
     if use_optimal_reward:
-        # First build envs without reward to extract DP table from training data only
         train_env, eval_env = ForexEnv.create_train_eval_envs(
-            split_ratio=0.7,
+            split_ratio=split_ratio,
             forex_candle_data=data,
             market_feature_engineer=market_fe,
             agent_feature_engineer=agent_fe,
@@ -78,9 +106,8 @@ def get_environments(use_optimal_reward=False):
         train_env.custom_reward_fn = dp_reward
         return train_env, eval_env
     else:
-        # Regular log equity reward
         return ForexEnv.create_train_eval_envs(
-            split_ratio=0.8,
+            split_ratio=split_ratio,
             forex_candle_data=data,
             market_feature_engineer=market_fe,
             agent_feature_engineer=agent_fe,
@@ -91,15 +118,23 @@ def get_environments(use_optimal_reward=False):
     
 def run_experiment(exploration_strategy: str, use_optimal_reward=False):
     note = input("Enter a short note for this experiment: ").strip().replace(' ', '_')
+
+    print("Available data configs:", ', '.join(PARAM_PRESETS.keys()))
+    config_options = list(PARAM_PRESETS.keys())
+    config_key = picker([(key, key) for key in config_options], default="M30").strip()
+    config_key = config_key if config_key in PARAM_PRESETS else "M15_0.8"
+    data_config = PARAM_PRESETS[config_key]
+
+
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    exp_name = f"{exploration_strategy}_{note}_{timestamp}"
+    exp_name = f"{exploration_strategy}_{note}_{config_key}_{timestamp}"
     exp_dir = EXPERIMENTS_DIR / exp_name
 
     train_episodes = input("Enter number of training episodes (default 25): ")
     train_episodes = int(train_episodes) if train_episodes.isdigit() else 25
 
     # Train
-    train_env, eval_env = get_environments(use_optimal_reward=use_optimal_reward)
+    train_env, eval_env = get_environments(data_config, use_optimal_reward=use_optimal_reward)
     logging.info(f"Instantiating {exploration_strategy.upper()} model...")
 
     dqn_args = dict(
