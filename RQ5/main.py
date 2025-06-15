@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime
-from pathlib import Path
 import sys
 import os
 
@@ -8,16 +7,16 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from common.data.data import ForexCandleData, Timeframe
-from common.envs.forex_env import ForexEnv, log_equity_diff
+from common.envs.forex_env import ForexEnv
+from common.envs.rewards import *
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_current_exposure
 from common.data.feature_engineer import FeatureEngineer, as_pct_change, ema, rsi, copy_column, as_ratio_of_other_column, as_min_max_fixed
 from common.constants import SEED
 from RQ5.constants import EXPERIMENTS_DIR, EXPERIMENT_NAME_FORMAT
-from common.envs.callbacks import SaveOnEpisodeEndCallback, ActionHistogramCallback, CoolStatsCallback
+from common.envs.callbacks import *
 from common.models.train_eval import train_model
 from common.models.utils import save_model_with_metadata
 from common.scripts import picker, has_nonempty_subdir, n_children
-from stable_baselines3 import DQN
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -62,14 +61,14 @@ def get_environments():
 
     logging.info("Building environments...")
     return ForexEnv.create_train_eval_envs(
-        split_ratio=0.7,
+        split_ratio=0.8,
         forex_candle_data=data,
         market_feature_engineer=market_fe,
         agent_feature_engineer=agent_fe,
         initial_capital=10000.0,
         transaction_cost_pct=0.0,
         n_actions=1,
-        custom_reward_function=log_equity_diff,
+        custom_reward_function=log_equity_change
     )
 
 def train(exploration_strategy: str):
@@ -93,32 +92,35 @@ def train(exploration_strategy: str):
     )
 
     if exploration_strategy == "epsilon_greedy":
+        from stable_baselines3 import DQN
         dqn_args.update({
             "exploration_initial_eps": 1.0,
             "exploration_final_eps": 0.05,
-            "exploration_fraction": 0.5
+            "exploration_fraction": 0.8
         })
-    elif exploration_strategy == "boltzmann":
-        # Placeholder - you'd implement Boltzmann manually or subclass DQN
-        logging.warning("Boltzmann not natively supported; requires custom agent.")
-    elif exploration_strategy == "ucb":
-        logging.warning("UCB not supported directly in SB3. Consider custom implementation.")
+        model = DQN(**dqn_args)
 
-    model = DQN(**dqn_args)
+    elif exploration_strategy == "boltzmann":
+        from RQ5.boltzmann_dqn import BoltzmannDQN 
+        model = BoltzmannDQN(**dqn_args, temperature=1.0)
+    elif exploration_strategy == "max_boltzmann":
+        from RQ5.boltzmann_dqn import MaxBoltzmannDQN
+        model = MaxBoltzmannDQN(**dqn_args, epsilon=0.1, temperature=1.0)
+
+    else:
+        raise ValueError(f"Unknown exploration strategy: {exploration_strategy}")
 
     exp_name = f"{datetime.now().strftime(EXPERIMENT_NAME_FORMAT)}_{exploration_strategy}"
     exp_dir = EXPERIMENTS_DIR / exp_name
     models_dir = exp_dir / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    callback = [
-        SaveOnEpisodeEndCallback(models_dir),
-        ActionHistogramCallback(train_env, log_freq=train_env.total_steps),
-        CoolStatsCallback(train_env, log_freq=train_env.total_steps)
-    ]
+    callback = [SaveCallback(models_dir, save_freq=train_env.episode_len),
+            ActionHistogramCallback(train_env, log_freq=train_env.episode_len),
+            SneakyLogger(verbose=1)]
 
     logging.info("Training...")
-    train_model(model, train_env, train_episodes=10, callback=callback)
+    train_model(model, train_env, train_episodes=20, callback=callback)
     save_model_with_metadata(model, models_dir / "model_final.zip")
 
 def evaluate(experiments_dir, limit=10):
@@ -152,7 +154,7 @@ if __name__ == "__main__":
 
     # Add the root directory to sys.path
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-    strategies = ["epsilon_greedy", "boltzmann", "ucb"]
+    strategies = ["epsilon_greedy", "boltzmann", "max_boltzmann"]
     options = [(f"train_{s}", lambda s=s: train(s)) for s in strategies]
     options += [
         ("eval", lambda: evaluate(EXPERIMENTS_DIR)),
