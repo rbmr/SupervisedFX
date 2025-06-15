@@ -142,7 +142,7 @@ class DukascopyDataDownloader:
 
         days = list(date_range(start, end, timedelta(days=1)))
         fetch_tick_day = partial(cls._fetch_tick_day, symbol=symbol, tick_format=tick_format)
-        data_files = parallel_run(fetch_tick_day, days, num_workers=4)
+        data_files = parallel_run(fetch_tick_day, days, num_workers=2)
 
         # Load and combine all day files
         day_dfs = parallel_run(pd.read_csv, data_files, num_workers=2)

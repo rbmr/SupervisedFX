@@ -2,7 +2,6 @@
 This file contains some simple scripts that can be useful anywhere during the project.
 """
 import json
-import math
 import os
 import random
 import signal

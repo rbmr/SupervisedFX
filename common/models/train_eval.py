@@ -16,7 +16,7 @@ from common.envs.forex_env import ForexEnv
 from common.models.analysis import analyse_finals, analyse_individual_run
 from common.models.dummy_models import DUMMY_MODELS
 from common.models.utils import (load_model_with_metadata, save_model_with_metadata)
-from common.scripts import parallel_run
+from common.scripts import parallel_run, set_seed
 
 from common.models.dummy_models import DummyModel
 
@@ -30,11 +30,16 @@ def run_experiment(train_env: ForexEnv,
                        train_episodes: int = 10,
                        eval_episodes: int = 1,
                        checkpoints: bool = False,
-                       tensorboard_logging: bool = False
+                       tensorboard_logging: bool = False,
+                       seed = 42,
+                       num_workers: int = 1
                        ) -> None:
     """
     Train the model on the training DataFrame, test it on the test DataFrame, and export the results.
     """
+
+    set_seed(seed)
+
     # Set up folders
     experiment_path = base_folder_path / "experiments" / experiment_group_name / experiment_name
     results_path = experiment_path / "results"
@@ -52,11 +57,23 @@ def run_experiment(train_env: ForexEnv,
     # set tensorboard logging if enabled
     if tensorboard_logging:
         model.tensorboard_log = str(experiment_path / "tensorboard_logs")
-        
+
+    starting_episode = 0
+    # in the models dir, find the latest model and load it if it exists (latest model is the newest by modification time)
+    latest_model = max(models_path.glob("*.zip"), key=lambda p: p.stat().st_mtime, default=None)
+    if latest_model and latest_model.is_file():
+        logging.info(f"Loading latest model from {latest_model}")
+        model = load_model_with_metadata(latest_model)
+        starting_episode = int(latest_model.stem.split('_')[1])
+        train_episodes -= starting_episode
+        train_episodes = max(train_episodes, 0)  # Ensure non-negative episodes
+
 
     callbacks = []
     if checkpoints:
-        callbacks.append(SaveOnEpisodeEndCallback(models_dir=models_path))
+        save_on_episode_callback = SaveOnEpisodeEndCallback(models_dir=models_path)
+        save_on_episode_callback.episode_num = starting_episode
+        callbacks.append(save_on_episode_callback)
 
     train_model(model, train_env=train_env, train_episodes=train_episodes, callback=callbacks)
 
@@ -70,13 +87,15 @@ def run_experiment(train_env: ForexEnv,
                     results_dir=results_path,
                     eval_envs={"train": train_env,
                                "eval": eval_env},
-                    eval_episodes=eval_episodes)
+                    eval_episodes=eval_episodes,
+                    num_workers=num_workers)
 
     # ANALYZING RESULTS
 
     analyse_results(
         results_dir=results_path,
-        model_name_suffix=f"[{experiment_group_name}::{experiment_name}]"
+        model_name_suffix=f"[{experiment_group_name}::{experiment_name}]",
+        num_workers=num_workers
     )
 
 def train_model(model: BaseAlgorithm,
@@ -245,7 +264,7 @@ def analyze_result(data_csv: Path, model_name_suffix: str = ""):
     """
     analyse_individual_run(data_csv, f"{data_csv.parent.parent.name}{model_name_suffix}")
 
-def analyse_results(results_dir: Path, model_name_suffix: str = "") -> None:
+def analyse_results(results_dir: Path, model_name_suffix: str = "", num_workers = 4) -> None:
     """
     Searches a directory for data.csv files, and performs analysis.
     Expected directory structure: /{model_name}/{env_name}/data.csv
@@ -262,7 +281,7 @@ def analyse_results(results_dir: Path, model_name_suffix: str = "") -> None:
     func = partial(analyze_result, model_name_suffix=model_name_suffix)
     result_files = list(results_dir.rglob("data.csv"))
     result_files.sort(key=lambda x: x.stat().st_mtime) # Old to new
-    parallel_run(func, result_files, num_workers=6)
+    parallel_run(func, result_files, num_workers=num_workers)
 
     # Aggregate environment results
     logging.info("Aggregating analysis results...")
@@ -343,9 +362,9 @@ def run_model(model: BaseAlgorithm,
             market_features_df.columns = [f"info.market_features.{col}" for col in market_features_df.columns]
             agent_data_df.columns = [f"info.agent_data.{col}" for col in agent_data_df.columns]
 
-            assert len(episode_log) == len(market_data_df)
-            assert len(episode_log) == len(market_features_df)
-            assert len(episode_log) == len(agent_data_df)
+            assert len(episode_log) == len(market_data_df), f"len episode_log ({len(episode_log)}) != len agent_data_df ({len(market_data_df)})"
+            assert len(episode_log) == len(market_features_df), f"len episode_log ({len(episode_log)}) != len agent_data_df ({len(market_features_df)})"
+            assert len(episode_log) == len(agent_data_df), f"len episode_log ({len(episode_log)}) != len agent_data_df ({len(agent_data_df)})"
 
             temp_df = pd.DataFrame(episode_log)
             temp_df = pd.concat([temp_df, agent_data_df, market_data_df, market_features_df], axis=1)

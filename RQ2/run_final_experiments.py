@@ -11,6 +11,7 @@ from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, get_c
 from common.envs.forex_env import ForexEnv
 from common.models.train_eval import run_experiment
 from common.scripts import *
+from RQ2.parameters import *
 
 
 def main():
@@ -42,7 +43,7 @@ def main():
             agent_feature_engineer=stepwise_feature_engineer,
             initial_capital=INITIAL_CAPITAL,
             transaction_cost_pct=TRANSACTION_COST_PCT,
-            n_actions=1)
+            n_actions=3)
         logging.info("Environments created.")
 
         policy_kwargs = dict(net_arch=[20,10])

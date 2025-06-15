@@ -531,16 +531,22 @@ def remove_ohlcv(df: pd.DataFrame):
                      'open_ask', 'high_ask', 'low_ask', 'close_ask', 'volume_ask']
     remove_columns(df, ohlcv_columns)
 
-def history_lookback(df: pd.DataFrame, lookback_window_size: int, columns: List[str] = None):
+def history_lookback(df: pd.DataFrame, lookback_window_size: int, columns: List[str] = None, not_columns: List[str] = None, step: int = 1):
     """
     Create a history lookback window for the DataFrame.
     """
-    if not columns:
+    if lookback_window_size == 0:
+        return
+    if columns is None:
         columns = df.columns.tolist()
+    if not_columns is None:
+        not_columns = ()
 
     # for each column make a new column shifted by 1, 2, ..., lookback_window_size
     for col in columns:
-        for i in range(1, lookback_window_size + 1):
+        if col in not_columns:
+            continue
+        for i in range(1, lookback_window_size + 1, step):
             df[f'{col}_shift_{i}'] = df[col].shift(i)
 
 def copy_columns(df: pd.DataFrame, source_columns: List[str], target_columns: List[str]):

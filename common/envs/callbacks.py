@@ -2,6 +2,8 @@ import logging
 from pathlib import Path
 
 import numpy as np
+import torch as th
+from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import BaseCallback
 
 from common.constants import AgentDataCol
@@ -59,7 +61,7 @@ class ActionHistogramCallback(BaseCallback):
         super().__init__(verbose)
         self.env = env
         self.log_freq = log_freq
-        self.bins = 11 if env.n_actions == 0 or env.n_actions > 5 else env.n_actions * 2 + 1
+        self.bins = 11 if env.n_actions == 0 or env.n_actions > 11 else env.n_actions
         self.max_height = 40
 
     def _on_step(self) -> bool:
@@ -101,7 +103,7 @@ class SneakyLogger(BaseCallback):
                 self.logger.record(f"{key}_std", np.std(values))
         raw_env.sneaky_buffer.clear()
 
-class RolloutLogger(BaseCallback):
+class A2CRolloutLogger(BaseCallback):
     """
     Logs all the rollout values that are collected by default.
     """
@@ -123,3 +125,94 @@ class RolloutLogger(BaseCallback):
 
         self.logger.record("rollout/log_prob_mean", np.mean(buffer.log_probs))
         self.logger.record("rollout/log_prob_std", np.std(buffer.log_probs))
+
+class BasicCallback(BaseCallback):
+
+    def __init__(self, verbose: int = 0, log_freq: int = 5_000):
+        super().__init__(verbose)
+        self.log_freq = log_freq
+        self._reset()
+
+    def _on_step(self) -> bool:
+        self._collect()
+        if self.num_timesteps % self.log_freq == 0:
+            self._log()
+            self._reset()
+        return True
+
+    def _collect(self):
+        self.rewards.extend(self.locals["rewards"])
+        self.actions.extend(self.locals['actions'])
+
+    def _log(self):
+        self.logger.record("custom/reward_mean", np.mean(self.rewards))
+        self.logger.record("custom/reward_std", np.std(self.rewards))
+        self.logger.record("custom/action_mean", np.mean(self.actions))
+        self.logger.record("custom/action_std", np.std(self.actions))
+        self.logger.dump()
+
+    def _reset(self) -> None:
+        self.rewards = []
+        self.actions = []
+
+class SACMetricsLogger(BaseCallback):
+    """
+    Custom callback to log metrics for the SAC algorithm.
+    """
+    def __init__(self, verbose: int = 0, log_freq: int = 1000):
+        super().__init__(verbose)
+        self.log_freq = log_freq
+        self._last_log_timestep = 0
+
+    def _on_step(self) -> bool:
+        if self.num_timesteps - self._last_log_timestep >= self.log_freq:
+            self._last_log_timestep = self.num_timesteps
+            self._log_sac_metrics()
+        return True
+
+    def _log_sac_metrics(self):
+        """
+        Computes and logs metrics relevant to SAC from the replay buffer.
+        """
+        # Ensure the model is an instance of SAC
+        if not isinstance(self.model, SAC):
+            if self.verbose > 0:
+                logging.warning("SACMetricsLogger is designed for SAC models only.")
+            return
+
+        # Ensure the replay buffer has enough samples to form a batch
+        buffer = self.model.replay_buffer
+        if buffer.size() < self.model.batch_size:
+            if self.verbose > 0:
+                logging.warning("Replay buffer too small to sample for logging. Skipping metrics logging.")
+            return
+
+        # Sample a batch from the replay buffer
+        data = buffer.sample(self.model.batch_size)
+
+        # Move sampled data to the same device as the model (CPU or GPU)
+        observations = data.observations.to(self.model.device)
+        actions = data.actions.to(self.model.device)
+
+        # Use torch.no_grad() as we are only evaluating and not performing gradient updates
+        with th.no_grad():
+
+            # SAC uses two critic (Q-value) networks to mitigate overestimation bias.
+            # We evaluate both and take the minimum, as done in SAC's training.
+            qf1_values, qf2_values = self.model.critic(observations, actions)
+            q_values = th.min(qf1_values, qf2_values)
+            self.logger.record("sac_metrics/q_value_mean", q_values.mean().item())
+            self.logger.record("sac_metrics/q_value_std", q_values.std().item())
+
+            # Get the actions and their log probabilities from the actor (policy) for the sampled observations
+            _, log_prob_pi = self.model.actor.action_log_prob(observations)
+            self.logger.record("sac_metrics/log_prob_mean", log_prob_pi.mean().item())
+            self.logger.record("sac_metrics/log_prob_std", log_prob_pi.std().item())
+
+            # SAC maximizes entropy, so logging it provides insight into exploration.
+            # Entropy is often defined as the negative mean of log probabilities.
+            policy_entropy = -log_prob_pi.mean()
+            self.logger.record("sac_metrics/policy_entropy", policy_entropy.item())
+
+            # Log the current size of the replay buffer to monitor its growth
+            self.logger.record("sac_metrics/replay_buffer_size", buffer.size())
