@@ -12,7 +12,7 @@ from common.data.feature_engineer import *
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, get_current_exposure
 from common.envs.forex_env import ForexEnv
 from common.envs.rewards import percentage_return
-from common.models.train_eval import run_experiment
+from common.models.train_eval import run_experiment, combine_finals
 from common.scripts import *
 from RQ2.parameters import *
 from RQ2.hyperparameter_experiments import *
@@ -31,21 +31,11 @@ def main():
                                     )
     
     experiments: List[Callable[[DummyVecEnv], DQN]] = [
-        HP_P2_cautious_baseline,
-        HP_P2_cautious_minimalist,
-        HP_P2_cautious_reduced,
-        HP_P2_cautious_increased,
-        HP_P2_cautious_medium_symmetric,
-        HP_P2_cautious_symmetric,
-        HP_P2_cautious_high,
-
-        HP_P2_balanced_baseline,
-        HP_P2_balanced_minimalist,
-        HP_P2_balanced_reduced,
-        HP_P2_balanced_increased,
-        HP_P2_balanced_medium_symmetric,
-        HP_P2_balanced_symmetric,
-        HP_P2_balanced_high,
+        HP_P3_hybrid_baseline,
+        HP_P3_hybrid_reduced,
+        HP_P3_hybrid_increased,
+        HP_P3_hybrid_medium_symmetric,
+        HP_P3_hybrid_symmetric
     ]
 
     feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers() # Get the feature engineers from the first experiment
@@ -62,33 +52,38 @@ def main():
 
 
     temp_dummy_env = DummyVecEnv([lambda: train_env])
-    for experiment in experiments:
-        logging.info(f"Running experiment: {experiment.__name__}")
+    
+    group_name = "[hyperparameters-P2]-1h_data"
+    # for experiment in experiments:
+    #     logging.info(f"Running experiment: {experiment.__name__}")
 
-        logging.info("Fetching Experiment Model...")
-        model = experiment(temp_dummy_env)
-        logging.info("Experiment Model fetched.")
+    #     logging.info("Fetching Experiment Model...")
+    #     model = experiment(temp_dummy_env)
+    #     logging.info("Experiment Model fetched.")
 
-        logging.info("Model created.")
-        logging.info("Model architecture:" + str(model.policy))
-        logging.info("Running Experiment parts...")
+    #     logging.info("Model created.")
+    #     logging.info("Model architecture:" + str(model.policy))
+    #     logging.info("Running Experiment parts...")
 
-        group_name = "[hyperparameters-P2]-1h_data"
-        run_experiment(
-            train_env=train_env,
-            eval_env=eval_env,
-            model=model,
-            base_folder_path=RQ2_DIR,
-            experiment_group_name=group_name,
-            experiment_name=experiment.__name__,
-            train_episodes=TRAIN_EPISODES,
-            eval_episodes=1,
-            checkpoints=True,
-            tensorboard_logging=True,
-            seed=SEED
-        )
+    #     run_experiment(
+    #         train_env=train_env,
+    #         eval_env=eval_env,
+    #         model=model,
+    #         base_folder_path=RQ2_DIR,
+    #         experiment_group_name=group_name,
+    #         experiment_name=experiment.__name__,
+    #         train_episodes=TRAIN_EPISODES,
+    #         eval_episodes=1,
+    #         checkpoints=True,
+    #         tensorboard_logging=True,
+    #         seed=SEED
+    #     )
 
-        logging.info(f"Experiment {experiment.__name__} completed.\n")
+    #     logging.info(f"Experiment {experiment.__name__} completed.\n")
+
+    combine_finals(
+        experiment_group= RQ2_DIR / "experiments" / group_name,
+    )
 
 
 if __name__ == '__main__':

@@ -170,12 +170,23 @@ def analyse_individual_run(results_file: Path, model_name: str):
 
     # scatter plot for the actions per time step
     plt.figure(figsize=(12, 6))
-    plt.scatter(np.arange(len(actions)), actions, alpha=0.5)
+    plt.scatter(np.arange(len(actions)), actions, alpha=0.5, s=1, color='orange')	
     plt.title(f"Actions Scatter Plot for {model_name}")
     plt.xlabel('Time Step')
     plt.ylabel('Action Value')
     plt.savefig(output_dir / f"actions_scatter.png")
     plt.close()
+
+    # line plot for the actions per time step
+    plt.figure(figsize=(12, 6))
+    plt.plot(actions, label='Actions', color='orange')
+    plt.title(f"Actions Line Plot for {model_name}")
+    plt.xlabel('Time Step')
+    plt.ylabel('Action Value')
+    plt.legend()
+    plt.savefig(output_dir / f"actions_line_plot.png")
+    plt.close()
+
     
     # profit factor. Calculate the gross profit (all positive returns) and gross loss (all negative returns)
     positive_returns = equity_returns[equity_returns > 0]

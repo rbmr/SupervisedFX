@@ -9,7 +9,7 @@ from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import FeatureEngineer, rsi, history_lookback, remove_ohlcv
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, get_current_exposure
 from common.envs.forex_env import ForexEnv
-from common.models.train_eval import run_experiment
+from common.models.train_eval import run_experiment, combine_finals
 from common.scripts import *
 from RQ2.parameters import *
 
@@ -29,6 +29,8 @@ def main():
     experiment_funcs: list[Callable[[], Tuple[FeatureEngineer, StepwiseFeatureEngineer]]] = [
         lambda: experiment_1(),
     ]
+
+    group_name = "SQ1"
 
     for func in experiment_funcs:
         logging.info(f"Running experiment: {func.__name__}")
@@ -74,7 +76,7 @@ def main():
             eval_env=eval_env,
             model=model,
             base_folder_path=RQ2_DIR,
-            experiment_group_name="hyperparameters",
+            experiment_group_name=group_name,
             experiment_name= func.__name__,
             train_episodes=1,
             eval_episodes=1,
@@ -82,6 +84,10 @@ def main():
         )
 
         logging.info(f"Experiment {func.__name__} completed.")
+
+    combine_finals(
+            RQ2_DIR / "experiments" / group_name,
+        )
 
 
 def base_experiment_func() -> Tuple[FeatureEngineer, StepwiseFeatureEngineer]:

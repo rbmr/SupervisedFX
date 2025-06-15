@@ -372,11 +372,17 @@ def run_model(model: BaseAlgorithm,
             info = infos[0] if infos else {}
 
             for obs_name, obs_df in info.items():
+                if not isinstance(obs_df, pd.DataFrame):
+                    logging.debug(f"Observation '{obs_name}' is not a DataFrame, skipping...")
+                    continue
                 obs_df.columns = [f"info.{obs_name}.{col}" for col in obs_df.columns]
                 assert len(episode_log) == len(obs_df), f"len episode_log ({len(episode_log)}) != len {obs_name}_df ({len(obs_df)})"
 
             temp_df = pd.DataFrame(episode_log)
-            temp_df = pd.concat([temp_df, *(obs_df for _, obs_df in info.items())], axis=1)
+            temp_df = pd.concat(
+                [temp_df] + [df for df in info.values() if isinstance(df, pd.DataFrame)],
+                axis=1
+            )
             logs_df = temp_df if logs_df is None else pd.concat([logs_df, temp_df], ignore_index=True, axis=0)
 
             # Start new episode
@@ -402,11 +408,15 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
         style_map = {}
     results = {}
 
+    # Collect all unique experiment names
+    experiment_names = set()
+
     # Collect raw entries: {env: {metric: {exp: [(model_key, value), ...]}}}
     for exp_dir in experiment_group.iterdir():
         if not exp_dir.is_dir():
             continue
         exp_name = exp_dir.name
+        experiment_names.add(exp_name)
         for info_path in exp_dir.rglob('info.json'):
             # parts: .../<model_name>/<environment_name>/info.json
             env_name = info_path.parent.name
@@ -420,13 +430,40 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
                 entries = metric_dict.setdefault(exp_name, [])
                 entries.append((model_key, val))
 
+    # GENERATE MISSING COLOURSS
+    sorted_experiment_names = sorted(list(experiment_names)) 
+    experiments_to_color = [
+        exp_name for exp_name in sorted_experiment_names 
+        if exp_name not in style_map or 'color' not in style_map.get(exp_name, {})
+    ]
+    if experiments_to_color:
+        num_experiments_to_color = len(experiments_to_color)
+        
+        # Choose the appropriate tab colormap based on the number of experiments
+        if num_experiments_to_color <= 10:
+            cmap = plt.cm.get_cmap('tab10')
+            colors = [cmap(i % cmap.N) for i in range(num_experiments_to_color)]
+        elif num_experiments_to_color <= 20:
+            cmap = plt.cm.get_cmap('tab20')
+            colors = [cmap(i % cmap.N) for i in range(num_experiments_to_color)]
+        # You can add more conditions for tab20b/c or other strategies for more colors
+        else:
+            print("Warning: More than 20 experiments detected. Colors may not be perfectly distinct.")
+            cmap = plt.cm.hsv
+            colors = [cmap(i / num_experiments_to_color) for i in range(num_experiments_to_color)]
+
+        for i, exp_name in enumerate(experiments_to_color):
+            if exp_name not in style_map:
+                style_map[exp_name] = {}
+            style_map[exp_name]['color'] = colors[i]
+
     # Sort by timestamp and extract values
     for env, metrics in results.items():
         for metric, exp_map in metrics.items():
             # sort each experiment's list
             for exp, entries in exp_map.items():
                 entries.sort(key=lambda x: x[0])
-                print(entries)
+                #print(entries)
                 exp_map[exp] = [v for _, v in entries]
             # ensure all experiments have same length
             lengths = {exp: len(vals) for exp, vals in exp_map.items()}
