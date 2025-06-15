@@ -370,20 +370,13 @@ def run_model(model: BaseAlgorithm,
 
             # Save episode info
             info = infos[0] if infos else {}
-            market_data_df: pd.DataFrame = info['market_data']
-            market_features_df = info['market_features']
-            agent_data_df = info['agent_data']
 
-            market_data_df.columns = [f"info.market_data.{col}" for col in market_data_df.columns]
-            market_features_df.columns = [f"info.market_features.{col}" for col in market_features_df.columns]
-            agent_data_df.columns = [f"info.agent_data.{col}" for col in agent_data_df.columns]
-
-            assert len(episode_log) == len(market_data_df), f"len episode_log ({len(episode_log)}) != len agent_data_df ({len(market_data_df)})"
-            assert len(episode_log) == len(market_features_df), f"len episode_log ({len(episode_log)}) != len agent_data_df ({len(market_features_df)})"
-            assert len(episode_log) == len(agent_data_df), f"len episode_log ({len(episode_log)}) != len agent_data_df ({len(agent_data_df)})"
+            for obs_name, obs_df in info.items():
+                obs_df.columns = [f"info.{obs_name}.{col}" for col in obs_df.columns]
+                assert len(episode_log) == len(obs_df), f"len episode_log ({len(episode_log)}) != len {obs_name}_df ({len(obs_df)})"
 
             temp_df = pd.DataFrame(episode_log)
-            temp_df = pd.concat([temp_df, agent_data_df, market_data_df, market_features_df], axis=1)
+            temp_df = pd.concat([temp_df, *(obs_df for _, obs_df in info.items())], axis=1)
             logs_df = temp_df if logs_df is None else pd.concat([logs_df, temp_df], ignore_index=True, axis=0)
 
             # Start new episode
