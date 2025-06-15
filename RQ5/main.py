@@ -14,9 +14,10 @@ from common.data.feature_engineer import FeatureEngineer, as_pct_change, ema, rs
 from common.constants import SEED
 from RQ5.constants import EXPERIMENTS_DIR, EXPERIMENT_NAME_FORMAT
 from common.envs.callbacks import *
-from common.models.train_eval import train_model
+from common.models.train_eval import train_model, analyse_results, evaluate_models
 from common.models.utils import save_model_with_metadata
 from common.scripts import picker, has_nonempty_subdir, n_children
+from common.envs.dp import get_dp_table_from_env
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -44,14 +45,14 @@ def get_feature_engineer():
     fe.add(oscillator)
     return fe
 
-def get_environments():
+def get_environments(use_optimal_reward=False):
     logging.info("Loading market data...")
     data = ForexCandleData.load(
         source="dukascopy",
         instrument="EURUSD",
-        granularity=Timeframe.M15,
-        start_time=datetime(2022, 1, 2, 22),
-        end_time=datetime(2025, 5, 16, 20, 45),
+        granularity=Timeframe.M30,
+        start_time=datetime(2020, 1, 1, 22),
+        end_time=datetime(2024, 12, 31, 21, 30),
     )
 
     logging.info("Creating feature pipelines...")
@@ -60,20 +61,46 @@ def get_environments():
     agent_fe.add(["current_exposure"], calculate_current_exposure)
 
     logging.info("Building environments...")
-    return ForexEnv.create_train_eval_envs(
-        split_ratio=0.8,
-        forex_candle_data=data,
-        market_feature_engineer=market_fe,
-        agent_feature_engineer=agent_fe,
-        initial_capital=10000.0,
-        transaction_cost_pct=0.0,
-        n_actions=1,
-        custom_reward_function=log_equity_change
-    )
+    if use_optimal_reward:
+        # First build envs without reward to extract DP table from training data only
+        train_env, eval_env = ForexEnv.create_train_eval_envs(
+            split_ratio=0.7,
+            forex_candle_data=data,
+            market_feature_engineer=market_fe,
+            agent_feature_engineer=agent_fe,
+            initial_capital=10000.0,
+            transaction_cost_pct=0.0,
+            custom_reward_function=None
+        )
+        table = get_dp_table_from_env(train_env)
+        dp_reward = DPRewardFunction(table)
 
-def train(exploration_strategy: str):
-    train_env, _ = get_environments()
-    logging.info("Instantiating DQN model...")
+        train_env.custom_reward_fn = dp_reward
+        return train_env, eval_env
+    else:
+        # Regular log equity reward
+        return ForexEnv.create_train_eval_envs(
+            split_ratio=0.8,
+            forex_candle_data=data,
+            market_feature_engineer=market_fe,
+            agent_feature_engineer=agent_fe,
+            initial_capital=10000.0,
+            transaction_cost_pct=0.0,
+            custom_reward_function=log_equity_change
+        )
+    
+def run_experiment(exploration_strategy: str, use_optimal_reward=False):
+    note = input("Enter a short note for this experiment: ").strip().replace(' ', '_')
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    exp_name = f"{exploration_strategy}_{note}_{timestamp}"
+    exp_dir = EXPERIMENTS_DIR / exp_name
+
+    train_episodes = input("Enter number of training episodes (default 25): ")
+    train_episodes = int(train_episodes) if train_episodes.isdigit() else 25
+
+    # Train
+    train_env, eval_env = get_environments(use_optimal_reward=use_optimal_reward)
+    logging.info(f"Instantiating {exploration_strategy.upper()} model...")
 
     dqn_args = dict(
         policy="MlpPolicy",
@@ -92,72 +119,63 @@ def train(exploration_strategy: str):
     )
 
     if exploration_strategy == "epsilon_greedy":
-        from stable_baselines3 import DQN
+        eps_init = input("Epsilon initial (default 1.0): ")
+        eps_final = input("Epsilon final (default 0.05): ")
+        exploration_fraction = input("Exploration fraction (default 0.8): ")
+
         dqn_args.update({
-            "exploration_initial_eps": 1.0,
-            "exploration_final_eps": 0.05,
-            "exploration_fraction": 0.8
+            "exploration_initial_eps": float(eps_init) if eps_init else 1.0,
+            "exploration_final_eps": float(eps_final) if eps_final else 0.05,
+            "exploration_fraction": float(exploration_fraction) if exploration_fraction else 0.8
         })
+        from stable_baselines3 import DQN
         model = DQN(**dqn_args)
 
     elif exploration_strategy == "boltzmann":
-        from RQ5.boltzmann_dqn import BoltzmannDQN 
-        model = BoltzmannDQN(**dqn_args, temperature=1.0)
+        temperature = input("Temperature (default 1.0): ")
+        from RQ5.boltzmann_dqn import BoltzmannDQN
+        model = BoltzmannDQN(**dqn_args, temperature=float(temperature) if temperature else 1.0)
+
     elif exploration_strategy == "max_boltzmann":
+        temperature = input("Temperature (default 1.0): ")
+        epsilon = input("Epsilon (default 0.1): ")
         from RQ5.boltzmann_dqn import MaxBoltzmannDQN
-        model = MaxBoltzmannDQN(**dqn_args, epsilon=0.1, temperature=1.0)
+        model = MaxBoltzmannDQN(
+            **dqn_args,
+            temperature=float(temperature) if temperature else 1.0,
+            epsilon=float(epsilon) if epsilon else 0.1
+        )
 
     else:
         raise ValueError(f"Unknown exploration strategy: {exploration_strategy}")
 
-    exp_name = f"{datetime.now().strftime(EXPERIMENT_NAME_FORMAT)}_{exploration_strategy}"
-    exp_dir = EXPERIMENTS_DIR / exp_name
     models_dir = exp_dir / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    callback = [SaveCallback(models_dir, save_freq=train_env.episode_len),
-            ActionHistogramCallback(train_env, log_freq=train_env.episode_len),
-            SneakyLogger(verbose=1)]
+    callback = [
+        SaveCallback(models_dir, save_freq=train_env.episode_len),
+        ActionHistogramCallback(train_env, log_freq=train_env.episode_len),
+        SneakyLogger(verbose=1)
+    ]
 
-    logging.info("Training...")
-    train_model(model, train_env, train_episodes=20, callback=callback)
+    logging.info("Starting training...")
+    train_model(model, train_env, train_episodes=train_episodes, callback=callback)
     save_model_with_metadata(model, models_dir / "model_final.zip")
 
-def evaluate(experiments_dir, limit=10):
-    from common.models.train_eval import evaluate_models
-
-    dirs = sorted([
-        f for f in experiments_dir.iterdir() if has_nonempty_subdir(f, "models")
-    ], key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
-
-    exp_dir = picker([(f"{f.name} ({n_children(f / 'models')})", f) for f in dirs])
-    models_dir = exp_dir / "models"
+    # Evaluate
+    logging.info("Evaluating model...")
     results_dir = exp_dir / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    train_env, eval_env = get_environments()
     evaluate_models(models_dir, results_dir, {"train": train_env, "eval": eval_env}, eval_episodes=1)
 
-def analyze(experiments_dir, limit=10):
-    from common.models.train_eval import analyse_results
-
-    dirs = sorted([
-        f for f in experiments_dir.iterdir() if has_nonempty_subdir(f, "results")
-    ], key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
-
-    exp_dir = picker([(f"{f.name} ({n_children(f / 'results')})", f) for f in dirs])
-    analyse_results(exp_dir / "results")
+    # Analyze
+    logging.info("Analyzing results...")
+    analyse_results(results_dir)
 
 if __name__ == "__main__":
-    import sys
-    import os
-
-    # Add the root directory to sys.path
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
     strategies = ["epsilon_greedy", "boltzmann", "max_boltzmann"]
-    options = [(f"train_{s}", lambda s=s: train(s)) for s in strategies]
-    options += [
-        ("eval", lambda: evaluate(EXPERIMENTS_DIR)),
-        ("analyze", lambda: analyze(EXPERIMENTS_DIR)),
-    ]
+    options = [(f"run_{s}", lambda s=s: run_experiment(s)) for s in strategies]
+    options += [("run_optimal", lambda: run_experiment("optimal_reward", use_optimal_reward=True))]
+
     picker(options, default=None)()
