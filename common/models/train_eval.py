@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 import pandas as pd
+from matplotlib import pyplot as plt
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -398,3 +399,66 @@ def run_model(model: BaseAlgorithm,
     if data_path is not None:
         logs_df.to_csv(data_path, index=False)
     return logs_df
+
+def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[str, str]]] = None, ext: str = ".png"):
+    """
+    Combines the result of an experiment group
+    <experiment_group>/<experiment_name>/results/<model_name>/<environment_name>/info.json
+    """
+    if style_map is None:
+        style_map = {}
+    results = {}
+
+    # Collect raw entries: {env: {metric: {exp: [(model_key, value), ...]}}}
+    for exp_dir in experiment_group.iterdir():
+        if not exp_dir.is_dir():
+            continue
+        exp_name = exp_dir.name
+        for info_path in exp_dir.rglob('info.json'):
+            # parts: .../<model_name>/<environment_name>/info.json
+            env_name = info_path.parent.name
+            model_key = extract_key(info_path)
+            with open(info_path, mode="r") as f:
+                data = json.load(f)
+            # init nested dicts
+            env_dict = results.setdefault(env_name, {})
+            for metric, val in data.items():
+                metric_dict = env_dict.setdefault(metric, {})
+                entries = metric_dict.setdefault(exp_name, [])
+                entries.append((model_key, val))
+
+    # Sort by timestamp and extract values
+    for env, metrics in results.items():
+        for metric, exp_map in metrics.items():
+            # sort each experiment's list
+            for exp, entries in exp_map.items():
+                entries.sort(key=lambda x: x[0])
+                print(entries)
+                exp_map[exp] = [v for _, v in entries]
+            # ensure all experiments have same length
+            lengths = {exp: len(vals) for exp, vals in exp_map.items()}
+            if len(set(lengths.values())) != 1:
+                raise ValueError(f"Metric '{metric}' in environment '{env}' has unequal number of values: {lengths}")
+
+    # Create output directories
+    combined_dir = experiment_group / 'combined_finals'
+    combined_dir.mkdir(exist_ok=True)
+    for env, metrics in results.items():
+        env_dir = combined_dir / env
+        env_dir.mkdir(exist_ok=True)
+        # Plot each metric
+        for metric, exp_map in metrics.items():
+            plt.figure(figsize=(12, 6))
+            for exp, values in exp_map.items():
+                style = style_map.get(exp, {})
+                plt.plot(values, label=exp, **style)
+            plt.title(f"{env} - {metric}")
+            plt.xlabel('Run (chronological)')
+            plt.ylabel(metric)
+            plt.legend(fontsize=10, loc='best', bbox_to_anchor=(1.0, 1.0))  # Smaller legend, pushed outside
+            plt.tight_layout(pad=0.8)  # Adjust layout to fit legend
+            output = env_dir / f"{metric}{ext}"
+            plt.savefig(output, bbox_inches='tight', pad_inches=0.2)
+            plt.close()
+
+    return results
