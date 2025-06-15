@@ -250,8 +250,8 @@ class ForexEnv(gym.Env):
                                n_actions: int = 3,
                                action_low: float = -1.0,
                                action_high: float = 1.0,
-                               custom_reward_function: Optional[Callable[[Self], float]] = None,
-                               shuffled = False) -> tuple[Self, Self]:
+                               custom_reward_function: Optional[Callable[[Self], float]] = None
+                            ) -> tuple[Self, Self]:
         obs_configs = [ObsConfig(
             name = 'market_features',
             fe = market_feature_engineer,
@@ -261,7 +261,6 @@ class ForexEnv(gym.Env):
         env_config = EnvConfig(
             initial_capital = initial_capital,
             transaction_cost_pct = transaction_cost_pct,
-            shuffled = shuffled,
             reward_function = custom_reward_function,
         )
         action_config = ActionConfig(
