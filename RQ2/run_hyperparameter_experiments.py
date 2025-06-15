@@ -25,27 +25,17 @@ def main():
 
     forex_data = ForexCandleData.load(source="dukascopy",
                                       instrument="EURUSD",
-                                      granularity=Timeframe.M15,
+                                      granularity=Timeframe.H1,
                                       start_time=RQ2_HYPERPARAMETERS_START_DATE,
-                                      end_time= RQ2_HYPERPARAMETERS_END_DATE_15M,
+                                      end_time= RQ2_HYPERPARAMETERS_END_DATE_1H,
                                     )
     
     experiments: List[Callable[[DummyVecEnv], DQN]] = [
-        HP_P2_cautious_baseline,
-        HP_P2_cautious_minimalist,
-        HP_P2_cautious_reduced,
-        HP_P2_cautious_increased,
-        HP_P2_cautious_medium_symmetric,
-        HP_P2_cautious_symmetric,
-        HP_P2_cautious_high,
-
-        HP_P2_balanced_baseline,
-        HP_P2_balanced_minimalist,
-        HP_P2_balanced_reduced,
-        HP_P2_balanced_increased,
-        HP_P2_balanced_medium_symmetric,
-        HP_P2_balanced_symmetric,
-        HP_P2_balanced_high,
+        HP_P3_hybrid_baseline,
+        HP_P3_hybrid_reduced,
+        HP_P3_hybrid_increased,
+        HP_P3_hybrid_medium_symmetric,
+        HP_P3_hybrid_symmetric
     ]
 
     feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers() # Get the feature engineers from the first experiment

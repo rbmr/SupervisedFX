@@ -15,6 +15,7 @@ from common.envs.rewards import percentage_return
 from common.models.train_eval import run_experiment
 from common.scripts import *
 from RQ2.parameters import *
+from RQ2.hyperparameter_experiments import apply_cautious_parameters, apply_balanced_parameters
 
 
 def main():
@@ -40,33 +41,17 @@ def main():
         agent_feature_engineer=stepwise_feature_engineer,
         initial_capital=INITIAL_CAPITAL,
         transaction_cost_pct=TRANSACTION_COST_PCT,
-        n_actions=0,
+        n_actions=3,
         custom_reward_function=percentage_return)
     logging.info("Environments created.")
 
     temp_env = DummyVecEnv([lambda: train_env])
 
 
-    model = SAC(
-        policy="MlpPolicy",
-        env=temp_env,
-        learning_rate=0.0005,
-        buffer_size=60_000,
-        learning_starts=1000,
-        batch_size=512,
-        tau=0.005,
-        gamma=0.95,
-        train_freq=1,
-        gradient_steps=1,
-        target_update_interval=1,
-        ent_coef='auto',
-        policy_kwargs=dict(
-            net_arch=[32, 16],
-            activation_fn=LeakyReLU,
-            optimizer_class=optim.Adam,
-        ),
-        verbose=1
-    )
+    dqn_kwargs = base_dqn_kwargs(temp_env)
+    dqn_kwargs = apply_balanced_parameters(dqn_kwargs)
+    dqn_kwargs["buffer_size"] = 2048
+    model = DQN(**dqn_kwargs)
 
 
     logging.info("Model created.")
@@ -78,9 +63,9 @@ def main():
         eval_env=eval_env,
         model=model,
         base_folder_path=RQ2_DIR,
-        experiment_group_name="sac",
-        experiment_name="1",
-        train_episodes=50,
+        experiment_group_name="dqn",
+        experiment_name="lower_buffer_balanced",
+        train_episodes=40,
         eval_episodes=1,
         checkpoints=True,
         tensorboard_logging=True,
