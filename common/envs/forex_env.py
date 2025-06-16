@@ -270,12 +270,12 @@ class ForexEnv(gym.Env):
             low = action_low,
             high = action_high,
         )
-        data_configs = DataConfig.get_configs(
+        data_configs = DataConfig.from_splits(
             forex_candle_data=forex_candle_data,
             split_pcts=split_pcts,
             obs_configs=obs_configs,
         )
-        
+
         return [cls(action_config, env_config, data_config) for data_config in data_configs]
 
 
