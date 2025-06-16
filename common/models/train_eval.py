@@ -159,7 +159,6 @@ def evaluate_model(model_zip: Path,
                    results_dir: Path,
                    eval_envs: dict[str, ForexEnv],
                    eval_episodes: int = 1,
-                   force_eval: bool = False,
                    progress_bar: bool = False) -> None:
     """
     Evaluates a model on a set of ForexEnvs for a given number of episodes.
@@ -173,9 +172,6 @@ def evaluate_model(model_zip: Path,
     model_name = model_zip.stem
     model = load_model_with_metadata(model_zip)
     model_results_dir = results_dir / model_name
-    if not force_eval and model_results_dir.exists():
-        logging.info(f"{model_name} has already been evaluated, skipping...")
-        return
 
     for eval_env_name, eval_env in eval_envs.items():
         env_results_dir = model_results_dir / eval_env_name
@@ -240,13 +236,18 @@ def evaluate_models(models_dir: Path,
         results_dir=results_dir,
         eval_envs=eval_envs,
         eval_episodes=eval_episodes,
-        force_eval=force_eval,
         progress_bar=progress_bar,
     )
     manager = Manager()
     shared_lock = manager.Lock()
     shared_seen = manager.list()
     queue = ModelQueue(models_dir, shared_seen, shared_lock)
+
+    if not force_eval:
+        results_dir = models_dir.parent / "results"
+        for model_zip in models_dir.glob("*.zip"):
+            if (results_dir / model_zip.stem).exists():
+                shared_seen.append(model_zip)
 
     workers = []
     for i in range(num_workers):
