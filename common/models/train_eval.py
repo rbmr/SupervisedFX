@@ -219,16 +219,12 @@ def evaluate_models(models_dir: Path,
                     eval_envs: dict[str, ForexEnv],
                     eval_episodes: int = 1,
                     force_eval: bool = False,
-                    num_workers: int = 4,
-                    eval_dummies: bool = False) -> None:
+                    num_workers: int = 4) -> None:
     """
     Evaluates each model in a directory on a set of ForexEnvs for a given number of episodes.
     Saves results in results_dir.
     """
     logging.info("Starting evaluation...")
-
-    if eval_dummies:
-        evaluate_dummies(results_dir, eval_envs)
 
     progress_bar = num_workers == 1
     func = partial(
