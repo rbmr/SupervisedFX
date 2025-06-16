@@ -220,19 +220,26 @@ def apply_hybrid_parameters(dqn_kwargs: dict) -> dict:
     """
     Apply hybrid parameters that combine cautious and balanced approaches.
     """
-    dqn_kwargs['learning_rate'] = 0.0001
+    dqn_kwargs['learning_rate'] = 0.00075
     dqn_kwargs['buffer_size'] = 60_000
-    dqn_kwargs['batch_size'] = 256
+    dqn_kwargs['batch_size'] = 512
     dqn_kwargs['tau'] = 0.005
     dqn_kwargs['train_freq'] = 32
     dqn_kwargs['gradient_steps'] = 1
-    dqn_kwargs['target_update_interval'] = 2_000
+    dqn_kwargs['target_update_interval'] = 2250
     dqn_kwargs['exploration_fraction'] = 0.35
     dqn_kwargs['exploration_initial_eps'] = 1.0
     dqn_kwargs['exploration_final_eps'] = 0.05
     return dqn_kwargs
 
-#experiments for reduced, baseline, increased, symmetric, medium symmetric
+def HP_P3_hybdrid_minimalist(temp_env: DummyVecEnv) -> DQN:
+    """
+    Initializes a 'hybrid' DQN model with minimalist capacity.
+    """
+    dqn_kwargs = base_dqn_kwargs(temp_env)
+    dqn_kwargs = apply_hybrid_parameters(dqn_kwargs)
+    dqn_kwargs = apply_minimalist_capacity_network(dqn_kwargs)
+    return DQN(**dqn_kwargs)
 
 def HP_P3_hybrid_reduced(temp_env: DummyVecEnv) -> DQN:
     """
@@ -276,4 +283,13 @@ def HP_P3_hybrid_medium_symmetric(temp_env: DummyVecEnv) -> DQN:
     dqn_kwargs = base_dqn_kwargs(temp_env)
     dqn_kwargs = apply_hybrid_parameters(dqn_kwargs)
     dqn_kwargs = apply_medium_symmetric_capacity_network(dqn_kwargs)
+    return DQN(**dqn_kwargs)
+
+def HP_P3_hybrid_high(temp_env: DummyVecEnv) -> DQN:
+    """
+    Initializes a 'hybrid' DQN model with high capacity.
+    """
+    dqn_kwargs = base_dqn_kwargs(temp_env)
+    dqn_kwargs = apply_hybrid_parameters(dqn_kwargs)
+    dqn_kwargs = apply_high_capacity_network(dqn_kwargs)
     return DQN(**dqn_kwargs)
