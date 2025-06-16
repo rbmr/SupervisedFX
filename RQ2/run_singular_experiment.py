@@ -42,15 +42,14 @@ def main():
         initial_capital=INITIAL_CAPITAL,
         transaction_cost_pct=TRANSACTION_COST_PCT,
         n_actions=3,
-        custom_reward_function=percentage_return)
+        custom_reward_function=percentage_return )
     logging.info("Environments created.")
 
     temp_env = DummyVecEnv([lambda: train_env])
 
 
     dqn_kwargs = base_dqn_kwargs(temp_env)
-    dqn_kwargs = apply_balanced_parameters(dqn_kwargs)
-    dqn_kwargs["buffer_size"] = 2048
+    dqn_kwargs = apply_cautious_parameters(dqn_kwargs)
     model = DQN(**dqn_kwargs)
 
 
@@ -64,7 +63,7 @@ def main():
         model=model,
         base_folder_path=RQ2_DIR,
         experiment_group_name="dqn",
-        experiment_name="lower_buffer_balanced",
+        experiment_name="scaled_rewards",
         train_episodes=40,
         eval_episodes=1,
         checkpoints=True,
