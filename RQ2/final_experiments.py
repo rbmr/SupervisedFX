@@ -144,11 +144,11 @@ class RQ2FeatureEngineerFactory:
 
     # AGENT FEATURES
     def add_current_exposure(self):
-        self._stepwise_feature_engineer.add(get_current_exposure)
+        self._stepwise_feature_engineer.add(["current_exposure"], get_current_exposure)
         return self
     
     def add_duration_of_current_trade(self):
-        self._stepwise_feature_engineer.add(duration_of_current_trade)
+        self._stepwise_feature_engineer.add(["duration_of_trade"], duration_of_current_trade)
         return self
 
 
@@ -186,6 +186,11 @@ def S1_TM_L24L7() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
 def S1_TM_SC24SC7() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
     factory = RQ2FeatureEngineerFactory.create_core_factory(time=False)
     factory.add_sin_24h().add_cos_24h().add_sin_7d().add_cos_7d()
+    return factory.give_me_them_engineers()
+
+def S1_TM_COMBO() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = RQ2FeatureEngineerFactory.create_core_factory(time=False)
+    factory.add_lin_24h().add_sin_24h().add_cos_24h()
     return factory.give_me_them_engineers()
 
 def S1_TM_ALL() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
