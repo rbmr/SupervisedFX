@@ -1,7 +1,10 @@
+import itertools
 from datetime import datetime
 from pathlib import Path
+from typing import Generator
 
 from common.data.data import ForexCandleData, Timeframe
+from common.models.dummy_models import long_model, cash_model, short_model, dp_perfect_model, random_model
 
 RQ1_DIR = Path(__file__).resolve().parent 
 RQ1_EXPERIMENTS_DIR = RQ1_DIR / "experiments" / "report"
@@ -14,10 +17,30 @@ INITIAL_CAPITAL = 10_000
 N_ACTIONS = 0
 ACTION_LOW = -1.0
 ACTION_HIGH = 1.0
+DUMMY_MODELS = {"long_model": long_model, "cash_model": cash_model, "short_model": short_model, "perfect_model": dp_perfect_model, "random_model": random_model}
+
 FOREX_CANDLE_DATA = ForexCandleData.load(
     source="dukascopy",
     instrument="EURUSD",
-    granularity=Timeframe.M30,
+    granularity=Timeframe.H1,
     start_time=datetime(2020, 1, 1, 22, 0, 0, 0),
-    end_time=datetime(2024, 12, 31, 21, 30, 0, 0),
+    end_time=datetime(2024, 12, 31, 21, 00, 0, 0),
 )
+
+SAC_HYPERPARAMS = dict(
+    learning_rate=3.e-4,
+    buffer_size=200_000,
+    learning_starts=1000,
+    batch_size=256,
+    tau=0.005,
+    gamma=1.0,
+    ent_coef='auto',
+    gradient_steps=2,
+    train_freq=48,
+)
+
+CUD_COLORS = ['#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', '#D55E00', '#CC79A7']
+MARKERS = ["o", "v", "s", "*", "D", "P", "X"]
+
+SEED = 42
+SEEDS = itertools.count(SEED)
