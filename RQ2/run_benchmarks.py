@@ -74,7 +74,7 @@ def main():
         # Create environments
         logging.info("Creating environments...")
         train_env, eval_env = ForexEnv.create_train_eval_envs(
-            split_ratio=RQ2_DATA_SPLIT_RATIO,
+            split_pcts=[RQ2_DATA_SPLIT_RATIO, 1-RQ2_DATA_SPLIT_RATIO],
             forex_candle_data=forex_data,
             market_feature_engineer=feature_engineer,
             agent_feature_engineer=stepwise_feature_engineer,

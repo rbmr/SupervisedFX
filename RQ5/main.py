@@ -61,7 +61,7 @@ def get_environments():
 
     logging.info("Building environments...")
     return ForexEnv.create_train_eval_envs(
-        split_ratio=0.8,
+        split_pcts=[0.8,0.2],
         forex_candle_data=data,
         market_feature_engineer=market_fe,
         agent_feature_engineer=agent_fe,
