@@ -464,7 +464,6 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
             # sort each experiment's list
             for exp, entries in exp_map.items():
                 entries.sort(key=lambda x: x[0])
-                #print(entries)
                 exp_map[exp] = [v for _, v in entries]
             # ensure all experiments have same length
             lengths = {exp: len(vals) for exp, vals in exp_map.items()}
