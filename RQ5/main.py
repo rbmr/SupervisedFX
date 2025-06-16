@@ -60,7 +60,7 @@ def get_environments():
     agent_fe.add(["current_exposure"], calculate_current_exposure)
 
     logging.info("Building environments...")
-    return ForexEnv.create_train_eval_envs(
+    return ForexEnv.create_split_envs(
         split_pcts=[0.8,0.2],
         forex_candle_data=data,
         market_feature_engineer=market_fe,

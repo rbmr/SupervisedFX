@@ -242,7 +242,7 @@ class DataConfig:
 class ForexEnv(gym.Env):
 
     @classmethod
-    def create_train_eval_envs(cls,
+    def create_split_envs(cls,
                                split_pcts: list[float],
                                forex_candle_data: ForexCandleData,
                                market_feature_engineer: FeatureEngineer,
