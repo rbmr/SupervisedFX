@@ -3,8 +3,9 @@ import logging
 from functools import partial
 from multiprocessing import Lock, Manager, Process
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Dict, List, Tuple
 
+import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from stable_baselines3.common.base_class import BaseAlgorithm
@@ -159,7 +160,6 @@ def evaluate_model(model_zip: Path,
                    results_dir: Path,
                    eval_envs: dict[str, ForexEnv],
                    eval_episodes: int = 1,
-                   force_eval: bool = False,
                    progress_bar: bool = False) -> None:
     """
     Evaluates a model on a set of ForexEnvs for a given number of episodes.
@@ -173,9 +173,6 @@ def evaluate_model(model_zip: Path,
     model_name = model_zip.stem
     model = load_model_with_metadata(model_zip)
     model_results_dir = results_dir / model_name
-    if not force_eval and model_results_dir.exists():
-        logging.info(f"{model_name} has already been evaluated, skipping...")
-        return
 
     for eval_env_name, eval_env in eval_envs.items():
         env_results_dir = model_results_dir / eval_env_name
@@ -223,16 +220,12 @@ def evaluate_models(models_dir: Path,
                     eval_envs: dict[str, ForexEnv],
                     eval_episodes: int = 1,
                     force_eval: bool = False,
-                    num_workers: int = 4,
-                    eval_dummies: bool = False) -> None:
+                    num_workers: int = 4) -> None:
     """
     Evaluates each model in a directory on a set of ForexEnvs for a given number of episodes.
     Saves results in results_dir.
     """
     logging.info("Starting evaluation...")
-
-    if eval_dummies:
-        evaluate_dummies(results_dir, eval_envs)
 
     progress_bar = num_workers == 1
     func = partial(
@@ -240,13 +233,18 @@ def evaluate_models(models_dir: Path,
         results_dir=results_dir,
         eval_envs=eval_envs,
         eval_episodes=eval_episodes,
-        force_eval=force_eval,
         progress_bar=progress_bar,
     )
     manager = Manager()
     shared_lock = manager.Lock()
     shared_seen = manager.list()
     queue = ModelQueue(models_dir, shared_seen, shared_lock)
+
+    if not force_eval:
+        results_dir = models_dir.parent / "results"
+        for model_zip in models_dir.glob("*.zip"):
+            if (results_dir / model_zip.stem).exists():
+                shared_seen.append(model_zip)
 
     workers = []
     for i in range(num_workers):
@@ -402,24 +400,35 @@ def run_model(model: BaseAlgorithm,
 def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[str, str]]] = None, ext: str = ".png"):
     """
     Combines the result of an experiment group
-    <experiment_group>/<experiment_name>/results/<model_name>/<environment_name>/info.json
+    <experiment_group>/<experiment_name>/[seed_<seed>/]results/<model_name>/<environment_name>/info.json
     """
     if style_map is None:
         style_map = {}
-    results = {}
 
     # Collect all unique experiment names
+    results = {}
     experiment_names = set()
 
-    # Collect raw entries: {env: {metric: {exp: [(model_key, value), ...]}}}
+    # Collect raw entries: {env: {metric: {exp: {seed: [(model_key, value), ...]}}}}
+    results: Dict[str, Dict[str, Dict[str, Dict[Optional[int], List[Tuple[Tuple[bool, int], float]]]]]] = {}
+    experiment_names = set()
+
     for exp_dir in experiment_group.iterdir():
         if not exp_dir.is_dir():
             continue
         exp_name = exp_dir.name
         experiment_names.add(exp_name)
         for info_path in exp_dir.rglob('info.json'):
-            # parts: .../<model_name>/<environment_name>/info.json
-            env_name = info_path.parent.name
+            # parts: .../[seed_<seed>/]results/<model_name>/<environment_name>/info.json
+            parts = info_path.relative_to(exp_dir).parts
+            if parts[0].startswith("seed_"):
+                seed = safe_int(parts[0].lstrip("seed_"))
+                rel = parts[1:] # remove the seed, leaving (results, <model_name>, <env_name>, info.json)
+            else:
+                seed = None
+                rel = parts # should be (results, <model_name>, <env_name>, info.json)
+            assert len(rel) == 4 and rel[0] == "results"
+            env_name = rel[-2]
             model_key = extract_key(info_path)
             with open(info_path, mode="r") as f:
                 data = json.load(f)
@@ -427,10 +436,11 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
             env_dict = results.setdefault(env_name, {})
             for metric, val in data.items():
                 metric_dict = env_dict.setdefault(metric, {})
-                entries = metric_dict.setdefault(exp_name, [])
-                entries.append((model_key, val))
+                exp_dict = metric_dict.setdefault(exp_name, {})
+                seed_list = exp_dict.setdefault(seed, [])
+                seed_list.append((model_key, val))
 
-    # GENERATE MISSING COLOURSS
+    # GENERATE MISSING COLOURS
     sorted_experiment_names = sorted(list(experiment_names)) 
     experiments_to_color = [
         exp_name for exp_name in sorted_experiment_names 
@@ -458,37 +468,79 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
             style_map[exp_name]['color'] = colors[i]
 
     # Sort by timestamp and extract values
+    # processed : {env: {<metric>.<mean/std>.<exp_name>: [<values>]}}
+    # we use dot separation because exp_name or metric might contain underscores
+    processed: Dict[str, Dict[str, List[float]]] = {}
+
     for env, metrics in results.items():
         for metric, exp_map in metrics.items():
-            # sort each experiment's list
-            for exp, entries in exp_map.items():
-                entries.sort(key=lambda x: x[0])
-                #print(entries)
-                exp_map[exp] = [v for _, v in entries]
-            # ensure all experiments have same length
-            lengths = {exp: len(vals) for exp, vals in exp_map.items()}
-            if len(set(lengths.values())) != 1:
-                raise ValueError(f"Metric '{metric}' in environment '{env}' has unequal number of values: {lengths}")
+            for exp_name, seed_map in exp_map.items():
+
+                # sort each seed's entries by model_key
+                sorted_vals_per_seed: List[List[float]] = []
+                for seed, entries in seed_map.items():
+                    entries.sort(key=lambda x: x[0])
+                    vals = [v for _, v in entries]
+                    sorted_vals_per_seed.append(vals)
+
+                # ensure all seeds have same length
+                lengths = [len(v) for v in sorted_vals_per_seed]
+                if len(set(lengths)) != 1:
+                    raise ValueError(f"Unequal lengths for {env}/{metric}/{exp_name}: {lengths}")
+
+                arr = np.array(sorted_vals_per_seed)
+                mean = arr.mean(axis=0)
+                std = arr.std(axis=0)
+
+                out_env = processed.setdefault(env, {})
+                out_env[f"{metric}.mean.{exp_name}"] = mean.tolist()
+                out_env[f"{metric}.std.{exp_name}"] = std.tolist()
 
     # Create output directories
     combined_dir = experiment_group / 'combined_finals'
     combined_dir.mkdir(exist_ok=True)
+
     for env, metrics in results.items():
+
+        # identify base metrics
+        base_metrics = set(m.rsplit('.', 2)[0] for m in metrics)
         env_dir = combined_dir / env
         env_dir.mkdir(exist_ok=True)
+
         # Plot each metric
-        for metric, exp_map in metrics.items():
-            plt.figure(figsize=(12, 6))
-            for exp, values in exp_map.items():
-                style = style_map.get(exp, {})
-                plt.plot(values, label=exp, **style)
-            plt.title(f"{env} - {metric}")
-            plt.xlabel('Run (chronological)')
-            plt.ylabel(metric)
+        for base in base_metrics:
+            fig, ax = plt.subplots(figsize=(12, 6))
+
+            # episodes from mean of any exp
+            mean_key = next(k for k in metrics if k.startswith(f"{base}.mean"))
+            episodes = np.arange(len(metrics[mean_key]))
+
+            for exp_name in sorted_experiment_names:
+
+                mean_key = f"{base}.mean.{exp_name}"
+                std_key = f"{base}.std.{exp_name}"
+                assert mean_key in metrics
+                assert std_key in metrics
+
+                mean = np.array(metrics[mean_key])
+                std = np.array(metrics.get(std_key, [0]*len(mean)))
+
+                style = style_map.get(exp_name, {})
+                ax.plot(episodes, mean, label=exp_name, **style)
+
+                # draw std band only if non-zero
+                if std.max() == 0:
+                    continue
+                ax.fill_between(episodes, mean - std, mean + std, alpha=0.2, zorder=0)
+
+            plt.title(f"{env} - {base}")
+            plt.xlabel('Run index')
+            plt.ylabel(base)
             plt.legend(fontsize=10, loc='best', bbox_to_anchor=(1.0, 1.0))  # Smaller legend, pushed outside
             plt.tight_layout(pad=0.8)  # Adjust layout to fit legend
-            output = env_dir / f"{metric}{ext}"
+
+            output = env_dir / f"{base}{ext}"
             plt.savefig(output, bbox_inches='tight', pad_inches=0.2)
             plt.close()
 
-    return results
+    return processed

@@ -18,7 +18,6 @@ class SaveCallback(BaseCallback):
         if models_dir.exists() and not models_dir.is_dir():
             raise ValueError(f"{models_dir} is not a valid directory.")
         self.models_dir = models_dir
-        self.models_dir.mkdir(parents=True, exist_ok=True)
         self.save_freq = save_freq
 
     def _on_step(self) -> bool:
