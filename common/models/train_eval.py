@@ -500,7 +500,7 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
     combined_dir = experiment_group / 'combined_finals'
     combined_dir.mkdir(exist_ok=True)
 
-    for env, metrics in results.items():
+    for env, metrics in processed.items():
 
         # identify base metrics
         base_metrics = set(m.rsplit('.', 2)[0] for m in metrics)
