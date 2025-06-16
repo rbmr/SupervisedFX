@@ -276,11 +276,12 @@ def run_experiment(experiment_group: str, config: ExperimentConfig, seed: int = 
 
     analyse_results(results_dir)
 
-def run_experiments(experiment_group: str, experiments: List[ExperimentConfig]):
+def run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1):
 
-    for experiment, seed in experiments, SEEDS:
-        logging.info(f"Running experiment: {experiment}")
-        run_experiment(experiment_group=experiment_group, config=experiment, seed=seed)
+    for experiment in zip(experiments):
+        for i in range(n_seeds):
+            logging.info(f"Running experiment: {experiment}")
+            run_experiment(experiment_group=experiment_group, config=experiment, seed=SEED+i)
 
     combine_finals(RQ1_EXPERIMENTS_DIR / experiment_group, {exp.name : exp.get_style() for exp in experiments}, ext=".svg")
 
@@ -295,12 +296,11 @@ def run_baselines():
         "train": train_env,
         "eval": eval_env,
     }
-    for dummy_factory in DUMMY_MODELS:
-        name = dummy_factory.__name__
+    for dummy_name, dummy_factory in DUMMY_MODELS.items():
         for eval_env_name, eval_env in eval_envs.items():
             dummy_model = dummy_factory(eval_env)
-            results_dir = experiment_group_dir / name
-            evaluate_dummy(dummy_model = dummy_model, name=name, results_dir=results_dir, eval_env=eval_env, eval_env_name=eval_env_name)
+            results_dir = experiment_group_dir / dummy_name
+            evaluate_dummy(dummy_model = dummy_model, name=dummy_name, results_dir=results_dir, eval_env=eval_env, eval_env_name=eval_env_name)
 
 def run_shape_experiments():
 
@@ -313,7 +313,7 @@ def run_shape_experiments():
         ExperimentConfig(name="shape_inv_funnel", net_shape=shapes["inv_funnel"], line_color=CUD_COLORS[3], line_marker="<"),
     ]
 
-    run_experiments(experiment_group="network_shapes", experiments=experiments)
+    run_experiments(experiment_group="network_shapes", experiments=experiments, n_seeds=5)
 
 def run_size_experiments():
 
@@ -342,7 +342,7 @@ def run_activation_experiments():
             line_color = color,
         ))
 
-    run_experiments(experiment_group=f"activation_functions", experiments=experiments)
+    run_experiments(experiment_group=f"activation_functions", experiments=experiments, n_seeds=5)
 
 if __name__ == "__main__":
 
