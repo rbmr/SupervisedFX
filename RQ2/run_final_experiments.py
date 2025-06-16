@@ -17,6 +17,8 @@ from common.scripts import *
 from RQ2.parameters import *
 from RQ2.hyperparameter_experiments import *
 
+from RQ2.final_experiments import *
+
 
 def main():
     
@@ -30,19 +32,16 @@ def main():
                                       end_time= RQ2_HYPERPARAMETERS_END_DATE_1H,
                                     )
     
-    experiments: List[Callable[[DummyVecEnv], DQN]] = [
-        HP_P3_hybrid_baseline,
-        HP_P3_hybrid_reduced,
-        HP_P3_hybrid_increased,
-        HP_P3_hybrid_medium_symmetric,
-        HP_P3_hybrid_symmetric,
-        HP_P3_hybdrid_minimalist,
-        HP_P3_hybrid_high
-    ]
+    experiments: List[Callable[[], tuple[FeatureEngineer, StepwiseFeatureEngineer]]] = [S1_TR_ALL]
 
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers() # Get the feature engineers from the first experiment
-    train_env, eval_env = ForexEnv.create_split_envs(
-            split_pcts=[RQ2_DATA_SPLIT_RATIO, 1-RQ2_DATA_SPLIT_RATIO],
+    
+    group_name = "ksadjhflksajdhflskdajh"
+    for experiment in experiments:
+        
+        feature_engineer, stepwise_feature_engineer = experiment()
+
+        train_env, validate_env, eval_env = ForexEnv.create_split_envs(
+            split_pcts=RQ2_FINAL_EXPERIMENTS_DATA_SPLITS,
             forex_candle_data=forex_data,
             market_feature_engineer=feature_engineer,
             agent_feature_engineer=stepwise_feature_engineer,
@@ -52,24 +51,16 @@ def main():
             custom_reward_function=percentage_return
         )
 
-
-    temp_dummy_env = DummyVecEnv([lambda: train_env])
-    
-    group_name = "[hyperparameters-P3]-1h_data"
-    for experiment in experiments:
-        logging.info(f"Running experiment: {experiment.__name__}")
-
-        logging.info("Fetching Experiment Model...")
-        model = experiment(temp_dummy_env)
-        logging.info("Experiment Model fetched.")
-
-        logging.info("Model created.")
-        logging.info("Model architecture:" + str(model.policy))
-        logging.info("Running Experiment parts...")
+        dummy_env = DummyVecEnv([lambda: train_env])
+        dqn_kwargs = base_dqn_kwargs(dummy_env)
+        dqn_kwargs = apply_cautious_parameters(dqn_kwargs)
+        dqn_kwargs = apply_increased_capacity_network(dqn_kwargs)
+        model = DQN(**dqn_kwargs)
 
         run_experiment(
             train_env=train_env,
-            validate_env=eval_env,
+            validate_env=validate_env,
+            eval_env=eval_env,
             model=model,
             base_folder_path=RQ2_DIR,
             experiment_group_name=group_name,
@@ -87,6 +78,51 @@ def main():
         experiment_group= RQ2_DIR / "experiments" / group_name,
     )
 
+
+def get_s1_experiment_functions() -> Dict[str, List[Callable]]:
+    return {
+        "Time": [
+            S1_TM_NONE,
+            S1_TM_L24,
+            S1_TM_S24,
+            S1_TM_SC24,
+            S1_TM_L24L7,
+            S1_TM_SC24SC7,
+            S1_TM_COMBO,
+            S1_TM_ALL
+        ],
+        "Trend": [
+            S1_TR_NONE,
+            S1_TR_NV,
+            S1_TR_V,
+            S1_TR_COMBO,
+            S1_TR_ALL
+        ],
+        "Momentum": [
+            S1_MO_NONE,
+            S1_MO_NV,
+            S1_MO_V,
+            S1_MO_COMBO,
+            S1_MO_ALL
+        ],
+        "Volatility": [
+            S1_VO_NONE,
+            S1_VO_NV,
+            S1_VO_V,
+            S1_VO_COMBO,
+            S1_VO_ALL
+        ],
+        "Agent": [
+            S1_AG_NONE,
+            S1_AG_CE,
+            S1_AG_DT,
+            S1_AG_ALL
+        ],
+        "Combinatory": [
+            S1_COMBO_COMBO,
+            S1_COMBO_ALL
+        ]
+    }
 
 if __name__ == '__main__':
     main()

@@ -136,7 +136,7 @@ def main():
         logging.info("Running train test analyze...")
         run_experiment(
             train_env=train_env,
-            eval_env=eval_env,
+            validate_env=eval_env,
             model=dqn_model,
             base_folder_path=RQ2_DIR,
             experiment_group_name="[hyperparameters]-15m_data",
