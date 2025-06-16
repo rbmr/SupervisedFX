@@ -278,7 +278,7 @@ def run_experiment(experiment_group: str, config: ExperimentConfig, seed: int = 
 
 def run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1):
 
-    for experiment in zip(experiments):
+    for experiment in experiments:
         for i in range(n_seeds):
             logging.info(f"Running experiment: {experiment}")
             run_experiment(experiment_group=experiment_group, config=experiment, seed=SEED+i)
