@@ -448,7 +448,7 @@ def chaikin_volatility(df: pd.DataFrame, ema_window: int = 10, roc_period: int =
     roc_ema = ema_high_low.pct_change(periods=roc_period)
     
     df[f'chaikin_vol_{ema_window}_{roc_period}'] = roc_ema
-    df[f'chaikin_vol_{ema_window}_{roc_period}'].fillna(0, inplace=True)
+    df[f'chaikin_vol_{ema_window}_{roc_period}'] = df[f'chaikin_vol_{ema_window}_{roc_period}'].fillna(0)
 
 def ease_of_movement(df: pd.DataFrame, window: int = 14):
     """
@@ -482,7 +482,7 @@ def ease_of_movement(df: pd.DataFrame, window: int = 14):
 
     # Add the new feature to the DataFrame and fill any NaNs with 0
     df[f'eom_{window}'] = eom
-    df[f'eom_{window}'].fillna(0, inplace=True)
+    df[f'eom_{window}'] = df[f'eom_{window}'].fillna(0)
 
 # ------------------------------- #
 # -- END VOLATILITY Indicators -- #
