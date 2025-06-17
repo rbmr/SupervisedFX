@@ -599,7 +599,7 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
                 # draw std band only if non-zero
                 if std.max() == 0:
                     continue
-                ax.fill_between(episodes, mean - std, mean + std, alpha=0.2, zorder=0)
+                ax.fill_between(episodes, mean - std, mean + std, alpha=0.15, zorder=0)
 
             plt.title(f"{env} - {base}")
             plt.xlabel('Run index')
