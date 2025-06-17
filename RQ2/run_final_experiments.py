@@ -33,7 +33,6 @@ def get_data():
 def get_model(forex_env: ForexEnv, seed: int) -> DQN:
     dqn_kwargs = base_dqn_kwargs(forex_env, seed)
     dqn_kwargs = apply_cautious_parameters(dqn_kwargs)
-    dqn_kwargs = apply_increased_capacity_network(dqn_kwargs)
     model = DQN(**dqn_kwargs)
     return model
 

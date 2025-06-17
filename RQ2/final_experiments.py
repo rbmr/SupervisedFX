@@ -23,6 +23,7 @@ def S1_TM_NONE() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
 def S1_TM_L24() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
     factory = RQ2FeatureEngineerFactory.create_core_factory(time=False)
     factory.add_lin_24h()
+    return factory.give_me_them_engineers()
 
 def S1_TM_S24() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
     factory = RQ2FeatureEngineerFactory.create_core_factory(time=False)
