@@ -14,7 +14,7 @@ from common.data.feature_engineer import FeatureEngineer, as_pct_change, ema, rs
 from common.constants import SEED
 from RQ5.constants import EXPERIMENTS_DIR, EXPERIMENT_NAME_FORMAT
 from common.envs.callbacks import *
-from common.models.train_eval import train_model, analyse_results, evaluate_models
+from common.models.train_eval import train_model, analyse_results, evaluate_models, train_model_with_curiosity
 from common.models.utils import save_model_with_metadata
 from common.scripts import picker, has_nonempty_subdir, n_children
 from common.envs.dp import get_dp_table_from_env
@@ -121,8 +121,8 @@ def run_experiment(exploration_strategy: str, use_optimal_reward=False):
 
     print("Available data configs:", ', '.join(PARAM_PRESETS.keys()))
     config_options = list(PARAM_PRESETS.keys())
-    config_key = picker([(key, key) for key in config_options], default="M30").strip()
-    config_key = config_key if config_key in PARAM_PRESETS else "M15_0.8"
+    config_key = picker([(key, key) for key in config_options], default="M30_0.7").strip()
+    config_key = config_key if config_key in PARAM_PRESETS else "M30_0.7"
     data_config = PARAM_PRESETS[config_key]
 
 
@@ -180,6 +180,30 @@ def run_experiment(exploration_strategy: str, use_optimal_reward=False):
             temperature=float(temperature) if temperature else 1.0,
             epsilon=float(epsilon) if epsilon else 0.1
         )
+    
+    elif exploration_strategy == "curiosity":
+        from stable_baselines3 import DQN
+        from common.envs.curiosity import CuriosityModule
+
+        curiosity_beta = input("Curiosity beta (intrinsic reward scaling, default 0.1): ")
+        curiosity_beta = float(curiosity_beta) if curiosity_beta else 0.1
+
+        dqn_args.update({
+            "exploration_initial_eps": 0.1,
+            "exploration_final_eps": 0.01,
+            "exploration_fraction": 0.8
+        })
+
+        model = DQN(**dqn_args)
+
+        # Initialize curiosity module
+        curiosity_module = CuriosityModule(
+            state_dim=train_env.observation_space.shape[0],
+            action_dim=train_env.action_space.n,
+            hidden_dim=128,
+            lr=1e-4
+        )
+
 
     else:
         raise ValueError(f"Unknown exploration strategy: {exploration_strategy}")
@@ -194,8 +218,19 @@ def run_experiment(exploration_strategy: str, use_optimal_reward=False):
     ]
 
     logging.info("Starting training...")
-    train_model(model, train_env, train_episodes=train_episodes, callback=callback)
-    save_model_with_metadata(model, models_dir / "model_final.zip")
+    if exploration_strategy == "curiosity":
+        train_model_with_curiosity(
+            model=model,
+            curiosity_module=curiosity_module,
+            train_env=train_env,
+            train_episodes=train_episodes,
+            beta=curiosity_beta,
+            model_save_path=models_dir,
+            callback=callback
+        )
+    else:
+        train_model(model, train_env, train_episodes=train_episodes, callback=callback)
+        save_model_with_metadata(model, models_dir / "model_final.zip")
 
     # Evaluate
     logging.info("Evaluating model...")
@@ -209,7 +244,7 @@ def run_experiment(exploration_strategy: str, use_optimal_reward=False):
     analyse_results(results_dir)
 
 if __name__ == "__main__":
-    strategies = ["epsilon_greedy", "boltzmann", "max_boltzmann"]
+    strategies = ["epsilon_greedy", "boltzmann", "max_boltzmann", "curiosity"]
     options = [(f"run_{s}", lambda s=s: run_experiment(s)) for s in strategies]
     options += [("run_optimal", lambda: run_experiment("optimal_reward", use_optimal_reward=True))]
 
