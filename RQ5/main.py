@@ -180,7 +180,7 @@ def run_experiment(exploration_strategy: str, use_optimal_reward=False):
             epsilon=float(epsilon) if epsilon else 0.1
         )
     elif exploration_strategy == "curiosity":
-        from common.envs.curiosity import CuriosityModule
+        from RQ5.curiosity import CuriosityModule
         from stable_baselines3 import DQN
         from common.models.train_eval import train_model_with_curiosity
 
