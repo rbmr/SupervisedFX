@@ -241,9 +241,9 @@ def evaluate_models(models_dir: Path,
     queue = ModelQueue(models_dir, shared_seen, shared_lock)
 
     if not force_eval:
-        results_dir = models_dir.parent / "results"
         for model_zip in models_dir.glob("*.zip"):
             if (results_dir / model_zip.stem).exists():
+                logging.info(f"{model_zip} has already been evaluated, skipping.")
                 shared_seen.append(model_zip)
 
     workers = []
