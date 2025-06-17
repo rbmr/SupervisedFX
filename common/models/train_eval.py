@@ -1,5 +1,7 @@
 import json
 import logging
+from asyncio import FIRST_EXCEPTION
+from concurrent.futures import ProcessPoolExecutor, wait
 from functools import partial
 from multiprocessing import Lock, Manager, Process
 from pathlib import Path
@@ -258,33 +260,6 @@ def evaluate_model(model_zip: Path,
                   deterministic=True,
                   progress_bar=progress_bar)
 
-class ModelQueue:
-    def __init__(self, models_dir: Path, seen, lock: Lock):
-        if not models_dir.is_dir():
-            raise ValueError(f"{models_dir} is not a directory")
-        self.models_dir = models_dir
-        self.seen = seen # Shared list
-        self.lock = lock # Shared lock
-
-    def get(self) -> Path | None:
-        with self.lock:
-            models = sorted(self.models_dir.glob("*.zip"), key=lambda p: p.stat().st_mtime)
-            for model_zip in models:
-                if not model_zip.is_file():
-                    continue
-                if model_zip in self.seen:
-                    continue
-                self.seen.append(model_zip)
-                return model_zip
-        return None
-
-def evaluate_worker(queue: ModelQueue, func: Callable):
-    while True:
-        model_path = queue.get()
-        if model_path is None:
-            break
-        func(model_path)
-
 def evaluate_models(models_dir: Path,
                     results_dir: Path,
                     eval_envs: dict[str, ForexEnv],
@@ -305,25 +280,29 @@ def evaluate_models(models_dir: Path,
         eval_episodes=eval_episodes,
         progress_bar=progress_bar,
     )
-    manager = Manager()
-    shared_lock = manager.Lock()
-    shared_seen = manager.list()
-    queue = ModelQueue(models_dir, shared_seen, shared_lock)
 
+    seen: set[Path] = set()
     if not force_eval:
         for model_zip in models_dir.glob("*.zip"):
             if (results_dir / model_zip.stem).exists():
                 logging.info(f"{model_zip} has already been evaluated, skipping.")
-                shared_seen.append(model_zip)
+                seen.add(model_zip)
 
-    workers = []
-    for i in range(num_workers):
-        p = Process(target=evaluate_worker, args=(queue, func), name=f"Worker-{i+1}" )
-        p.start()
-        workers.append(p)
-
-    for p in workers:
-        p.join()
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        while True:
+            models = sorted(models_dir.glob("*.zip"), key=lambda x: x.stat().st_mtime)
+            new_models = [model for model in models if model not in seen]
+            if not new_models:
+                break
+            seen.update(new_models)
+            futures = [executor.submit(func, model_zip) for model_zip in new_models]
+            done, not_done = wait(futures, return_when=FIRST_EXCEPTION)
+            for future in done:
+                exc = future.exception()
+                if exc is not None:
+                    for p in not_done:
+                        p.cancel()
+                    raise exc
 
     logging.info("Finished evaluation.")
 
