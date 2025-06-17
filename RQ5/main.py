@@ -184,8 +184,8 @@ def run_experiment(exploration_strategy: str, use_optimal_reward=False):
         from stable_baselines3 import DQN
         from common.models.train_eval import train_model_with_curiosity
 
-        curiosity_beta = input("Curiosity beta (intrinsic reward scaling, default 0.1): ")
-        curiosity_beta = float(curiosity_beta) if curiosity_beta else 0.1
+        curiosity_beta = input("Curiosity beta (intrinsic reward scaling, default 0.2): ")
+        curiosity_beta = float(curiosity_beta) if curiosity_beta else 0.2
 
         dqn_args.update({
             "exploration_initial_eps": 0.1,

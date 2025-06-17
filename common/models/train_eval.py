@@ -401,6 +401,13 @@ def train_model_with_curiosity(
             cb.init_callback(model)
             cb.num_timesteps = 0
 
+    curiosity_batch = []
+    curiosity_batch_size = 32
+    intrinsic_episode_rewards = []
+    episode_idx = 0
+    previous_action = None
+    entropy_penalty_weight = 0.001  # small penalty for repeating action
+
     for step in tqdm(range(total_steps)):
         state_tensor = torch.FloatTensor(obs).to(model.device)
         action, _ = model.predict(obs, deterministic=False)
@@ -416,22 +423,51 @@ def train_model_with_curiosity(
             state_tensor, next_state_tensor, action_one_hot_tensor
         )[0]
 
-        combined_reward = extrinsic_reward + beta * intrinsic_reward
+        # Normalize + clip intrinsic reward
+        mean = intrinsic_reward.mean()
+        std = intrinsic_reward.std() + 1e-8
+        normalized_intrinsic = (intrinsic_reward - mean) / std
+        clipped_intrinsic = np.clip(normalized_intrinsic, -3, 3)
+
+        # Dynamic curiosity weight: strong at start, decays linearly
+        progress = step / total_steps
+        dynamic_beta = beta * (1.0 - 0.8 * progress)
+
+        # Combine rewards
+        combined_reward = extrinsic_reward + dynamic_beta * clipped_intrinsic
+
+        # Apply entropy penalty to discourage same action
+        if previous_action is not None and int(action) == int(previous_action):
+            combined_reward -= entropy_penalty_weight
+        previous_action = int(action)
+
+        # Add to replay buffer
         infos = [{"TimeLimit.truncated": done}]
         model.replay_buffer.add(obs, next_obs, action, combined_reward, done, infos=infos)
 
-        curiosity_module.update_batch(
-            [state_tensor], [next_state_tensor], [action_idx_tensor], [action_one_hot_tensor]
-        )
+        # Add to curiosity training buffer
+        curiosity_batch.append((state_tensor, next_state_tensor, action_idx_tensor, action_one_hot_tensor))
+        if len(curiosity_batch) >= curiosity_batch_size:
+            states, next_states, action_idxs, action_one_hots = zip(*curiosity_batch)
+            curiosity_module.update_batch(states, next_states, action_idxs, action_one_hots)
+            curiosity_batch.clear()
 
+        # Log intrinsic reward
+        intrinsic_episode_rewards.append(clipped_intrinsic)
 
+        # Reset if done
         obs = next_obs if not done else env.reset()
+        if done:
+            avg_intrinsic = np.mean(intrinsic_episode_rewards)
+            logging.info(f"[Episode {episode_idx}] Avg intrinsic reward: {avg_intrinsic:.4f}")
+            intrinsic_episode_rewards.clear()
+            episode_idx += 1
 
-        model.num_timesteps += 1  # <- critical for BaseCallback-compatible behavior
-
+        # Update callbacks
+        model.num_timesteps += 1
         if callback:
             for cb in callback:
-                cb.num_timesteps = model.num_timesteps  # keep them in sync
+                cb.num_timesteps = model.num_timesteps
                 cb.locals = {
                     'obs': obs,
                     'actions': action,
@@ -440,9 +476,6 @@ def train_model_with_curiosity(
                     'infos': infos
                 }
                 cb.on_step()
-
-
-
 
     save_model_with_metadata(model, model_save_path / "model_final.zip")
     torch.save(curiosity_module.state_dict(), model_save_path / "curiosity_module.pth")
