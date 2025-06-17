@@ -9,6 +9,8 @@ import pandas as pd
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
+import torch
+import numpy as np
 from tqdm import tqdm
 
 from common.envs.callbacks import SaveOnEpisodeEndCallback
@@ -383,3 +385,62 @@ def run_model(model: BaseAlgorithm,
     if data_path is not None:
         logs_df.to_csv(data_path, index=False)
     return logs_df
+
+def train_model_with_curiosity(
+    model, curiosity_module, train_env, train_episodes, beta, model_save_path, callback=None
+):
+    logging.info(f"Training with curiosity for {train_episodes} episodes...")
+
+    env = DummyVecEnv([lambda: train_env])
+    total_steps = train_episodes * train_env.episode_len
+    obs = env.reset()
+
+    # Initialize callbacks
+    if callback:
+        for cb in callback:
+            cb.init_callback(model)
+
+    for step in tqdm(range(total_steps)):
+        state_tensor = torch.FloatTensor(obs).to(model.device)
+        action, _ = model.predict(obs, deterministic=False)
+        next_obs, extrinsic_reward, done, info = env.step(action)
+        next_state_tensor = torch.FloatTensor(next_obs).to(model.device)
+
+        action_idx_tensor = torch.tensor([int(action)], dtype=torch.long, device=model.device)
+        action_one_hot = np.zeros(train_env.action_space.n, dtype=np.float32)
+        action_one_hot[int(action)] = 1.0
+        action_one_hot_tensor = torch.FloatTensor(action_one_hot).unsqueeze(0).to(model.device)
+
+        intrinsic_reward = curiosity_module.compute_intrinsic_reward(
+            state_tensor, next_state_tensor, action_one_hot_tensor
+        )[0]
+
+        combined_reward = extrinsic_reward + beta * intrinsic_reward
+        infos = [{"TimeLimit.truncated": done}]
+        model.replay_buffer.add(obs, next_obs, action, combined_reward, done, infos=infos)
+
+        curiosity_module.update(
+            state_tensor, next_state_tensor, action_idx_tensor, action_one_hot_tensor
+        )
+
+        obs = next_obs if not done else env.reset()
+
+        # Proper callback invocation
+        if callback:
+            for cb in callback:
+                if hasattr(cb, "log_freq") and step % cb.log_freq == 0:
+                    cb.locals = {
+                        'obs': obs,
+                        'actions': action,
+                        'rewards': combined_reward,
+                        'dones': done,
+                        'infos': infos
+                    }
+                    cb.globals = {}
+                    cb.on_step()
+
+
+    save_model_with_metadata(model, model_save_path / "model_final.zip")
+    torch.save(curiosity_module.state_dict(), model_save_path / "curiosity_module.pth")
+
+    logging.info("Curiosity training complete.")
