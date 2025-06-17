@@ -193,7 +193,7 @@ def evaluate_model(model_zip: Path,
                   progress_bar=progress_bar)
 
 class ModelQueue:
-    def __init__(self, models_dir: Path, seen, lock: Lock):
+    def __init__(self, models_dir: Path, seen, lock: Lock): # type: ignore
         if not models_dir.is_dir():
             raise ValueError(f"{models_dir} is not a directory")
         self.models_dir = models_dir
@@ -419,9 +419,10 @@ def train_model_with_curiosity(
         infos = [{"TimeLimit.truncated": done}]
         model.replay_buffer.add(obs, next_obs, action, combined_reward, done, infos=infos)
 
-        curiosity_module.update(
-            state_tensor, next_state_tensor, action_idx_tensor, action_one_hot_tensor
+        curiosity_module.update_batch(
+            [state_tensor], [next_state_tensor], [action_idx_tensor], [action_one_hot_tensor]
         )
+
 
         obs = next_obs if not done else env.reset()
 
