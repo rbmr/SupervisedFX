@@ -14,11 +14,11 @@ class FeatureEngineer:
     def __init__(self):
         self._pipeline_steps: List[Callable[[pd.DataFrame], None]] = []
         
-    def add(self, func: Callable[[pd.DataFrame], None] | Callable[[pd.DataFrame, ...], None], *args, **kwargs) -> Self:
+    def add(self, func: Callable[[pd.DataFrame], None] | Callable[[pd.DataFrame, ...], None], **kwargs) -> Self:
         """
         Add a step to the pipeline. Function should modify dataframe in place.
         """
-        self._pipeline_steps.append(partial(func, *args, **kwargs))
+        self._pipeline_steps.append(partial(func, **kwargs))
         return self
     
     def run(self, df: pd.DataFrame, remove_original_columns=True) -> pd.DataFrame:
