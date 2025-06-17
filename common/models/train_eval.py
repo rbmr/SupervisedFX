@@ -22,8 +22,10 @@ from common.scripts import parallel_run, set_seed, safe_int
 
 from common.models.dummy_models import DummyModel
 
+import matplotlib
+matplotlib.use('Agg') 
 
-def run_experiment(train_env: ForexEnv,
+def run_experiment_deprecated(train_env: ForexEnv,
                        validate_env: ForexEnv,
                        model: BaseAlgorithm,
                        base_folder_path: Path,
@@ -465,150 +467,164 @@ def run_model(model: BaseAlgorithm,
         logs_df.to_csv(data_path, index=False)
     return logs_df
 
+
+
 def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[str, str]]] = None, ext: str = ".png"):
     """
-    Combines the result of an experiment group
-    <experiment_group>/<experiment_name>/[seed_<seed>/]results/<model_name>/<environment_name>/info.json
+    Combines the results of an experiment group.
+    - Generates combined plots for each metric and environment with meaningful x-axes.
+    - Generates a graphical summary table for each individual model run.
     """
     if style_map is None:
         style_map = {}
 
-    # Collect all unique experiment names
-    results = {}
+    # Data capture remains the same, as the model_key already contains the numerical value
+    results: Dict[str, Dict[str, Dict[str, Dict[Optional[int], List[Tuple[Tuple[bool, int], float, str]]]]]] = {}
     experiment_names = set()
-
-    # Collect raw entries: {env: {metric: {exp: {seed: [(model_key, value), ...]}}}}
-    results: Dict[str, Dict[str, Dict[str, Dict[Optional[int], List[Tuple[Tuple[bool, int], float]]]]]] = {}
-    experiment_names = set()
-
     for exp_dir in experiment_group.iterdir():
-        if not exp_dir.is_dir():
-            continue
+        if not exp_dir.is_dir(): continue
         exp_name = exp_dir.name
         experiment_names.add(exp_name)
         for info_path in exp_dir.rglob('info.json'):
-            # parts: .../[seed_<seed>/]results/<model_name>/<environment_name>/info.json
             parts = info_path.relative_to(exp_dir).parts
             if parts[0].startswith("seed_"):
                 seed = safe_int(parts[0].lstrip("seed_"))
-                rel = parts[1:] # remove the seed, leaving (results, <model_name>, <env_name>, info.json)
+                rel = parts[1:]
             else:
                 seed = None
-                rel = parts # should be (results, <model_name>, <env_name>, info.json)
+                rel = parts
             assert len(rel) == 4 and rel[0] == "results"
             env_name = rel[-2]
-            model_key = extract_key(info_path)
-            with open(info_path, mode="r") as f:
-                data = json.load(f)
-            # init nested dicts
+            model_name = info_path.parent.parent.name
+            model_key = extract_key(info_path) # model_key is the (bool, int) tuple
+            with open(info_path, mode="r") as f: data = json.load(f)
+            
             env_dict = results.setdefault(env_name, {})
             for metric, val in data.items():
                 metric_dict = env_dict.setdefault(metric, {})
                 exp_dict = metric_dict.setdefault(exp_name, {})
                 seed_list = exp_dict.setdefault(seed, [])
-                seed_list.append((model_key, val))
+                seed_list.append((model_key, val, model_name))
 
-    # GENERATE MISSING COLOURS
-    sorted_experiment_names = sorted(list(experiment_names)) 
+    # Color generation logic remains the same
+    sorted_experiment_names = sorted(list(experiment_names))
     experiments_to_color = [
-        exp_name for exp_name in sorted_experiment_names 
+        exp_name for exp_name in sorted_experiment_names
         if exp_name not in style_map or 'color' not in style_map.get(exp_name, {})
     ]
     if experiments_to_color:
+        # ... (color generation logic is unchanged) ...
         num_experiments_to_color = len(experiments_to_color)
-        
-        # Choose the appropriate tab colormap based on the number of experiments
-        if num_experiments_to_color <= 10:
-            cmap = plt.cm.get_cmap('tab10')
-            colors = [cmap(i % cmap.N) for i in range(num_experiments_to_color)]
-        elif num_experiments_to_color <= 20:
-            cmap = plt.cm.get_cmap('tab20')
-            colors = [cmap(i % cmap.N) for i in range(num_experiments_to_color)]
-        # You can add more conditions for tab20b/c or other strategies for more colors
+        if num_experiments_to_color <= 10: cmap = plt.cm.get_cmap('tab10')
+        elif num_experiments_to_color <= 20: cmap = plt.cm.get_cmap('tab20')
         else:
-            print("Warning: More than 20 experiments detected. Colors may not be perfectly distinct.")
+            logging.warning("More than 20 experiments detected. Colors may not be perfectly distinct.")
             cmap = plt.cm.hsv
-            colors = [cmap(i / num_experiments_to_color) for i in range(num_experiments_to_color)]
-
+        colors = [cmap(i % cmap.N if cmap.N > 0 else 0) for i in range(num_experiments_to_color)]
         for i, exp_name in enumerate(experiments_to_color):
-            if exp_name not in style_map:
-                style_map[exp_name] = {}
+            if exp_name not in style_map: style_map[exp_name] = {}
             style_map[exp_name]['color'] = colors[i]
 
-    # Sort by timestamp and extract values
-    # processed : {env: {<metric>.<mean/std>.<exp_name>: [<values>]}}
-    # we use dot separation because exp_name or metric might contain underscores
+    # --- CHANGE 1: Capture X-Values During Data Processing ---
+    # We now create model_x_values alongside the other dictionaries
     processed: Dict[str, Dict[str, List[float]]] = {}
+    model_identifiers: Dict[str, Dict[str, List[str]]] = {}
+    model_x_values: Dict[str, Dict[str, List[int]]] = {} # New dictionary to hold x-axis values
 
     for env, metrics in results.items():
         for metric, exp_map in metrics.items():
             for exp_name, seed_map in exp_map.items():
+                if exp_name not in model_identifiers.setdefault(env, {}):
+                    first_seed = next(iter(seed_map.values()), [])
+                    first_seed.sort(key=lambda x: x[0])
+                    # Store the string names for table filenames
+                    model_identifiers[env][exp_name] = [name for _, _, name in first_seed]
+                    # Store the numerical keys for the plot's x-axis
+                    # The key is x[0], which is (bool, int). The value is the int part, x[0][1].
+                    model_x_values.setdefault(env, {})[exp_name] = [key[1] for key, _, _ in first_seed]
 
-                # sort each seed's entries by model_key
                 sorted_vals_per_seed: List[List[float]] = []
-                for seed, entries in seed_map.items():
+                for entries in seed_map.values():
                     entries.sort(key=lambda x: x[0])
-                    vals = [v for _, v in entries]
+                    vals = [v for _, v, _ in entries]
                     sorted_vals_per_seed.append(vals)
 
-                # ensure all seeds have same length
-                lengths = [len(v) for v in sorted_vals_per_seed]
-                if len(set(lengths)) != 1:
-                    raise ValueError(f"Unequal lengths for {env}/{metric}/{exp_name}: {lengths}")
+                if not any(sorted_vals_per_seed): continue
+                lengths = {len(v) for v in sorted_vals_per_seed}
+                if len(lengths) > 1:
+                    logging.warning(f"Unequal lengths for {env}/{metric}/{exp_name}: {lengths}. Skipping.")
+                    continue
 
                 arr = np.array(sorted_vals_per_seed)
-                mean = arr.mean(axis=0)
-                std = arr.std(axis=0)
-
                 out_env = processed.setdefault(env, {})
-                out_env[f"{metric}.mean.{exp_name}"] = mean.tolist()
-                out_env[f"{metric}.std.{exp_name}"] = std.tolist()
+                out_env[f"{metric}.mean.{exp_name}"] = arr.mean(axis=0).tolist()
+                out_env[f"{metric}.std.{exp_name}"] = arr.std(axis=0).tolist()
 
-    # Create output directories
+    # Output generation for tables and plots
     combined_dir = experiment_group / 'combined_finals'
     combined_dir.mkdir(exist_ok=True)
 
-    for env, metrics in processed.items():
+    for env, metrics_data in processed.items():
+        # Table generation logic is unchanged
+        base_metrics = sorted(list(set(k.split('.')[0] for k in metrics_data)))
+        if model_identifiers.get(env):
+            for exp_name in sorted(model_identifiers.get(env, {}).keys()):
+                run_identifiers = model_identifiers[env][exp_name]
+                output_dir_exp = combined_dir / env / exp_name
+                output_dir_exp.mkdir(parents=True, exist_ok=True)
+                for i, run_name in enumerate(run_identifiers):
+                    # ... (table generation logic is unchanged) ...
+                    table_data = []
+                    for metric in base_metrics:
+                        mean_val = metrics_data.get(f"{metric}.mean.{exp_name}", [])[i]
+                        std_val = metrics_data.get(f"{metric}.std.{exp_name}", [])[i]
+                        table_data.append([f'{mean_val:.4f}', f'{std_val:.4f}'])
 
-        # identify base metrics
-        base_metrics = set(m.rsplit('.', 2)[0] for m in metrics)
-        env_dir = combined_dir / env
-        env_dir.mkdir(exist_ok=True)
+                    fig, ax = plt.subplots(figsize=(4, 0.5 + len(base_metrics) * 0.3))
+                    ax.axis('tight'); ax.axis('off')
+                    table = plt.table(cellText=table_data, rowLabels=base_metrics, colLabels=['Mean', 'Std Dev'],
+                                      loc='center', cellLoc='center')
+                    table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1.2, 1.4)
+                    output_path = output_dir_exp / f"{run_name}_analysis_table{ext}"
+                    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.1)
+                    plt.close(fig)
+            logging.info(f"Generated analysis tables for environment '{env}'")
 
-        # Plot each metric
+        # --- CHANGE 2 & 3: Modify Plotting Logic ---
+        env_plot_dir = combined_dir / env
         for base in base_metrics:
             fig, ax = plt.subplots(figsize=(12, 6))
 
-            # episodes from mean of any exp
-            mean_key = next(k for k in metrics if k.startswith(f"{base}.mean"))
-            episodes = np.arange(len(metrics[mean_key]))
-
             for exp_name in sorted_experiment_names:
-
                 mean_key = f"{base}.mean.{exp_name}"
+                if mean_key not in metrics_data: continue
                 std_key = f"{base}.std.{exp_name}"
-                assert mean_key in metrics
-                assert std_key in metrics
+                
+                # Get the specific x-axis values for this experiment
+                x_values = model_x_values.get(env, {}).get(exp_name)
+                if not x_values: continue # Skip if no x-values were found
 
-                mean = np.array(metrics[mean_key])
-                std = np.array(metrics.get(std_key, [0]*len(mean)))
-
+                mean = np.array(metrics_data[mean_key])
+                std = np.array(metrics_data[std_key])
                 style = style_map.get(exp_name, {})
-                ax.plot(episodes, mean, label=exp_name, **style)
 
-                # draw std band only if non-zero
-                if std.max() == 0:
-                    continue
-                ax.fill_between(episodes, mean - std, mean + std, alpha=0.15, zorder=0)
+                # Use the real x_values in all plotting commands
+                if len(mean) > 1:
+                    line = ax.plot(x_values, mean, label=exp_name, **style)
+                    if std.max() > 0: ax.fill_between(x_values, mean - std, mean + std, color=line[0].get_color(), alpha=0.2, zorder=0)
+                else:
+                    plot_style = {**style, 'marker': style.get('marker', 'o'), 'linestyle': 'None'}
+                    line = ax.plot(x_values, mean, label=exp_name, **plot_style)
+                    if std.max() > 0: ax.errorbar(x_values, mean, yerr=std, fmt='none', color=line[0].get_color(), capsize=5)
 
+            # Update the x-axis label to be more descriptive
             plt.title(f"{env} - {base}")
-            plt.xlabel('Run index')
+            plt.xlabel('Model Value (from name)') # CHANGE 3
             plt.ylabel(base)
-            plt.legend(fontsize=10, loc='best', bbox_to_anchor=(1.0, 1.0))  # Smaller legend, pushed outside
-            plt.tight_layout(pad=0.8)  # Adjust layout to fit legend
-
-            output = env_dir / f"{base}{ext}"
+            plt.legend(fontsize=10, loc='best', bbox_to_anchor=(1.0, 1.0))
+            plt.tight_layout(pad=0.8)
+            output = env_plot_dir / f"{base}{ext}"
             plt.savefig(output, bbox_inches='tight', pad_inches=0.2)
-            plt.close()
+            plt.close(fig)
 
     return processed

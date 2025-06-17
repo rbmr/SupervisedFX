@@ -10,11 +10,13 @@ from RQ2.constants import *
 from common.data.feature_engineer import *
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, get_current_exposure, duration_of_current_trade 
 from common.scripts import *
+from common.data.data import ForexCandleData, Timeframe
+from common.envs.forex_env import ForexEnv
 
 import matplotlib
 matplotlib.use('Agg')
 
-SEED = 42
+SEEDS = [42, 43, 44, 45, 46]
 
 INITIAL_CAPITAL = 10000.0
 TRANSACTION_COST_PCT = 5/100_000
@@ -156,7 +158,9 @@ def old_baseline_feature_engineers() -> tuple[FeatureEngineer, StepwiseFeatureEn
     return feature_engineer, stepwise_feature_engineer
 
 
-def base_dqn_kwargs(temp_env: DummyVecEnv) -> Dict[str, Any]:
+def base_dqn_kwargs(temp_env: ForexEnv, seed: int) -> Dict[str, Any]:
+    dummy_env = DummyVecEnv([lambda: temp_env])
+    
     policy_kwargs = dict(
         net_arch=[32, 16], 
         optimizer_class=optim.Adam, 
@@ -165,11 +169,11 @@ def base_dqn_kwargs(temp_env: DummyVecEnv) -> Dict[str, Any]:
 
     kwargs = dict(
         policy="MlpPolicy",
-        env=temp_env,
+        env=dummy_env,
         learning_starts=1000,
         policy_kwargs=policy_kwargs,
         verbose=0,
-        seed=SEED,
+        seed=seed,
         device=DEVICE
     )
     return kwargs

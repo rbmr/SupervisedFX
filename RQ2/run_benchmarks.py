@@ -9,7 +9,7 @@ from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
 from common.envs.forex_env import ForexEnv
 from common.envs.rewards import risk_adjusted_return
 from common.models.dummy_models import DummyModel, long_model, short_model, custom_comparison_model, dp_perfect_model, DummyModelFactory
-from common.models.train_eval import run_experiment, evaluate_dummy, analyse_results
+from common.models.train_eval import evaluate_dummy, analyse_results
 from common.scripts import *
 from RQ2.parameters import *
 
@@ -63,9 +63,9 @@ def main():
 
     forex_data = ForexCandleData.load(source="dukascopy",
                                       instrument="EURUSD",
-                                      granularity=Timeframe.M15,
+                                      granularity=Timeframe.H1,
                                       start_time=RQ2_EXPERIMENTS_START_DATE,
-                                      end_time= RQ2_EXPERIMENTS_END_DATE,
+                                      end_time=RQ2_EXPERIMENTS_END_DATE
                                     )
     
     for name, model, feature_engineer, stepwise_feature_engineer in get_benchmarks():
@@ -73,8 +73,8 @@ def main():
 
         # Create environments
         logging.info("Creating environments...")
-        train_env, eval_env = ForexEnv.create_split_envs(
-            split_pcts=[RQ2_DATA_SPLIT_RATIO, 1-RQ2_DATA_SPLIT_RATIO],
+        train_env, validate_env, eval_env = ForexEnv.create_split_envs(
+            split_pcts=RQ2_FINAL_EXPERIMENTS_DATA_SPLITS,
             forex_candle_data=forex_data,
             market_feature_engineer=feature_engineer,
             agent_feature_engineer=stepwise_feature_engineer,
@@ -85,7 +85,6 @@ def main():
         logging.info("Environments created.")
 
         eval_envs = {
-            "train": train_env,
             "eval": eval_env
         }
 
