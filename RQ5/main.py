@@ -180,10 +180,10 @@ def run_experiment(exploration_strategy: str, use_optimal_reward=False):
             temperature=float(temperature) if temperature else 1.0,
             epsilon=float(epsilon) if epsilon else 0.1
         )
-    
     elif exploration_strategy == "curiosity":
-        from stable_baselines3 import DQN
         from common.envs.curiosity import CuriosityModule
+        from stable_baselines3 import DQN
+        from common.models.train_eval import train_model_with_curiosity
 
         curiosity_beta = input("Curiosity beta (intrinsic reward scaling, default 0.1): ")
         curiosity_beta = float(curiosity_beta) if curiosity_beta else 0.1
@@ -196,7 +196,6 @@ def run_experiment(exploration_strategy: str, use_optimal_reward=False):
 
         model = DQN(**dqn_args)
 
-        # Initialize curiosity module
         curiosity_module = CuriosityModule(
             state_dim=train_env.observation_space.shape[0],
             action_dim=train_env.action_space.n,
@@ -204,6 +203,27 @@ def run_experiment(exploration_strategy: str, use_optimal_reward=False):
             lr=1e-4
         )
 
+        models_dir = exp_dir / "models"
+        models_dir.mkdir(parents=True, exist_ok=True)
+
+        callback = [
+            SaveCallback(models_dir, save_freq=train_env.episode_len),
+            ActionHistogramCallback(train_env, log_freq=train_env.episode_len),
+            SneakyLogger(verbose=0)  # reduce logging to avoid slowdowns
+        ]
+
+        logging.info("Starting curiosity-driven training...")
+        train_model_with_curiosity(
+            model=model,
+            curiosity_module=curiosity_module,
+            train_env=train_env,
+            train_episodes=train_episodes,
+            beta=curiosity_beta,
+            model_save_path=models_dir,
+            callback=callback
+        )
+
+        save_model_with_metadata(model, models_dir / "model_final.zip")
 
     else:
         raise ValueError(f"Unknown exploration strategy: {exploration_strategy}")
