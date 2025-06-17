@@ -99,7 +99,7 @@ def main(experiment_type: str = "Combinatory"):
     
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     
-    group_name = "FE_S1_" + experiment_type
+    group_name = "[FE_S1_" + experiment_type + "]"
     experiments: List[Callable[[], tuple[FeatureEngineer, StepwiseFeatureEngineer]]] = get_s1_experiment_functions()[experiment_type]
 
     blueprints = []

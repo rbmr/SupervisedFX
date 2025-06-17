@@ -136,6 +136,9 @@ def run_experiment(group_name: str,
     # set tensorboard logging if enabled
     model.tensorboard_log = str(experiment_path / "tensorboard_logs")
 
+    # print policy and action space for debugging
+    logging.info(f"Policy: {model.policy}")
+    logging.info(f"Action Space: {train_env.action_space}")
     # --------------------- #
     # ---- TRAIN MODEL ---- #
     # --------------------- #
