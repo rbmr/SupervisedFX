@@ -33,7 +33,6 @@ def get_data():
 def get_model(forex_env: ForexEnv, seed: int) -> DQN:
     dqn_kwargs = base_dqn_kwargs(forex_env, seed)
     dqn_kwargs = apply_cautious_parameters(dqn_kwargs)
-    dqn_kwargs = apply_increased_capacity_network(dqn_kwargs)
     model = DQN(**dqn_kwargs)
     return model
 
@@ -96,14 +95,12 @@ def get_s1_experiment_functions() -> Dict[str, List[Callable]]:
     }
 
 
-def main():
+def main(experiment_type: str = "Combinatory"):
     
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     
-    group_name = ";;dsjgfhfsladkjfh"
-    experiments: List[Callable[[], tuple[FeatureEngineer, StepwiseFeatureEngineer]]] = [
-        # S1_TR_ALL,
-    ]
+    group_name = "FE_S1_" + experiment_type
+    experiments: List[Callable[[], tuple[FeatureEngineer, StepwiseFeatureEngineer]]] = get_s1_experiment_functions()[experiment_type]
 
     blueprints = []
     for experiment in experiments:
@@ -113,7 +110,7 @@ def main():
             feature_engineers_func=experiment,
             envs_func=get_envs,
             model_func_with_seed=get_model,
-            train_episodes=2,
+            train_episodes=TRAIN_EPISODES,
         )
         blueprints.append(blueprint)
     
@@ -125,4 +122,18 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # let the user choose the experiment type with input
+    options = get_s1_experiment_functions().keys()
+    print("Available experiment types:")
+    for i, option in enumerate(options):
+        print(f"{i + 1}: {option}")
+    choice = input("Choose an experiment type (number): ")
+    try:
+        choice_index = int(choice) - 1
+        if 0 <= choice_index < len(options):
+            selected_experiment_type = list(options)[choice_index]
+            main(selected_experiment_type)
+        else:
+            print("Invalid choice. Please select a valid option.")
+    except ValueError:
+        print("Invalid input. Please enter a number corresponding to the options.")
