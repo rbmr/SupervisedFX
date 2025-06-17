@@ -8,14 +8,12 @@ class CuriosityModule(nn.Module):
         self.state_dim = state_dim
         self.action_dim = action_dim
 
-        # Inverse model (predicts action given state and next state)
         self.inverse_model = nn.Sequential(
             nn.Linear(state_dim * 2, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, action_dim),
         )
 
-        # Forward model (predicts next state given state and action)
         self.forward_model = nn.Sequential(
             nn.Linear(state_dim + action_dim, hidden_dim),
             nn.ReLU(),
@@ -40,12 +38,15 @@ class CuriosityModule(nn.Module):
         intrinsic_reward = torch.mean((pred_next_state - next_state) ** 2, dim=-1)
         return intrinsic_reward.detach().cpu().numpy()
 
-    def update(self, state, next_state, action_idx, action_one_hot):
-        pred_action_logits, pred_next_state = self.forward(state, next_state, action_one_hot)
+    def update_batch(self, states, next_states, action_idxs, action_one_hots):
+        states = torch.cat(states, dim=0)
+        next_states = torch.cat(next_states, dim=0)
+        action_idxs = torch.cat(action_idxs, dim=0)
+        action_one_hots = torch.cat(action_one_hots, dim=0)
 
-        inverse_loss = self.inverse_loss_fn(pred_action_logits, action_idx)
-        forward_loss = self.forward_loss_fn(pred_next_state, next_state)
-
+        pred_action_logits, pred_next_state = self.forward(states, next_states, action_one_hots)
+        inverse_loss = self.inverse_loss_fn(pred_action_logits, action_idxs)
+        forward_loss = self.forward_loss_fn(pred_next_state, next_states)
         loss = inverse_loss + forward_loss
 
         self.optimizer.zero_grad()
