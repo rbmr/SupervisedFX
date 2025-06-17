@@ -40,7 +40,7 @@ def get_envs(forex_data: ForexCandleData, feature_engineer: FeatureEngineer, ste
         n_actions=3,
         custom_reward_function=percentage_return
     )
-    return train_env, eval_env
+    return [train_env, eval_env, None]
 
 def main():
     

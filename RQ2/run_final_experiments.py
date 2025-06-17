@@ -48,7 +48,7 @@ def get_envs(forex_data: ForexCandleData, feature_engineer: FeatureEngineer, ste
         n_actions=3,
         custom_reward_function=percentage_return
     )
-    return train_env, validate_env, eval_env
+    return [train_env, validate_env, eval_env]
 
 def get_s1_experiment_functions() -> Dict[str, List[Callable]]:
     return {

@@ -22,6 +22,8 @@ from common.scripts import parallel_run, set_seed, safe_int
 
 from common.models.dummy_models import DummyModel
 
+import matplotlib
+matplotlib.use('Agg') 
 
 def run_experiment_deprecated(train_env: ForexEnv,
                        validate_env: ForexEnv,
