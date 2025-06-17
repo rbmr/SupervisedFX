@@ -158,29 +158,30 @@ class DataConfig:
                     obs_configs: list[ObsConfig]):
         # --- VALIDATION ---
         assert abs(sum(split_pcts) - 1.0) < 1e-9, f"split_ratios must sum to 1.0, but sum is {sum(split_pcts)}."
-        assert all(r > 0 for r in split_pcts), "All split_ratios must be positive."
+        assert all(r > 0 for r in split_pcts), f"All split_ratios must be positive, but were {split_pcts}."
 
         # Retrieve market data.
         market_data = forex_candle_data.df.copy(deep=True)
         logging.info(f"Market data ({len(market_data)}, {len(market_data.columns)}): {market_data.columns.tolist()}.")
+
         # Retrieve observations
         observations = [EnvObs.from_config(config, market_data) for config in obs_configs]
 
         # --- DATA SPLITTING LOGIC ---
         data_configs = []
         total_len = len(market_data)
-        
+
         # Calculate the absolute indices for splitting the data
         split_indices = [0] + [int(total_len * sum(split_pcts[:i+1])) for i in range(len(split_pcts))]
-        
+
         # Ensure the last index goes to the very end of the dataframe
         split_indices[-1] = total_len
-        
+
         # Create a DataConfig for each data slice
         for i in range(len(split_pcts)):
             start_idx = split_indices[i]
             end_idx = split_indices[i+1]
-            
+
             # Slice market data
             split_market_data = market_data.iloc[start_idx:end_idx]
 
@@ -194,13 +195,13 @@ class DataConfig:
                     name=env_ob.name,
                     window=env_ob.window
                 ))
-            
+
             # Create and store the DataConfig for this split
             data_configs.append(cls(
                 market_data=split_market_data,
                 observations=split_env_obs
             ))
-            
+
         return data_configs
 
 
@@ -253,7 +254,7 @@ class ForexEnv(gym.Env):
                                action_low: float = -1.0,
                                action_high: float = 1.0,
                                custom_reward_function: Optional[Callable[[Self], float]] = None
-                            ) -> tuple[Self, Self]:
+                            ) -> list[Self]:
         obs_configs = [ObsConfig(
             name = 'market_features',
             fe = market_feature_engineer,
