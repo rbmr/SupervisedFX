@@ -1,8 +1,12 @@
 import argparse
+import json
 import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s, %(levelname)s] %(message)s' )
+
 import random
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Callable, Optional, List
 
 import numpy as np
@@ -10,8 +14,8 @@ from stable_baselines3 import SAC
 from torch import nn
 
 from RQ1.constants import RQ1_EXPERIMENTS_DIR, EXPERIMENT_NAME_FORMAT, SAC_HYPERPARAMS, SPLIT_RATIO, FOREX_CANDLE_DATA, \
-    ACTION_HIGH, ACTION_LOW, N_ACTIONS, TRANSACTION_COST_PCT, INITIAL_CAPITAL, CUD_COLORS, MARKERS, TENSORBOARD_DIR, \
-    DUMMY_MODELS, SEED, SEEDS
+    ACTION_HIGH, ACTION_LOW, N_ACTIONS, TRANSACTION_COST_PCT, INITIAL_CAPITAL, CUD_COLORS, MARKERS, DUMMY_MODELS, SEED
+from RQ1.scripts import get_n_params, get_n_neurons, get_n_flops, get_widths
 from common.data.feature_engineer import FeatureEngineer, complex_24h, complex_7d, parabolic_sar, \
     as_ratio_of_other_column, history_lookback, as_z_score, remove_columns, macd, bollinger_bands, vwap, mfi, \
     as_min_max_fixed, chaikin_volatility
@@ -20,116 +24,117 @@ from common.envs.callbacks import SaveCallback, ActionHistogramCallback
 from common.envs.forex_env import ForexEnv, DataConfig, ActionConfig, EnvConfig, ObsConfig
 from common.models.train_eval import combine_finals, evaluate_models, analyse_results, train_model, evaluate_dummy
 
-
 def get_shapes():
+    """
+    Given some network shapes, and constraints on these shapes, determines the division
+    of neurons across these layers such that the difference in number of parameters is minimized.
+    Works in polynomial time.
+    """
+
+    logging.info("Setting up valid configurations")
+
+    # Hard constraints:
+    # (1) No layer has an absurd size: level_low <= x, a, (a*b), c, (c*d), (c*d*d), e, (e*f), (e*f*f) <= level_high
+    # (2) The difference in shape is significant: 1.5 <= b, d, f <= 2.0
+
+    fac_range = np.linspace(1.5, 2.0, 100)
+    level_low = 32
+    level_high = 80
+
+    shape_layers_fn = {
+        "flat": lambda x: (int(x), int(x), int(x)),
+        "diamond": lambda a, b: (int(a), int(a*b), int(a)),
+        "inv_funnel": lambda c, d: (int(c), int(c*d), int(c*d*d)),
+        "funnel": lambda e, f: (int(e*f*f), int(e*f), int(e)),
+        "shallow": lambda g: (int(g), int(g)),
+    }
+
+    shape_configs = {
+        "flat": [(x,) for x in range(level_low, level_high + 1)],
+        "diamond": [(a, float(b)) for b in fac_range for a in range(level_low, int(level_high / b) + 1)],
+        "inv_funnel": [(c, float(d)) for d in fac_range for c in range(level_low, int(level_high / (d * d)) + 1)],
+        "funnel": [(e, float(f)) for f in fac_range for e in range(level_low, int(level_high / (f * f)) + 1)],
+        "shallow" : [(g,) for g in range(level_low, level_high + 1)]
+    }
+
+    logging.info("Sorting and caching shape info")
+
+    shapes = set(shape_configs.keys()) & set(shape_layers_fn.keys())
 
     inp = 32
     out = 1
 
-    def n_params(p: int, q: int, r: int):
-        """
-        Computes the number of parameters in the neural network,
-        given global input size and output size and 3 fully connected layers.
-        """
-        return (inp * p) + (p * q) + (q * r) + (r * out) + p + q + r + out
+    shape_arch_params_pairs = {}
+    for s in shapes:
+        layers_fn = shape_layers_fn[s]
+        configs = shape_configs[s]
+        archs = [layers_fn(*config) for config in configs]
+        arch_params_pairs = [(arch, get_n_params(inp, *arch, out)) for arch in archs]
+        shape_arch_params_pairs[s] = arch_params_pairs
 
-    # Constraints
-    # 64 <= x <= 128
-    # 32 <= a, (a*b), c, (c*d), (c*d*d), e, (e*f), (e*f*f) <= 128
-    # 1.25 <= b, d, f <= 2.0
+    del shape_layers_fn, shape_configs
 
-    # objective function: minimize (max n_params - min n_params) for these shapes:
-    # "flat" : [x, x, x],
-    # "diamond" : [a, a*b, a],
-    # "inv": [c, c*d, c*d*d],
-    # "funnel": [e*f*f, e*f, e]
+    for config_params in shape_arch_params_pairs.values():
+        config_params.sort(key=lambda x: x[1])
 
-    fac_range = np.linspace(1.5, 2.0, 100)
-    x_low = 16
-    x_high = 64
-    level_low = 16
-    level_high = 64
+    logging.info("Finding optimal solution")
 
-    print("Generating configurations")
-
-    flat = [(x, n_params(x, x, x)) for x in range(x_low, x_high + 1)]
-    diamond = [(a, b, n_params(a, int(a * b), a)) for b in fac_range for a in range(level_low, int(level_high / b) + 1)]
-    inv = [(c, d, n_params(c, int(c * d), int(c * d * d))) for d in fac_range for c in
-           range(level_low, int(level_high / (d * d)) + 1)]
-    funnel = [(e, f, n_params(int(e * f * f), int(e * f), e)) for f in fac_range for e in
-              range(level_low, int(level_high / (f * f)) + 1)]
-
-    print("Sorting configurations")
-
-    flat.sort(key=lambda x: x[1])
-    diamond.sort(key=lambda x: x[2])
-    inv.sort(key=lambda x: x[2])
-    funnel.sort(key=lambda x: x[2])
-
-    print("Finding optimal combination")
-
-    i, j, k, l = 0, 0, 0, 0
-
+    # Loop over all configurations to find the minimal combination
+    shape_i = {s: 0 for s in shapes}
     min_diff = float("inf")
     solution = None
 
-    while (i < len(flat) and
-           j < len(diamond) and
-           k < len(inv) and
-           l < len(funnel)):
+    while all(shape_i[s] < len(shape_arch_params_pairs[s]) for s in shapes):
 
-        params = (flat[i][1], diamond[j][2], inv[k][2], funnel[l][2])
-        current_max = max(params)
-        current_min = min(params)
-        diff = current_max - current_min
+        params = tuple(shape_arch_params_pairs[s][shape_i[s]][1] for s in shapes)
+        max_params = max(params)
+        min_params = min(params)
+        diff = max_params - min_params
 
         if diff < min_diff:
             min_diff = diff
-            solution = (i, j, k, l)
+            solution = shape_i.copy()
 
-        if current_min == flat[i][1]:
-            i += 1
-        elif current_min == diamond[j][2]:
-            j += 1
-        elif current_min == inv[k][2]:
-            k += 1
-        else:
-            l += 1
+        for s in shapes:
+            i = shape_i[s]
+            arch_params_pairs = shape_arch_params_pairs[s]
+            arch, n_params = arch_params_pairs[i]
+            if n_params == min_params:
+                shape_i[s] = i + 1
 
-    assert solution is not None
+    assert solution is not None, "No solution could be found."
 
-    i, j, k, l = solution
-    x, flat_params = flat[i]
-    a, b, diamond_params = diamond[j]
-    c, d, inv_params = inv[k]
-    e, f, funnel_params = funnel[l]
+    logging.info("Found optimal solution.")
 
-    shapes = {
-        "flat" : [x, x, x],
-        "diamond": [a, int(a * b), a],
-        "inv_funnel": [c, int(c * d), int(c * d * d)],
-        "funnel":  [int(e * f * f), int(e * f), e],
-    }
+    result = {}
+    for shape, arch_params_pairs in shape_arch_params_pairs.items():
+        arch, n_params = arch_params_pairs[solution[shape]]
+        n_neurons = get_n_neurons(inp, *arch, out)
+        n_flops = get_n_flops(inp, *arch, out)
+        logging.info(f"{shape} {arch}: {n_params} params, {n_neurons} neurons, {n_flops} flops")
+        result[shape] = arch
 
-    print(shapes)
-    print("flat", flat_params)
-    print("diamond", diamond_params)
-    print("inv_funnel", inv_params)
-    print("funnel", funnel_params)
+    return result
 
-    return shapes
-
-@dataclass(frozen=True)
+@dataclass
 class ExperimentConfig:
 
     name: str = field(default_factory=lambda: datetime.now().strftime(EXPERIMENT_NAME_FORMAT))
-    net_shape: list = field(default_factory=lambda: [64, 64])
+    net_shape: list[int] = field(default_factory=lambda: [64, 64])
+    actor_shape: Optional[list[int]] = None
+    critic_shape: Optional[list[int]] = None
     activation_fn: Callable = nn.ReLU
     lookback: int = 3
 
     line_color: str = "black"
     line_style: str = "-"
     line_marker: Optional[str] = None
+
+    def __post_init__(self):
+        if self.actor_shape is None:
+            self.actor_shape = self.net_shape
+        if self.critic_shape is None:
+            self.critic_shape = self.net_shape
 
     def get_style(self):
         return {
@@ -138,7 +143,24 @@ class ExperimentConfig:
             "marker": self.line_marker,
         }
 
+    def log_info(self, experiment_dir: Path):
+        """Logs some information about this experiment to a JSON file inside experiment_dir."""
+        info = dict(
+            name = self.name,
+            actor_shape = self.actor_shape,
+            critic_shape = self.critic_shape,
+            activation_fn = self.activation_fn.__name__,
+            lookback = self.lookback,
+        )
+        experiment_dir.mkdir(parents=True, exist_ok=True)
+        with open(experiment_dir / "info.json", "w") as f:
+            json.dump(info, f, indent=4) # type: ignore
+
 def get_envs(config: Optional[ExperimentConfig] = None):
+    """
+    Sets up the environment. The environment is the same for all models.
+    Lookback parameter is not used currently. Always remains equal to 3.
+    """
 
     if config is None:
         config = ExperimentConfig()
@@ -222,11 +244,15 @@ def get_envs(config: Optional[ExperimentConfig] = None):
     return train_env, eval_env
 
 def run_experiment(experiment_group: str, config: ExperimentConfig, seed: int = SEED):
+    """
+    Runs a single experiment: trains the model, evaluates it, and analyzes the results.
+    """
 
-    # Set seeds
-    np.random.seed(SEED)
-    random.seed(SEED)
+    # Set seeds, only important for training, evaluation is deterministic.
     # The environments are entirely deterministic, no seeds need to be set.
+    # Model seed is set upon model creation.
+    np.random.seed(seed)
+    random.seed(seed)
 
     # Get environments
 
@@ -237,6 +263,7 @@ def run_experiment(experiment_group: str, config: ExperimentConfig, seed: int = 
     experiment_dir = RQ1_EXPERIMENTS_DIR / experiment_group / config.name / f"seed_{seed}"
     models_dir = experiment_dir / "models"
     results_dir = experiment_dir / "results"
+    config.log_info(experiment_dir) # log some info about this experiment
 
     # Train model
 
@@ -248,10 +275,9 @@ def run_experiment(experiment_group: str, config: ExperimentConfig, seed: int = 
             **SAC_HYPERPARAMS,
             policy_kwargs=dict(
                 activation_fn=config.activation_fn,
-                net_arch=dict(pi=config.net_shape, qf=config.net_shape)
+                net_arch=dict(pi=config.actor_shape, qf=config.critic_shape)
             ),
             verbose=0,
-            tensorboard_log=TENSORBOARD_DIR / config.name,
             device="cpu",
             seed=seed
         )
@@ -276,7 +302,13 @@ def run_experiment(experiment_group: str, config: ExperimentConfig, seed: int = 
 
     analyse_results(results_dir)
 
-def run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1):
+def run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, add_timestamp: bool=True):
+    """
+    Runs each of the experiments for a number of seeds.
+    """
+    if add_timestamp:
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        experiment_group = f"{timestamp}_{experiment_group}"
 
     for experiment in experiments:
         for i in range(n_seeds):
@@ -286,7 +318,9 @@ def run_experiments(experiment_group: str, experiments: List[ExperimentConfig], 
     combine_finals(RQ1_EXPERIMENTS_DIR / experiment_group, {exp.name : exp.get_style() for exp in experiments}, ext=".svg")
 
 def run_baselines():
-
+    """
+    Runs the baseline models on the train and eval environments. Used as reference.
+    """
     train_env, eval_env = get_envs()
 
     experiment_group = "baselines"
@@ -296,14 +330,19 @@ def run_baselines():
         "train": train_env,
         "eval": eval_env,
     }
+    results_dir = experiment_group_dir
     for dummy_name, dummy_factory in DUMMY_MODELS.items():
         for eval_env_name, eval_env in eval_envs.items():
             dummy_model = dummy_factory(eval_env)
-            results_dir = experiment_group_dir / dummy_name
             evaluate_dummy(dummy_model = dummy_model, name=dummy_name, results_dir=results_dir, eval_env=eval_env, eval_env_name=eval_env_name)
 
-def run_shape_experiments():
+    analyse_results(results_dir)
 
+def run_shape_experiments():
+    """
+    Determine the impact of network shapes on model performance.
+    Number of parameters is roughly equal across networks.
+    """
     shapes = get_shapes()
 
     experiments = [
@@ -311,12 +350,64 @@ def run_shape_experiments():
         ExperimentConfig(name="shape_diamond", net_shape=shapes["diamond"], line_color=CUD_COLORS[1], line_marker="D"),
         ExperimentConfig(name="shape_funnel", net_shape=shapes["funnel"], line_color=CUD_COLORS[2], line_marker=">"),
         ExperimentConfig(name="shape_inv_funnel", net_shape=shapes["inv_funnel"], line_color=CUD_COLORS[3], line_marker="<"),
+        ExperimentConfig(name="shape_shallow", net_shape=shapes["shallow"], line_color=CUD_COLORS[4], line_marker="*"),
     ]
 
     run_experiments(experiment_group="network_shapes", experiments=experiments, n_seeds=5)
 
-def run_size_experiments():
+def run_division_experiments():
+    """
+    Determine the impact of dividing parameters over the actor and the critic networks.
+    Number of parameters remains equal.
+    """
 
+    # Setup
+    inp = 32
+    out = 1
+    n_layers = 2
+    base_net = [64, 64]
+    total_params = get_n_params(inp, *base_net, out) * 2
+
+    # Adding experiments
+    experiments = [ExperimentConfig(
+        name="no_bias",
+        net_shape=base_net,
+    )]
+
+    # Slight bias
+    w1, w2 = get_widths(inp, out, n_layers, total_params, 0.60)
+    experiments.append(ExperimentConfig(
+        name = "moderate_actor_bias",
+        actor_shape = [w1] * n_layers,
+        critic_shape = [w2] * n_layers,
+    ))
+    experiments.append(ExperimentConfig(
+        name = "moderate_critic_bias",
+        actor_shape = [w2] * n_layers,
+        critic_shape = [w1] * n_layers,
+    ))
+
+    # Large bias
+    w1, w2 = get_widths(inp, out, n_layers, total_params, 0.75)
+    experiments.append(ExperimentConfig(
+        name = "large_actor_bias",
+        actor_shape = [w1] * n_layers,
+        critic_shape = [w2] * n_layers,
+    ))
+    experiments.append(ExperimentConfig(
+        name = "large_critic_bias",
+        actor_shape = [w2] * n_layers,
+        critic_shape = [w1] * n_layers,
+    ))
+
+
+    run_experiments(experiment_group="network_division", experiments=experiments, n_seeds=5)
+
+def run_size_experiments():
+    """
+    Determine the impact of network size on model performance.
+    We modify two aspects: Model depth (number of layers), and Model width (number of neurons per layer).
+    """
     for depth_name, depth in zip(["shallow", "moderate", "deep", "very_deep"], [1, 2, 3, 4]):
 
         experiments = []
@@ -332,12 +423,16 @@ def run_size_experiments():
         run_experiments(experiment_group=f"{depth_name}_networks", experiments=experiments)
 
 def run_activation_experiments():
-
+    """
+    Determine the impact of network activation functions on model performance.
+    All networks are the same size and shape.
+    """
     experiments = []
 
     for activation_fn, color, marker in zip([nn.ReLU, nn.LeakyReLU, nn.Sigmoid, nn.SiLU, nn.Tanh, nn.ELU], CUD_COLORS[:6], MARKERS[:6]):
         experiments.append(ExperimentConfig(
             name = activation_fn.__name__,
+            activation_fn = activation_fn,
             line_marker = marker,
             line_color = color,
         ))
@@ -347,7 +442,7 @@ def run_activation_experiments():
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("experiment", type=int, help="all (0), shapes (1), sizes (2), activations (3), baselines (4)")
+    parser.add_argument("experiment", default=0, type=int, help="all (0), shapes (1), sizes (2), activations (3), baselines (4), division (5)")
     args = parser.parse_args()
     experiment_id = args.experiment
 
@@ -359,3 +454,5 @@ if __name__ == "__main__":
         run_activation_experiments()
     if experiment_id == 4 or experiment_id == 0:
         run_baselines()
+    if experiment_id == 5 or experiment_id == 0:
+        run_division_experiments()
