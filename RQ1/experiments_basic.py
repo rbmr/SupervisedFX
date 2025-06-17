@@ -1,6 +1,15 @@
 import argparse
+import itertools
 import json
 import logging
+from asyncio import FIRST_EXCEPTION
+from concurrent.futures import ProcessPoolExecutor, wait
+from functools import partial
+
+from common.envs.dp import DPTable, get_dp_table_from_env
+from common.envs.rewards import DPRewardFunction
+from common.scripts import parallel_apply
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s, %(levelname)s] %(message)s' )
 
 import random
@@ -12,6 +21,7 @@ from typing import Callable, Optional, List
 import numpy as np
 from stable_baselines3 import SAC
 from torch import nn
+import torch
 
 from RQ1.constants import RQ1_EXPERIMENTS_DIR, EXPERIMENT_NAME_FORMAT, SAC_HYPERPARAMS, SPLIT_RATIO, FOREX_CANDLE_DATA, \
     ACTION_HIGH, ACTION_LOW, N_ACTIONS, TRANSACTION_COST_PCT, INITIAL_CAPITAL, CUD_COLORS, MARKERS, DUMMY_MODELS, SEED
@@ -79,7 +89,14 @@ def get_shapes():
 
     logging.info("Finding optimal solution")
 
-    # Loop over all configurations to find the minimal combination
+    # Loop over all configurations to find the minimal combination.
+    # We loop in order of minimal n_params, repeatedly taking the difference between the min and max.
+    # Every iteration we increment the index for the shape corresponding to min n_params.
+    # This either gives:
+    # (1) An equal or better min max diff (since the new value is in [old min, old max] and new min >= old min)
+    # (2) A different max (the new value is > old max), which could have a worse, better, or equal min max diff.
+    # We can exit when any value reaches the last element because that means the index that was incremented
+    # corresponded to the minimum, and incrementing any other will therefore cause the min max diff to increase.
     shape_i = {s: 0 for s in shapes}
     min_diff = float("inf")
     solution = None
@@ -156,6 +173,44 @@ class ExperimentConfig:
         with open(experiment_dir / "info.json", "w") as f:
             json.dump(info, f, indent=4) # type: ignore
 
+def add_technical_analysis(df, lookback: int):
+
+    # Trend
+
+    parabolic_sar(df)
+    as_ratio_of_other_column(df, 'sar', 'close_bid')
+
+    vwap(df, window=4)
+    vwap(df, window=12)
+    vwap(df, window=48)
+    as_ratio_of_other_column(df, 'vwap_4', 'close_bid')
+    as_ratio_of_other_column(df, 'vwap_12', 'close_bid')
+    as_ratio_of_other_column(df, 'vwap_48', 'close_bid')
+
+    history_lookback(df, lookback, ["sar", "vwap_4", "vwap_12", "vwap_48"])
+
+    # Momentum
+
+    macd(df, short_window=12, long_window=26, signal_window=9)
+    remove_columns(df, ["macd_signal", "macd"])
+    as_z_score(df, 'macd_hist', window=50)
+
+    mfi(df, window=14)
+    as_min_max_fixed(df, "mfi_14", min=0, max=100)
+
+    history_lookback(df, lookback, ["macd_hist", "mfi_14"])
+
+    # Technical Analysis
+
+    bollinger_bands(df, window=20, num_std_dev=2)
+    as_ratio_of_other_column(df, "bb_upper_20", "close_bid")
+    as_ratio_of_other_column(df, "bb_lower_20", "close_bid")
+
+    chaikin_volatility(df, ema_window=10, roc_period=10) # adds chaikin_vol_{ema_window}_{roc_period}
+    as_z_score(df, "chaikin_vol_10_10", window=50)
+
+    history_lookback(df, lookback, ["bb_upper_20", "bb_lower_20", "chaikin_vol_10_10"])
+
 def get_envs(config: Optional[ExperimentConfig] = None):
     """
     Sets up the environment. The environment is the same for all models.
@@ -169,47 +224,7 @@ def get_envs(config: Optional[ExperimentConfig] = None):
     fe = FeatureEngineer()
     fe.add(complex_24h) # 2 features
     fe.add(complex_7d) # 2 features
-
-    def _trend(df):
-
-        parabolic_sar(df)
-        as_ratio_of_other_column(df, 'sar', 'close_bid')
-
-        vwap(df, window=4)
-        vwap(df, window=12)
-        vwap(df, window=48)
-        as_ratio_of_other_column(df, 'vwap_12', 'close_bid')
-
-        history_lookback(df, config.lookback, ["sar", "vwap_4", "vwap_12", "vwap_48"])
-
-    fe.add(_trend) # 4 * lookback
-
-    def _momentum(df):
-
-        macd(df, short_window=12, long_window=26, signal_window=9)
-        remove_columns(df, ["macd_signal", "macd"])
-        as_z_score(df, 'macd_hist', window=50)
-
-        mfi(df, window=14)
-        as_min_max_fixed(df, "mfi_14", min=0, max=100)
-
-        history_lookback(df, config.lookback, ["macd_hist", "mfi_14"])
-
-    fe.add(_momentum) # 2 * lookback
-
-    def _volatility(df):
-
-        bollinger_bands(df, window=20, num_std_dev=2)
-        as_ratio_of_other_column(df, "bb_upper_20", "close_bid")
-        as_ratio_of_other_column(df, "bb_lower_20", "close_bid")
-
-        chaikin_volatility(df, ema_window=10, roc_period=10)
-        #chaikin_vol_{ema_window}_{roc_period}
-        as_z_score(df, "chaikin_vol_10_10", window=50)
-
-        history_lookback(df, config.lookback, ["bb_upper_20", "bb_lower_20", "chaikin_vol_10_10"])
-
-    fe.add(_volatility) # 3 * lookback
+    fe.add(partial(add_technical_analysis, lookback=config.lookback)) # 4 * lookback
 
     sfe = StepwiseFeatureEngineer()
     sfe.add(["current_exposure"], calculate_current_exposure) # 1 feature
@@ -240,7 +255,11 @@ def get_envs(config: Optional[ExperimentConfig] = None):
         obs_configs=obs_configs,
     )
     train_env = ForexEnv(action_config, env_config, train_config)
+    train_env.custom_reward_fn = DPRewardFunction(get_dp_table_from_env(train_env))
+
     eval_env = ForexEnv(action_config, env_config, eval_config)
+    eval_env.custom_reward_fn = DPRewardFunction(get_dp_table_from_env(eval_env))
+
     return train_env, eval_env
 
 def run_experiment(experiment_group: str, config: ExperimentConfig, seed: int = SEED):
@@ -253,6 +272,7 @@ def run_experiment(experiment_group: str, config: ExperimentConfig, seed: int = 
     # Model seed is set upon model creation.
     np.random.seed(seed)
     random.seed(seed)
+    torch.manual_seed(seed)
 
     # Get environments
 
@@ -278,7 +298,7 @@ def run_experiment(experiment_group: str, config: ExperimentConfig, seed: int = 
                 net_arch=dict(pi=config.actor_shape, qf=config.critic_shape)
             ),
             verbose=0,
-            device="cpu",
+            device="cpu", # cpu is faster than cuda for SAC.
             seed=seed
         )
         # SaveCallback creates models_dir upon first model save.
@@ -296,13 +316,17 @@ def run_experiment(experiment_group: str, config: ExperimentConfig, seed: int = 
 
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    evaluate_models(models_dir, results_dir, eval_envs, eval_episodes=1, num_workers=3)
+    evaluate_models(models_dir, results_dir, eval_envs, num_workers=3)
 
     # Analyze results
 
     analyse_results(results_dir)
 
-def run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, add_timestamp: bool=True):
+def run_experiment_wrapper(config_seed: tuple[ExperimentConfig, int], experiment_group: str):
+    config, seed = config_seed
+    run_experiment(experiment_group, config, seed)
+
+def run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, n_workers=3, add_timestamp: bool=True):
     """
     Runs each of the experiments for a number of seeds.
     """
@@ -310,10 +334,9 @@ def run_experiments(experiment_group: str, experiments: List[ExperimentConfig], 
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         experiment_group = f"{timestamp}_{experiment_group}"
 
-    for experiment in experiments:
-        for i in range(n_seeds):
-            logging.info(f"Running experiment: {experiment}")
-            run_experiment(experiment_group=experiment_group, config=experiment, seed=SEED+i)
+    func = partial(run_experiment_wrapper, experiment_group=experiment_group)
+    inputs = list(itertools.product(experiments, range(SEED, SEED + n_seeds)))
+    parallel_apply(func, inputs, num_workers=n_workers)
 
     combine_finals(RQ1_EXPERIMENTS_DIR / experiment_group, {exp.name : exp.get_style() for exp in experiments}, ext=".svg")
 
@@ -399,7 +422,6 @@ def run_division_experiments():
         actor_shape = [w2] * n_layers,
         critic_shape = [w1] * n_layers,
     ))
-
 
     run_experiments(experiment_group="network_division", experiments=experiments, n_seeds=5)
 
