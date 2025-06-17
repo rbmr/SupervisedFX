@@ -14,7 +14,7 @@ from common.data.feature_engineer import FeatureEngineer, as_pct_change, ema, rs
 from common.constants import SEED
 from RQ5.constants import EXPERIMENTS_DIR, EXPERIMENT_NAME_FORMAT
 from common.envs.callbacks import *
-from common.models.train_eval import train_model, analyse_results, evaluate_models, train_model_with_curiosity
+from common.models.train_eval import evaluate_and_analyze_model, train_model, analyse_results, evaluate_models
 from common.models.utils import save_model_with_metadata
 from common.scripts import picker, has_nonempty_subdir, n_children
 from common.envs.dp import get_dp_table_from_env
@@ -121,10 +121,9 @@ def run_experiment(exploration_strategy: str, use_optimal_reward=False):
 
     print("Available data configs:", ', '.join(PARAM_PRESETS.keys()))
     config_options = list(PARAM_PRESETS.keys())
-    config_key = picker([(key, key) for key in config_options], default="M30_0.7").strip()
-    config_key = config_key if config_key in PARAM_PRESETS else "M30_0.7"
+    config_key = picker([(key, key) for key in config_options], default="M15_0.8").strip()
+    config_key = config_key if config_key in PARAM_PRESETS else "M15_0.8"
     data_config = PARAM_PRESETS[config_key]
-
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     exp_name = f"{exploration_strategy}_{note}_{config_key}_{timestamp}"
@@ -228,40 +227,25 @@ def run_experiment(exploration_strategy: str, use_optimal_reward=False):
     else:
         raise ValueError(f"Unknown exploration strategy: {exploration_strategy}")
 
-    models_dir = exp_dir / "models"
-    models_dir.mkdir(parents=True, exist_ok=True)
+        
+    # Only train again if strategy is not curiosity (already trained above)
+    if exploration_strategy != "curiosity":
+        models_dir = exp_dir / "models"
+        models_dir.mkdir(parents=True, exist_ok=True)
 
-    callback = [
-        SaveCallback(models_dir, save_freq=train_env.episode_len),
-        ActionHistogramCallback(train_env, log_freq=train_env.episode_len),
-        SneakyLogger(verbose=1)
-    ]
+        callback = [
+            SaveCallback(models_dir, save_freq=train_env.episode_len),
+            ActionHistogramCallback(train_env, log_freq=train_env.episode_len),
+            SneakyLogger(verbose=1)
+        ]
 
-    logging.info("Starting training...")
-    if exploration_strategy == "curiosity":
-        train_model_with_curiosity(
-            model=model,
-            curiosity_module=curiosity_module,
-            train_env=train_env,
-            train_episodes=train_episodes,
-            beta=curiosity_beta,
-            model_save_path=models_dir,
-            callback=callback
-        )
-    else:
+        logging.info("Starting training...")
         train_model(model, train_env, train_episodes=train_episodes, callback=callback)
         save_model_with_metadata(model, models_dir / "model_final.zip")
 
-    # Evaluate
-    logging.info("Evaluating model...")
-    results_dir = exp_dir / "results"
-    results_dir.mkdir(parents=True, exist_ok=True)
-
-    evaluate_models(models_dir, results_dir, {"train": train_env, "eval": eval_env}, eval_episodes=1)
-
-    # Analyze
-    logging.info("Analyzing results...")
-    analyse_results(results_dir)
+    # Evaluate and analyze model (always done regardless of strategy)
+    logging.info("Evaluating and Analyzing results...")
+    evaluate_and_analyze_model(exp_dir, train_env, eval_env)
 
 if __name__ == "__main__":
     strategies = ["epsilon_greedy", "boltzmann", "max_boltzmann", "curiosity"]
