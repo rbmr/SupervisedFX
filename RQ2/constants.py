@@ -21,4 +21,6 @@ RQ2_EXPERIMENTS_END_DATE = datetime(2024, 12, 31, 21, 0, 0, 0)
 RQ2_DATA_SPLIT_RATIO = 0.7
 RQ2_VALTEST_SPLIT_RATIO = 0.5  # 50% of the validation set will be used for testing
 
+RQ2_FINAL_EXPERIMENTS_DATA_SPLITS = [0.7, 0.15, 0.15]  # Train, Validation, Test
+
 # -- END PARAMETERS -- #

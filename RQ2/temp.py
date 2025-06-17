@@ -109,8 +109,8 @@ def main():
     feature_engineer, stepwise_feature_engineer = get_feature_engineers()
 
     logging.info("Creating environments...")
-    train_env, eval_env = ForexEnv.create_train_eval_envs(
-        split_ratio=RQ2_DATA_SPLIT_RATIO,
+    train_env, eval_env = ForexEnv.create_split_envs(
+        split_pcts=[RQ2_DATA_SPLIT_RATIO, 1 - RQ2_DATA_SPLIT_RATIO],
         forex_candle_data=forex_data,
         market_feature_engineer=feature_engineer,
         agent_feature_engineer=stepwise_feature_engineer,
@@ -136,7 +136,7 @@ def main():
         logging.info("Running train test analyze...")
         run_experiment(
             train_env=train_env,
-            eval_env=eval_env,
+            validate_env=eval_env,
             model=dqn_model,
             base_folder_path=RQ2_DIR,
             experiment_group_name="[hyperparameters]-15m_data",

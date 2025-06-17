@@ -212,9 +212,9 @@ def get_envs(config: Optional[ExperimentConfig] = None):
         low=ACTION_LOW,
         high=ACTION_HIGH,
     )
-    train_config, eval_config = DataConfig.get_configs(
+    train_config, eval_config = DataConfig.from_splits(
         forex_candle_data=FOREX_CANDLE_DATA,
-        split_ratio=SPLIT_RATIO,
+        split_pcts=[SPLIT_RATIO, 1 - SPLIT_RATIO],
         obs_configs=obs_configs,
     )
     train_env = ForexEnv(action_config, env_config, train_config)

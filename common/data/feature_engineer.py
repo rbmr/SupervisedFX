@@ -88,6 +88,18 @@ def sin_24h(df: pd.DataFrame):
     ntod = _norm_time_of_day(df['date_gmt'])
     df['sin_24h'] = np.sin(ntod * np.pi * 2)
 
+def cos_7d(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    ntow = _norm_time_of_week(df['date_gmt'])
+    df['cos_7d'] = np.cos(ntow * np.pi * 2)
+
+def cos_24h(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    ntod = _norm_time_of_day(df['date_gmt'])
+    df['cos_24h'] = np.cos(ntod * np.pi * 2)
+
 def complex_7d(df: pd.DataFrame):
     if 'date_gmt' not in df.columns:
         raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
@@ -437,6 +449,40 @@ def chaikin_volatility(df: pd.DataFrame, ema_window: int = 10, roc_period: int =
     
     df[f'chaikin_vol_{ema_window}_{roc_period}'] = roc_ema
     df[f'chaikin_vol_{ema_window}_{roc_period}'].fillna(0, inplace=True)
+
+def ease_of_movement(df: pd.DataFrame, window: int = 14):
+    """
+    Calculate the Ease of Movement (EOM) indicator.
+    EOM highlights the relationship between price change and volume, showing
+    how easily prices move for a given amount of volume.
+    """
+    # Calculate the distance moved from the previous period's midpoint
+    high = df['high_bid']
+    low = df['low_bid']
+    volume = df['volume']
+
+    distance_moved = ((high + low) / 2) - ((high.shift(1) + low.shift(1)) / 2)
+
+    # Calculate the price range for the current period
+    price_range = high - low
+
+    # Replace zero price_range with NaN to avoid division by zero errors.
+    # We will handle the resulting NaNs later.
+    price_range = price_range.replace(0, np.nan)
+
+    # Calculate the Box Ratio, which relates volume to the price range
+    # A large volume scale is used to keep the resulting EOM values in a manageable range.
+    box_ratio = (volume / 100_000_000) / price_range
+
+    # Calculate the 1-period Ease of Movement
+    eom_1_period = distance_moved / box_ratio
+
+    # The EOM indicator is typically a Simple Moving Average of the 1-period EOM
+    eom = eom_1_period.rolling(window=window).mean()
+
+    # Add the new feature to the DataFrame and fill any NaNs with 0
+    df[f'eom_{window}'] = eom
+    df[f'eom_{window}'].fillna(0, inplace=True)
 
 # ------------------------------- #
 # -- END VOLATILITY Indicators -- #

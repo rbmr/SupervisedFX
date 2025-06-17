@@ -24,11 +24,12 @@ from common.models.dummy_models import DummyModel
 
 
 def run_experiment(train_env: ForexEnv,
-                       eval_env: ForexEnv,
+                       validate_env: ForexEnv,
                        model: BaseAlgorithm,
                        base_folder_path: Path,
                        experiment_group_name: str,
                        experiment_name: str,
+                       eval_env: ForexEnv | None = None,
                        train_episodes: int = 10,
                        eval_episodes: int = 1,
                        checkpoints: bool = False,
@@ -88,7 +89,7 @@ def run_experiment(train_env: ForexEnv,
     evaluate_models(models_dir=models_path,
                     results_dir=results_path,
                     eval_envs={"train": train_env,
-                               "eval": eval_env},
+                               "validate": validate_env},
                     eval_episodes=eval_episodes,
                     num_workers=num_workers)
 
@@ -99,6 +100,73 @@ def run_experiment(train_env: ForexEnv,
         model_name_suffix=f"[{experiment_group_name}::{experiment_name}]",
         num_workers=num_workers
     )
+
+    if eval_env:
+        logging.info("Selecting best model based on custom score (Val_Perf - |Val_Perf - Train_Perf|)...")
+        
+        # 1. Collect performance data for all models from their info.json files
+        model_performance = {}
+        selection_metric = 'sharpe_ratio' # The metric used for performance (e.g., sharpe_ratio)
+
+        for info_path in results_path.rglob('info.json'):
+            env_name = info_path.parent.name
+            if env_name in ['train', 'validate']:
+                model_name = info_path.parent.parent.name
+                model_performance.setdefault(model_name, {})
+                try:
+                    with open(info_path, 'r') as f:
+                        data = json.load(f)
+                    metric_value = data.get(selection_metric)
+                    if metric_value is not None:
+                        model_performance[model_name][env_name] = metric_value
+                except (IOError, json.JSONDecodeError) as e:
+                    logging.warning(f"Could not read or parse {info_path}: {e}")
+
+        # 2. Calculate the custom score for each model and find the best one
+        scored_models = []
+        for model_name, perfs in model_performance.items():
+            if 'train' in perfs and 'validate' in perfs:
+                train_perf = perfs['train']
+                val_perf = perfs['validate']
+                score = val_perf - abs(val_perf - train_perf)
+                
+                model_zip_path = models_path / f"{model_name}.zip"
+                if model_zip_path.is_file():
+                    scored_models.append((score, model_zip_path, val_perf, train_perf))
+                else:
+                    logging.warning(f"Could not find model zip for scored model {model_name}, skipping.")
+
+        # 3. If a best model is found, evaluate it on the final evaluation environment
+        if not scored_models:
+            logging.error("No models with both train and validate results found. Cannot perform final evaluation.")
+        else:
+            scored_models.sort(key=lambda x: x[0], reverse=True)
+            best_score, best_model_path, best_val_perf, best_train_perf = scored_models[0]
+            
+            logging.info(f"Best model selected: {best_model_path.name}")
+            logging.info(f" -> Score: {best_score:.4f} (Validation Sharpe: {best_val_perf:.4f}, Training Sharpe: {best_train_perf:.4f})")
+            logging.info("Evaluating best model on the final evaluation environment...")
+
+            # Evaluate the best model on the eval_env
+            evaluate_model(
+                model_zip=best_model_path,
+                results_dir=results_path,
+                eval_envs={"evaluation": eval_env}, # Saves results in a dedicated 'evaluation' folder
+                eval_episodes=eval_episodes,
+                progress_bar=True
+            )
+
+            # 4. Analyze just the new evaluation result to create its specific info.json and plots
+            logging.info("Analyzing final evaluation result...")
+            eval_data_path = results_path / best_model_path.stem / "evaluation" / "data.csv"
+            if eval_data_path.is_file():
+                analyze_result(
+                    data_csv=eval_data_path,
+                    model_name_suffix=f"[{experiment_group_name}::{experiment_name}]"
+                )
+            else:
+                logging.error(f"Final evaluation did not produce a data file at {eval_data_path}")
+
 
 def train_model(model: BaseAlgorithm,
                 train_env: ForexEnv,

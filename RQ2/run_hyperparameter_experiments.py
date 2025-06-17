@@ -41,8 +41,8 @@ def main():
     ]
 
     feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers() # Get the feature engineers from the first experiment
-    train_env, eval_env = ForexEnv.create_train_eval_envs(
-            split_ratio=RQ2_DATA_SPLIT_RATIO,
+    train_env, eval_env = ForexEnv.create_split_envs(
+            split_pcts=[RQ2_DATA_SPLIT_RATIO, 1-RQ2_DATA_SPLIT_RATIO],
             forex_candle_data=forex_data,
             market_feature_engineer=feature_engineer,
             agent_feature_engineer=stepwise_feature_engineer,
@@ -69,7 +69,7 @@ def main():
 
         run_experiment(
             train_env=train_env,
-            eval_env=eval_env,
+            validate_env=eval_env,
             model=model,
             base_folder_path=RQ2_DIR,
             experiment_group_name=group_name,
