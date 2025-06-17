@@ -399,6 +399,7 @@ def train_model_with_curiosity(
     if callback:
         for cb in callback:
             cb.init_callback(model)
+            cb.num_timesteps = 0
 
     for step in tqdm(range(total_steps)):
         state_tensor = torch.FloatTensor(obs).to(model.device)
@@ -426,22 +427,37 @@ def train_model_with_curiosity(
 
         obs = next_obs if not done else env.reset()
 
-        # Proper callback invocation
+        model.num_timesteps += 1  # <- critical for BaseCallback-compatible behavior
+
         if callback:
             for cb in callback:
-                if hasattr(cb, "log_freq") and step % cb.log_freq == 0:
-                    cb.locals = {
-                        'obs': obs,
-                        'actions': action,
-                        'rewards': combined_reward,
-                        'dones': done,
-                        'infos': infos
-                    }
-                    cb.globals = {}
-                    cb.on_step()
+                cb.num_timesteps = model.num_timesteps  # keep them in sync
+                cb.locals = {
+                    'obs': obs,
+                    'actions': action,
+                    'rewards': combined_reward,
+                    'dones': done,
+                    'infos': infos
+                }
+                cb.on_step()
+
+
 
 
     save_model_with_metadata(model, model_save_path / "model_final.zip")
     torch.save(curiosity_module.state_dict(), model_save_path / "curiosity_module.pth")
 
     logging.info("Curiosity training complete.")
+
+def evaluate_and_analyze_model(exp_dir, train_env, eval_env, eval_episodes=1):
+    models_dir = exp_dir / "models"
+    results_dir = exp_dir / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    # Evaluate
+    logging.info("Evaluating model...")
+    evaluate_models(models_dir, results_dir, {"train": train_env, "eval": eval_env}, eval_episodes)
+
+    # Analyze
+    logging.info("Analyzing results...")
+    analyse_results(results_dir)
