@@ -107,8 +107,12 @@ def run_experiment(group_name: str,
         stepwise_feature_engineer=stepwise_feature_engineer
     )
     if len(envs) != 3:
-        raise ValueError(f"envs_func must return a list of 3 environments, got {len(envs)}")
+        raise ValueError(f"envs_func must return a list of 3 environments, got {len(envs)} environments. Expected: [train_env, validate_env, Optional[eval_env]]")
     train_env, validate_env, eval_env = envs
+    if not isinstance(train_env, ForexEnv) or not isinstance(validate_env, ForexEnv):
+        raise ValueError(f"train_env and validate_env must be instances of ForexEnv, got {type(train_env)} and {type(validate_env)}")
+    if eval_env is not None and not isinstance(eval_env, ForexEnv):
+        raise ValueError(f"eval_env must be an instance of ForexEnv or None, got {type(eval_env)}")
 
     if not isinstance(train_env, ForexEnv) or not isinstance(validate_env, ForexEnv) or (eval_env is not None and not isinstance(eval_env, ForexEnv)):
         raise ValueError(f"All environments must be instances of ForexEnv, got {type(train_env)}, {type(validate_env)}, {type(eval_env)}")
