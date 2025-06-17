@@ -30,13 +30,13 @@ class SaveCallback(BaseCallback):
         return True
 
 class SaveOnEpisodeEndCallback(BaseCallback):
-    def __init__(self, models_dir: Path, verbose=0):
+    def __init__(self, models_dir: Path, episode_num = 0, verbose=0):
         super().__init__(verbose)
         if models_dir.exists() and not models_dir.is_dir():
             raise ValueError(f"{models_dir} is not a valid directory.")
         self.models_dir = models_dir
         self.models_dir.mkdir(parents=True, exist_ok=True)
-        self.episode_num = 0
+        self.episode_num = episode_num
 
     def _on_step(self) -> bool:
         # Check if episode is done

@@ -12,7 +12,7 @@ from common.data.feature_engineer import *
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, get_current_exposure
 from common.envs.forex_env import ForexEnv
 from common.envs.rewards import percentage_return
-from common.models.train_eval import run_experiment
+from common.models.train_eval import run_experiment_deprecated
 from common.scripts import *
 from RQ2.parameters import *
 from RQ2.hyperparameter_experiments import apply_cautious_parameters, apply_balanced_parameters
@@ -57,12 +57,12 @@ def main():
     logging.info("Model architecture:" + str(model.policy))
 
     logging.info("Running train test analyze...")
-    run_experiment(
+    run_experiment_deprecated(
         train_env=train_env,
         validate_env=eval_env,
         model=model,
         base_folder_path=RQ2_DIR,
-        experiment_group_name="dqn",
+        group_name="dqn",
         experiment_name="scaled_rewards",
         train_episodes=40,
         eval_episodes=1,

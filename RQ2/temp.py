@@ -11,7 +11,7 @@ from common.data.data import ForexCandleData, Timeframe
 from common.data.feature_engineer import *
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, get_current_exposure, duration_of_current_trade 
 from common.envs.forex_env import ForexEnv
-from common.models.train_eval import run_experiment
+from common.models.train_eval import run_experiment_deprecated
 from common.envs.rewards import percentage_return
 from common.scripts import *
 
@@ -134,12 +134,12 @@ def main():
         logging.info(f"Running experiment: {experiment_func.__name__}")
         dqn_model = experiment_func(temp_env)
         logging.info("Running train test analyze...")
-        run_experiment(
+        run_experiment_deprecated(
             train_env=train_env,
             validate_env=eval_env,
             model=dqn_model,
             base_folder_path=RQ2_DIR,
-            experiment_group_name="[hyperparameters]-15m_data",
+            group_name="[hyperparameters]-15m_data",
             experiment_name=experiment_func.__name__,
             train_episodes=250,
             eval_episodes=1,

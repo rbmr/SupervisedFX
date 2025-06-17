@@ -12,80 +12,61 @@ from common.data.feature_engineer import *
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, get_current_exposure
 from common.envs.forex_env import ForexEnv
 from common.envs.rewards import percentage_return
-from common.models.train_eval import run_experiment, combine_finals
+from common.models.train_eval import run_experiment_deprecated, combine_finals
 from common.scripts import *
 from RQ2.parameters import *
 from RQ2.hyperparameter_experiments import *
 
+from common.models.experiment import ExperimentBlueprint, run_experiments
+from RQ2.feature_engineer_factory import RQ2FeatureEngineerFactory
+
+def get_data():
+    return ForexCandleData.load(
+        source="dukascopy",
+        instrument="EURUSD",
+        granularity=Timeframe.H1,
+        start_time=RQ2_HYPERPARAMETERS_START_DATE,
+        end_time= RQ2_HYPERPARAMETERS_END_DATE_1H,
+    )
+
+def get_envs(forex_data: ForexCandleData, feature_engineer: FeatureEngineer, stepwise_feature_engineer: StepwiseFeatureEngineer):
+    train_env, eval_env = ForexEnv.create_split_envs(
+        split_pcts=[RQ2_DATA_SPLIT_RATIO, 1-RQ2_DATA_SPLIT_RATIO, 0.0],
+        forex_candle_data=forex_data,
+        market_feature_engineer=feature_engineer,
+        agent_feature_engineer=stepwise_feature_engineer,
+        initial_capital=INITIAL_CAPITAL,
+        transaction_cost_pct=TRANSACTION_COST_PCT,
+        n_actions=3,
+        custom_reward_function=percentage_return
+    )
+    return train_env, eval_env
 
 def main():
     
-    set_seed(SEED)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-    forex_data = ForexCandleData.load(source="dukascopy",
-                                      instrument="EURUSD",
-                                      granularity=Timeframe.H1,
-                                      start_time=RQ2_HYPERPARAMETERS_START_DATE,
-                                      end_time= RQ2_HYPERPARAMETERS_END_DATE_1H,
-                                    )
-    
+    group_name = "[hyperparameters-P3]-1h_data"
     experiments: List[Callable[[DummyVecEnv], DQN]] = [
-        HP_P3_hybrid_baseline,
-        HP_P3_hybrid_reduced,
-        HP_P3_hybrid_increased,
-        HP_P3_hybrid_medium_symmetric,
-        HP_P3_hybrid_symmetric,
-        HP_P3_hybdrid_minimalist,
-        HP_P3_hybrid_high
+        HP_P1_aggressive
     ]
 
-    feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers() # Get the feature engineers from the first experiment
-    train_env, eval_env = ForexEnv.create_split_envs(
-            split_pcts=[RQ2_DATA_SPLIT_RATIO, 1-RQ2_DATA_SPLIT_RATIO],
-            forex_candle_data=forex_data,
-            market_feature_engineer=feature_engineer,
-            agent_feature_engineer=stepwise_feature_engineer,
-            initial_capital=INITIAL_CAPITAL,
-            transaction_cost_pct=TRANSACTION_COST_PCT,
-            n_actions=3,
-            custom_reward_function=percentage_return
-        )
-
-
-    temp_dummy_env = DummyVecEnv([lambda: train_env])
-    
-    group_name = "[hyperparameters-P3]-1h_data"
+    blueprints: List[ExperimentBlueprint] = []
     for experiment in experiments:
-        logging.info(f"Running experiment: {experiment.__name__}")
-
-        logging.info("Fetching Experiment Model...")
-        model = experiment(temp_dummy_env)
-        logging.info("Experiment Model fetched.")
-
-        logging.info("Model created.")
-        logging.info("Model architecture:" + str(model.policy))
-        logging.info("Running Experiment parts...")
-
-        run_experiment(
-            train_env=train_env,
-            validate_env=eval_env,
-            model=model,
-            base_folder_path=RQ2_DIR,
-            experiment_group_name=group_name,
-            experiment_name=experiment.__name__,
+        blueprints.append(ExperimentBlueprint(
+            name=experiment.__name__,
+            model_func_with_seed= lambda env, seed: HP_P1_aggressive(env, seed),
+            data_func=get_data,
+            feature_engineers_func= lambda: RQ2FeatureEngineerFactory.create_core_factory().give_me_them_engineers,
+            envs_func=get_envs,
             train_episodes=TRAIN_EPISODES,
-            eval_episodes=1,
-            checkpoints=True,
-            tensorboard_logging=True,
-            seed=SEED
-        )
+        ))
 
-        logging.info(f"Experiment {experiment.__name__} completed.\n")
-
-    combine_finals(
-        experiment_group= RQ2_DIR / "experiments" / group_name,
-    )
+    run_experiments(
+        group_name=group_name,
+        experiment_blueprints=blueprints,
+        base_folder_path=RQ2_DIR,
+        num_workers=1)
 
 
 if __name__ == '__main__':
