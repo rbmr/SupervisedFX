@@ -20,7 +20,7 @@ from common.envs.forex_env import ForexEnv
 from common.models.analysis import analyse_finals, analyse_individual_run
 from common.models.dummy_models import DUMMY_MODELS
 from common.models.utils import (load_model_with_metadata, save_model_with_metadata)
-from common.scripts import parallel_run, set_seed, safe_int
+from common.scripts import parallel_map, set_seed, safe_int, parallel_apply
 
 from common.models.dummy_models import DummyModel
 
@@ -288,21 +288,13 @@ def evaluate_models(models_dir: Path,
                 logging.info(f"{model_zip} has already been evaluated, skipping.")
                 seen.add(model_zip)
 
-    with ProcessPoolExecutor(max_workers=num_workers) as executor:
-        while True:
-            models = sorted(models_dir.glob("*.zip"), key=lambda x: x.stat().st_mtime)
-            new_models = [model for model in models if model not in seen]
-            if not new_models:
-                break
-            seen.update(new_models)
-            futures = [executor.submit(func, model_zip) for model_zip in new_models]
-            done, not_done = wait(futures, return_when=FIRST_EXCEPTION)
-            for future in done:
-                exc = future.exception()
-                if exc is not None:
-                    for p in not_done:
-                        p.cancel()
-                    raise exc
+    while True:
+        models = sorted(models_dir.glob("*.zip"), key=lambda x: x.stat().st_mtime)
+        new_models = [model for model in models if model not in seen]
+        if not new_models:
+            break
+        seen.update(new_models)
+        parallel_apply(func, new_models, num_workers=num_workers)
 
     logging.info("Finished evaluation.")
 
@@ -344,7 +336,7 @@ def analyse_results(results_dir: Path, model_name_suffix: str = "", num_workers 
     func = partial(analyze_result, model_name_suffix=model_name_suffix)
     result_files = list(results_dir.rglob("data.csv"))
     result_files.sort(key=extract_key) # Old to new
-    parallel_run(func, result_files, num_workers=num_workers)
+    parallel_apply(func, result_files, num_workers=num_workers)
 
     # Aggregate environment results
     logging.info("Aggregating analysis results...")
