@@ -1,9 +1,5 @@
-import itertools
-from datetime import datetime
 from pathlib import Path
-from typing import Generator
 
-from common.data.data import ForexCandleData, Timeframe
 from common.models.dummy_models import long_model, cash_model, short_model, dp_perfect_model, random_model
 
 RQ1_DIR = Path(__file__).resolve().parent 
@@ -12,20 +8,12 @@ EXPERIMENT_NAME_FORMAT = "%Y%m%d-%H%M%S"
 TENSORBOARD_DIR = RQ1_DIR / "tensorboard"
 
 SPLIT_RATIO = 0.7
-TRANSACTION_COST_PCT = 10 / 100_000
+TRANSACTION_COST_PCT = 5 / 100_000
 INITIAL_CAPITAL = 10_000
 N_ACTIONS = 0
 ACTION_LOW = -1.0
 ACTION_HIGH = 1.0
 DUMMY_MODELS = {"long_model": long_model, "cash_model": cash_model, "short_model": short_model, "perfect_model": dp_perfect_model, "random_model": random_model}
-
-FOREX_CANDLE_DATA = ForexCandleData.load(
-    source="dukascopy",
-    instrument="EURUSD",
-    granularity=Timeframe.H1,
-    start_time=datetime(2020, 1, 1, 22, 0, 0, 0),
-    end_time=datetime(2024, 12, 31, 21, 00, 0, 0),
-)
 
 SAC_HYPERPARAMS = dict(
     learning_rate=3.e-4,
@@ -43,4 +31,3 @@ CUD_COLORS = ['#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', '#D55E00', 
 MARKERS = ["o", "v", "s", "*", "D", "P", "X"]
 
 SEED = 42
-SEEDS = itertools.count(SEED)

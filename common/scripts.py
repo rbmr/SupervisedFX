@@ -1,12 +1,15 @@
 """
 This file contains some simple scripts that can be useful anywhere during the project.
 """
+import functools
 import json
 import os
 import random
 import signal
 import tempfile
 import time
+from asyncio import FIRST_EXCEPTION
+from concurrent.futures import ProcessPoolExecutor, wait
 from datetime import datetime, timedelta
 from functools import partial
 from multiprocessing import cpu_count, get_context
@@ -33,15 +36,59 @@ def compute_sliding_window(arr: np.ndarray, window: int, fns: list[Callable[[np.
             res[t] = fn(window_slice)
     return results
 
+class lazy_singleton:
+    """
+    Decorator that makes a function behave like a lazy singleton:
+    1. Value is computed at most once (cached after first call)
+    2. Value is computed only if function is called (lazy evaluation)
+    """
+    _NOT_COMPUTED = object()
+
+    def __init__(self, func: Callable[[], Any]):
+        self.func = func
+        self.cache = self._NOT_COMPUTED
+        functools.update_wrapper(self, func)
+
+    def __call__(self):
+        if self.cache is self._NOT_COMPUTED:
+            self.cache = self.func()
+        return self.cache
+
+def parallel_apply(func: Callable[[K], V], inputs: list[K], num_workers: int) -> None:
+    """
+    Applies a function to a list of inputs in parallel.
+    Raises an exception when an exception occurs in any process, and cancels all other processes.
+    """
+    assert num_workers > 0, "number of workers must be greater than 0"
+    if num_workers == 1:
+        for inp in inputs:
+            func(inp)
+        return None
+    executor = ProcessPoolExecutor(max_workers=num_workers)
+    futures = [executor.submit(func, inp) for inp in inputs]
+    try:
+        done, not_done = wait(futures, return_when=FIRST_EXCEPTION)
+        for f in done:
+            exc = f.exception()
+            if exc is not None:
+                executor.shutdown(wait=False, cancel_futures=True)
+                raise exc
+    finally:
+        # Ensure executor is cleaned up (no-op if already shut down)
+        executor.shutdown(wait=False, cancel_futures=True)
+
 def index_wrapper(func: Callable[[K], V], pair: tuple[int, K]) -> tuple[int, V]:
     i, x = pair
     return i, func(x)
 
-def parallel_run(func: Callable[[K], V], inputs: list[K], num_workers: int) -> list[V]:
+def parallel_map(func: Callable[[K], V], inputs: list[K], num_workers: int) -> list[V]:
     """
-    Applies a function to a list in parallel, returning results in proper order.
+    Maps a function to a list in parallel, returning results in proper order.
+    Raises an exception when an exception occurs in any process, and cancels all other processes.
     """
-    num_workers = max(min(cpu_count()-1, num_workers), 1)
+    assert num_workers > 0, "number of workers must be greater than 0"
+    if num_workers == 1:
+        return [func(inp) for inp in inputs]
     results: list[V | None] = [None] * len(inputs)
     ctx = get_context("spawn")
     indexed_inps = enumerate(inputs)
@@ -108,6 +155,8 @@ def map_input(input_str: str, fns: list[Callable]):
             for fn in fns:
                 inp = fn(inp)
             return inp
+        except KeyboardInterrupt as e:
+            raise e
         except BaseException as e:
             print(f"Invalid input: {e}")
 
