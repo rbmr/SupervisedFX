@@ -83,7 +83,7 @@ class EnvObs:
     def from_config(cls, config: ObsConfig, market_data: pd.DataFrame):
         """Create EnvObs from ObsConfig and market data."""
         if config.fe is not None:
-            features_df = config.fe.run(market_data.copy(deep=True), remove_original_columns=True)
+            features_df = config.fe.run(market_data.copy(deep=True))
             features_data = features_df.to_numpy(dtype=np.float32)
             feature_names = features_df.columns.tolist()
         else:
