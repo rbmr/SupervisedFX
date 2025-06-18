@@ -1,5 +1,7 @@
 import os
 
+from common.data.data import ForexCandleData, Timeframe
+
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 import logging
 
@@ -12,8 +14,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Callable, List, Optional
-
+from typing import List, Optional
+import gymnasium as gym
 import numpy as np
 import torch
 from stable_baselines3 import SAC
@@ -24,7 +26,8 @@ from common.data.feature_engineer import (FeatureEngineer, as_min_max_fixed,
                                           bollinger_bands, chaikin_volatility,
                                           complex_7d, complex_24h,
                                           history_lookback, macd, mfi,
-                                          parabolic_sar, remove_columns, vwap)
+                                          parabolic_sar, remove_columns, vwap, copy_columns, as_pct_change,
+                                          apply_column, as_robust_norm)
 from common.data.stepwise_feature_engineer import (StepwiseFeatureEngineer,
                                                    calculate_current_exposure)
 from common.envs.callbacks import ActionHistogramCallback, SaveCallback
@@ -37,12 +40,75 @@ from common.models.train_eval import (analyse_results, combine_finals,
                                       train_model)
 from common.scripts import parallel_apply
 from RQ1.constants import (ACTION_HIGH, ACTION_LOW, CUD_COLORS, DUMMY_MODELS,
-                           EXPERIMENT_NAME_FORMAT, FOREX_CANDLE_DATA,
                            INITIAL_CAPITAL, MARKERS, N_ACTIONS,
                            RQ1_EXPERIMENTS_DIR, SAC_HYPERPARAMS, SEED,
                            SPLIT_RATIO, TRANSACTION_COST_PCT)
 from RQ1.scripts import get_n_flops, get_n_neurons, get_n_params, get_widths
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor, FlattenExtractor
 
+
+class CnnOnlyExtractor(BaseFeaturesExtractor):
+    """
+    Custom CNN extractor for windowed time-series data. The CNN is designed to output a specific number of features.
+    :param observation_space: (gym.Space) The observation space for the CNN input.
+    :param features_dim: (int) Number of features to be extracted.
+    """
+
+    def __init__(self, observation_space: gym.spaces.Box, features_dim: int = 59):
+        super().__init__(observation_space, features_dim)
+        # Input to Conv2d should be: (batch_size, 1, num_features, lookback_window)
+        # We add the channel dimension '1' before passing data to the network.
+        self.cnn = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=(3, 3), stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=(1, 2), stride=(1, 2)),
+            nn.Conv2d(32, 64, kernel_size=(3, 3), stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=(1, 2), stride=(1, 2)),
+            nn.Flatten(),
+        )
+
+        # Compute the shape of the output of the CNN layers by doing one forward pass
+        with torch.no_grad():
+            sample_obs = torch.as_tensor(observation_space.sample()[None]).float()
+            n_flatten = self.cnn(sample_obs.unsqueeze(1)).shape[1]
+
+        self.linear = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        # Add the channel dimension for the Conv2d layers
+        return self.linear(self.cnn(observations.unsqueeze(1)))
+
+class CnnCombinedExtractor(BaseFeaturesExtractor):
+    """
+    Feature extractor that combines the output of a CNN for image-like data
+    and a simple FlattenExtractor for vector data.
+    """
+    cnn_output_dim = 59
+
+    def __init__(self, observation_space: gym.spaces.Dict):
+
+        extractors = {
+            "cnn_input": CnnOnlyExtractor(observation_space.spaces["cnn_input"], features_dim=self.cnn_output_dim), # type: ignore
+            "vector_input": FlattenExtractor(observation_space.spaces["vector_input"]),
+        }
+
+        # Calculate the total feature dimension from all sub-extractors
+        vector_input_dim = gym.spaces.flatdim(observation_space.spaces["vector_input"])
+        total_features_dim = self.cnn_output_dim + vector_input_dim
+
+        super().__init__(observation_space, features_dim=total_features_dim)
+        self.extractors = nn.ModuleDict(extractors)
+
+    def forward(self, observations: dict[str, torch.Tensor]) -> torch.Tensor:
+        """
+        Processes dictionary observations by passing each item to its corresponding extractor
+        and concatenating the results.
+        """
+        encoded_tensor_list = [
+            extractor(observations[key]) for key, extractor in self.extractors.items()
+        ]
+        return torch.cat(encoded_tensor_list, dim=1)
 
 def get_shapes(inp: int, out: int):
     """
@@ -138,45 +204,8 @@ def get_shapes(inp: int, out: int):
 
     return result
 
-@dataclass
-class ExperimentConfig:
-
-    name: str = field(default_factory=lambda: datetime.now().strftime(EXPERIMENT_NAME_FORMAT))
-    net_shape: list[int] = field(default_factory=lambda: [64, 64])
-    actor_shape: Optional[list[int]] = None
-    critic_shape: Optional[list[int]] = None
-    activation_fn: Callable = nn.ReLU
-
-    line_color: str = "black"
-    line_style: str = "-"
-    line_marker: Optional[str] = None
-
-    def __post_init__(self):
-        if self.actor_shape is None:
-            self.actor_shape = self.net_shape
-        if self.critic_shape is None:
-            self.critic_shape = self.net_shape
-
-    def get_style(self):
-        return {
-            "color" : self.line_color,
-            "linestyle" : self.line_style,
-            "marker": self.line_marker,
-        }
-
-    def log_info(self, experiment_dir: Path):
-        """Logs some information about this experiment to a JSON file inside experiment_dir."""
-        info = dict(
-            name = self.name,
-            actor_shape = self.actor_shape,
-            critic_shape = self.critic_shape,
-            activation_fn = self.activation_fn.__name__,
-        )
-        experiment_dir.mkdir(parents=True, exist_ok=True)
-        with open(experiment_dir / "info.json", "w") as f:
-            json.dump(info, f, indent=4) # type: ignore
-
 def add_technical_analysis(df):
+    """Default technical analysis features"""
 
     lookback = 3
 
@@ -216,285 +245,363 @@ def add_technical_analysis(df):
 
     history_lookback(df, lookback, ["bb_upper_20", "bb_lower_20", "chaikin_vol_10_10"])
 
-class ExperimentRunner:
 
-    def __init__(self):
+@dataclass
+class ExperimentConfig:
 
-        # Setup feature engineers
+    # General
+    name: str = field(default_factory=lambda: datetime.now().strftime("%Y%m%d_%H%M%S"))
 
-        fe = FeatureEngineer()
-        fe.add(complex_24h)  # 2 features
-        fe.add(complex_7d)  # 2 features
-        fe.add(add_technical_analysis)
+    # Matplotlib settings
+    line_color: str = "black"
+    line_style: str = "-"
+    line_marker: str = None
 
-        sfe = StepwiseFeatureEngineer()
-        sfe.add(["current_exposure"], calculate_current_exposure)  # 1 feature
+    # Environment settings
+    env_config: EnvConfig = field(default_factory=lambda: EnvConfig(
+        initial_capital=INITIAL_CAPITAL,
+        transaction_cost_pct=TRANSACTION_COST_PCT,
+        reward_function=None
+    ))
+    action_config: Optional[ActionConfig] = field(default_factory=lambda: ActionConfig(
+        n=N_ACTIONS,
+        low=ACTION_LOW,
+        high=ACTION_HIGH
+    ))
+    train_data_config: Optional[DataConfig] = None
+    eval_data_config: Optional[DataConfig] = None
 
-        self.inp = 32  # num of features
-        self.out = 1  # number of actions
+    inp: int = 32
+    out: int = 1
 
-        # Setup environment configuration (same across all experiments)
+    # Model settings
+    policy = "MlpPolicy"
+    device = "cpu"
+    activation_fn = nn.ReLU
+    net_shape: Optional[list[int]] = None
+    actor_shape: list[int] = [64, 64],
+    critic_shape: list[int] = [64, 64],
+    features_extractor_class = FlattenExtractor
+    features_extractor_kwargs = {}
 
-        self.obs_configs = [
-            ObsConfig(
-                name='market_features',
-                fe=fe,
-                sfe=sfe,
-                window=1
-            ),
-        ]
-        self.env_config = EnvConfig(
-            initial_capital=INITIAL_CAPITAL,
-            transaction_cost_pct=TRANSACTION_COST_PCT,
-            reward_function=None,
-        )
-        self.action_config = ActionConfig(
-            n=N_ACTIONS,
-            low=ACTION_LOW,
-            high=ACTION_HIGH,
-        )
-        self.train_config, self.eval_config = DataConfig.from_splits(
-            forex_candle_data=FOREX_CANDLE_DATA,
-            split_pcts=[SPLIT_RATIO, 1 - SPLIT_RATIO],
-            obs_configs=self.obs_configs,
-        )
+    forex_candle_data = ForexCandleData.load(
+        source="dukascopy",
+        instrument="EURUSD",
+        granularity=Timeframe.H1,
+        start_time=datetime(2020, 1, 1, 22, 0, 0, 0),
+        end_time=datetime(2024, 12, 31, 21, 00, 0, 0),
+    )
 
-    def _run_experiment(self, experiment_group: str, config: ExperimentConfig, seed: int = SEED):
-        """
-        Runs a single experiment: trains the model, evaluates it, and analyzes the results.
-        """
+    def __post_init__(self):
+        if self.net_shape is not None:
+            self.actor_shape = self.net_shape
+            self.critic_shape = self.net_shape
+        if self.train_data_config is None or self.eval_data_config is None:
 
-        # Set seeds, only important for training, evaluation is deterministic.
-        # The environments are entirely deterministic, no seeds need to be set.
-        # Model seed is set upon model creation.
-        np.random.seed(seed)
-        random.seed(seed)
-        torch.manual_seed(seed)
 
-        # Get environments
+            fe = FeatureEngineer()
+            fe.add(complex_24h)  # 2 features
+            fe.add(complex_7d)  # 2 features
+            fe.add(add_technical_analysis)
 
-        train_env = ForexEnv(self.action_config, self.env_config, self.train_config)
-        train_env.custom_reward_fn = DPRewardFunction(get_dp_table_from_env(train_env))
+            sfe = StepwiseFeatureEngineer()
+            sfe.add(["current_exposure"], calculate_current_exposure)  # 1 feature
 
-        eval_env = ForexEnv(self.action_config, self.env_config, self.eval_config)
-        eval_env.custom_reward_fn = DPRewardFunction(get_dp_table_from_env(eval_env))
-
-        # Setup directories
-
-        experiment_dir = RQ1_EXPERIMENTS_DIR / experiment_group / config.name / f"seed_{seed}"
-        models_dir = experiment_dir / "models"
-        results_dir = experiment_dir / "results"
-        config.log_info(experiment_dir)  # log some info about this experiment
-
-        # Train model
-
-        if not models_dir.exists():
-            model = SAC(
-                policy="MlpPolicy",
-                env=train_env,
-                **SAC_HYPERPARAMS,
-                policy_kwargs=dict(
-                    activation_fn=config.activation_fn,
-                    net_arch=dict(pi=config.actor_shape, qf=config.critic_shape)
-                ),
-                verbose=0,
-                device="cpu",  # cpu is faster than cuda for SAC.
-                seed=seed
+            obs_configs = [ObsConfig(name='market_features', fe=fe, sfe=sfe, window=1)]
+            train_data_config, eval_data_config = DataConfig.from_splits(
+                forex_candle_data=self.forex_candle_data,
+                split_pcts=[SPLIT_RATIO, 1 - SPLIT_RATIO],
+                obs_configs=obs_configs
             )
-            # SaveCallback creates models_dir upon first model save.
-            callback = [SaveCallback(models_dir, save_freq=train_env.episode_len),
-                        ActionHistogramCallback(train_env, log_freq=train_env.episode_len)]
+            self.train_data_config = self.train_data_config or train_data_config
+            self.eval_data_config = self.eval_data_config or eval_data_config
 
-            train_model(model, train_env, train_episodes=50, callback=callback)
+    def get_policy_kwargs(self):
+        return dict(
+            activation_fn=self.activation_fn,
+            net_arch=dict(pi=self.actor_shape, qf=self.critic_shape),
+            features_extractor_class=self.features_extractor_class,
+            features_extractor_kwargs=self.features_extractor_kwargs,
+        )
 
-        # Evaluate models
+    def get_style(self):
+        return dict(
+            color = self.line_color,
+            linestyle = self.line_style,
+            marker = self.line_marker,
+        )
 
-        eval_envs = {
-            "train": train_env,
-            "eval": eval_env,
-        }
+    def log_info(self, experiment_dir: Path):
+        """Logs some information about this experiment to a JSON file inside experiment_dir."""
+        info = dict(
+            name = self.name,
+            actor_shape = self.actor_shape,
+            critic_shape = self.critic_shape,
+            activation_fn = self.activation_fn.__name__,
+        )
+        experiment_dir.mkdir(parents=True, exist_ok=True)
+        with open(experiment_dir / "info.json", "w") as f:
+            json.dump(info, f, indent=4) # type: ignore
 
-        results_dir.mkdir(parents=True, exist_ok=True)
+def _run_experiment(experiment_group: str, config: ExperimentConfig, seed: int = SEED):
+    """
+    Runs a single experiment: trains the model, evaluates it, and analyzes the results.
+    """
 
-        evaluate_models(models_dir, results_dir, eval_envs, num_workers=3)
+    # Set seeds, only important for training, evaluation is deterministic.
+    # The environments are entirely deterministic, no seeds need to be set.
+    # Model seed is set upon model creation.
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
 
-        # Analyze results
+    # Get environments
 
-        analyse_results(results_dir)
+    train_env = ForexEnv(config.action_config, config.env_config, config.train_data_config)
+    train_env.custom_reward_fn = DPRewardFunction(get_dp_table_from_env(train_env))
 
-    def _run_experiment_wrapper(self, config_seed: tuple[ExperimentConfig, int], experiment_group: str):
-        """
-        Helper to unpack arguments for parallel processing.
-        """
-        config, seed = config_seed
-        self._run_experiment(experiment_group, config, seed)
+    eval_env = ForexEnv(config.action_config, config.env_config, config.eval_data_config)
+    eval_env.custom_reward_fn = DPRewardFunction(get_dp_table_from_env(eval_env))
 
-    def _run_experiments(self, experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, num_workers=3, add_timestamp: bool=True):
-        """
-        Runs each of the experiments for a number of seeds.
-        """
-        if add_timestamp:
-            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            experiment_group = f"{timestamp}_{experiment_group}"
+    # Setup directories
 
-        func = partial(self._run_experiment_wrapper, experiment_group=experiment_group)
-        inputs = list(itertools.product(experiments, range(SEED, SEED + n_seeds)))
-        parallel_apply(func, inputs, num_workers=num_workers)
+    experiment_dir = RQ1_EXPERIMENTS_DIR / experiment_group / config.name / f"seed_{seed}"
+    models_dir = experiment_dir / "models"
+    results_dir = experiment_dir / "results"
+    config.log_info(experiment_dir)  # log some info about this experiment
 
-        combine_finals(RQ1_EXPERIMENTS_DIR / experiment_group, {exp.name : exp.get_style() for exp in experiments}, ext=".svg")
+    # Train model
 
-    def run_baselines(self):
-        """
-        Runs the baseline models on the train and eval environments. Used as reference.
-        """
-        train_env = ForexEnv(self.action_config, self.env_config, self.train_config)
-        eval_env = ForexEnv(self.action_config, self.env_config, self.eval_config)
+    if not models_dir.exists():
+        model = SAC(
+            policy=config.policy,
+            env=train_env,
+            **SAC_HYPERPARAMS,
+            policy_kwargs=config.get_policy_kwargs(),
+            verbose=0,
+            device=config.device,
+            seed=seed
+        )
+        # SaveCallback creates models_dir upon first model save.
+        callback = [SaveCallback(models_dir, save_freq=train_env.episode_len),
+                    ActionHistogramCallback(train_env, log_freq=train_env.episode_len)]
+        train_model(model, train_env, train_episodes=50, callback=callback)
 
-        experiment_group = "baselines"
-        experiment_group_dir = RQ1_EXPERIMENTS_DIR / experiment_group
+    # Evaluate models
 
-        eval_envs = {
-            "train": train_env,
-            "eval": eval_env,
-        }
-        results_dir = experiment_group_dir
-        for dummy_name, dummy_factory in DUMMY_MODELS.items():
-            for eval_env_name, eval_env in eval_envs.items():
-                dummy_model = dummy_factory(eval_env)
-                evaluate_dummy(dummy_model = dummy_model, name=dummy_name, results_dir=results_dir, eval_env=eval_env, eval_env_name=eval_env_name)
+    eval_envs = {
+        "train": train_env,
+        "eval": eval_env,
+    }
 
-        analyse_results(results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
 
-    def run_shape_experiments(self):
-        """
-        Determine the impact of network shapes on model performance.
-        Number of parameters is roughly equal across networks.
-        """
-        shapes = get_shapes(self.inp, self.out)
+    evaluate_models(models_dir, results_dir, eval_envs, num_workers=3)
 
+    # Analyze results
+
+    analyse_results(results_dir)
+
+def _run_experiment_wrapper(config_seed: tuple[ExperimentConfig, int], experiment_group: str):
+    """
+    Helper to unpack arguments for parallel processing.
+    """
+    config, seed = config_seed
+    _run_experiment(experiment_group, config, seed)
+
+def _run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, num_workers=3, add_timestamp: bool=True):
+    """
+    Runs each of the experiments for a number of seeds.
+    """
+    if add_timestamp:
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        experiment_group = f"{timestamp}_{experiment_group}"
+
+    func = partial(_run_experiment_wrapper, experiment_group=experiment_group)
+    inputs = list(itertools.product(experiments, range(SEED, SEED + n_seeds)))
+    parallel_apply(func, inputs, num_workers=num_workers)
+
+    combine_finals(RQ1_EXPERIMENTS_DIR / experiment_group, {exp.name : exp.get_style() for exp in experiments}, ext=".svg")
+
+def run_baselines(self):
+    """
+    Runs the baseline models on the train and eval environments. Used as reference.
+    """
+    train_env = ForexEnv(self.action_config, self.env_config, self.train_config)
+    eval_env = ForexEnv(self.action_config, self.env_config, self.eval_config)
+
+    experiment_group = "baselines"
+    experiment_group_dir = RQ1_EXPERIMENTS_DIR / experiment_group
+
+    eval_envs = {
+        "train": train_env,
+        "eval": eval_env,
+    }
+    results_dir = experiment_group_dir
+    for dummy_name, dummy_factory in DUMMY_MODELS.items():
+        for eval_env_name, eval_env in eval_envs.items():
+            dummy_model = dummy_factory(eval_env)
+            evaluate_dummy(dummy_model = dummy_model, name=dummy_name, results_dir=results_dir, eval_env=eval_env, eval_env_name=eval_env_name)
+
+    analyse_results(results_dir)
+
+def run_shape_experiments():
+    """
+    Determine the impact of network shapes on model performance.
+    Number of parameters remains roughly equal.
+    """
+    shapes = get_shapes(ExperimentConfig.inp, ExperimentConfig.out)
+
+    experiments = [
+        ExperimentConfig(name="shape_flat", net_shape=shapes["flat"], line_color=CUD_COLORS[0], line_marker="s"),
+        ExperimentConfig(name="shape_diamond", net_shape=shapes["diamond"], line_color=CUD_COLORS[1], line_marker="D"),
+        ExperimentConfig(name="shape_funnel", net_shape=shapes["funnel"], line_color=CUD_COLORS[2], line_marker=">"),
+        ExperimentConfig(name="shape_inv_funnel", net_shape=shapes["inv_funnel"], line_color=CUD_COLORS[3], line_marker="<"),
+        ExperimentConfig(name="shape_shallow", net_shape=shapes["shallow"], line_color=CUD_COLORS[4], line_marker="*"),
+    ]
+
+    _run_experiments(experiment_group="network_shapes", experiments=experiments, n_seeds=5)
+
+def run_division_experiments():
+    """
+    Determine the impact of dividing parameters over the actor and the critic networks.
+    Number of parameters remains roughly equal.
+    """
+
+    # No bias
+    base_net = [64, 64]
+    experiments = [ExperimentConfig(name="no_bias", net_shape=base_net)]
+
+    # Slight bias
+    n_layers = 2
+    total_params = get_n_params(ExperimentConfig.inp, *base_net, ExperimentConfig.out) * 2
+    w1, w2 = get_widths(ExperimentConfig.inp, ExperimentConfig.out, n_layers, total_params, 0.60)
+    experiments.append(ExperimentConfig(name="moderate_actor_bias",actor_shape=[w1]*n_layers,critic_shape=[w2]*n_layers))
+    experiments.append(ExperimentConfig(name="moderate_critic_bias",actor_shape=[w2]*n_layers,critic_shape=[w1]*n_layers))
+
+    # Large bias
+    w1, w2 = get_widths(ExperimentConfig.inp, ExperimentConfig.out, n_layers, total_params, 0.75)
+    experiments.append(ExperimentConfig(name="large_actor_bias",actor_shape=[w1]*n_layers,critic_shape=[w2]*n_layers))
+    experiments.append(ExperimentConfig(name="large_critic_bias",actor_shape=[w2]*n_layers,critic_shape=[w1]*n_layers))
+
+    _run_experiments(experiment_group="network_division", experiments=experiments, n_seeds=5)
+
+def run_size_experiments():
+    """
+    Determine the impact of network size on model performance.
+    We modify two aspects: Model depth (number of layers), and Model width (number of neurons per layer).
+    """
+    for depth_name, depth in zip(["shallow", "moderate", "deep", "very_deep"], [1, 2, 3, 4]):
         experiments = [
-            ExperimentConfig(name="shape_flat", net_shape=shapes["flat"], line_color=CUD_COLORS[0], line_marker="s"),
-            ExperimentConfig(name="shape_diamond", net_shape=shapes["diamond"], line_color=CUD_COLORS[1], line_marker="D"),
-            ExperimentConfig(name="shape_funnel", net_shape=shapes["funnel"], line_color=CUD_COLORS[2], line_marker=">"),
-            ExperimentConfig(name="shape_inv_funnel", net_shape=shapes["inv_funnel"], line_color=CUD_COLORS[3], line_marker="<"),
-            ExperimentConfig(name="shape_shallow", net_shape=shapes["shallow"], line_color=CUD_COLORS[4], line_marker="*"),
+            ExperimentConfig(name=f"{depth_name}-{width_name}", net_shape=[width] * depth, line_marker=marker, line_color=color)
+            for width_name, width, color, marker in zip(["narrow", "moderate", "wide", "very_wide"], [16, 32, 64, 128], CUD_COLORS[:4], MARKERS[:4])
         ]
+        _run_experiments(experiment_group=f"{depth_name}_networks", experiments=experiments)
 
-        self._run_experiments(experiment_group="network_shapes", experiments=experiments)
+def run_activation_experiments():
+    """
+    Determine the impact of network activation functions on model performance.
+    All networks are the same size and shape.
+    """
+    experiments = []
 
-    def run_division_experiments(self):
-        """
-        Determine the impact of dividing parameters over the actor and the critic networks.
-        Number of parameters remains equal.
-        """
-
-        # Setup
-        n_layers = 2
-        base_net = [64, 64]
-        total_params = get_n_params(self.inp, *base_net, self.out) * 2
-
-        # Adding experiments
-        experiments = [ExperimentConfig(
-            name="no_bias",
-            net_shape=base_net,
-        )]
-
-        # Slight bias
-        w1, w2 = get_widths(self.inp, self.out, n_layers, total_params, 0.60)
+    for activation_fn, color, marker in zip([nn.ReLU, nn.LeakyReLU, nn.Sigmoid, nn.SiLU, nn.Tanh, nn.ELU], CUD_COLORS[:6], MARKERS[:6]):
         experiments.append(ExperimentConfig(
-            name = "moderate_actor_bias",
-            actor_shape = [w1] * n_layers,
-            critic_shape = [w2] * n_layers,
-        ))
-        experiments.append(ExperimentConfig(
-            name = "moderate_critic_bias",
-            actor_shape = [w2] * n_layers,
-            critic_shape = [w1] * n_layers,
+            name = activation_fn.__name__,
+            line_marker = marker,
+            line_color = color,
+            activation_fn=activation_fn,
         ))
 
-        # Large bias
-        w1, w2 = get_widths(self.inp, self.out, n_layers, total_params, 0.75)
-        experiments.append(ExperimentConfig(
-            name = "large_actor_bias",
-            actor_shape = [w1] * n_layers,
-            critic_shape = [w2] * n_layers,
-        ))
-        experiments.append(ExperimentConfig(
-            name = "large_critic_bias",
-            actor_shape = [w2] * n_layers,
-            critic_shape = [w1] * n_layers,
-        ))
+    _run_experiments(experiment_group=f"activation_functions", experiments=experiments, n_seeds=5)
 
-        self._run_experiments(experiment_group="network_division", experiments=experiments)
+def run_cnn_experiments():
+    """
+    Compares a model using technical analysis features against one using a CNN
+    to process raw candlestick data.
+    """
 
-    def run_size_experiments(self):
-        """
-        Determine the impact of network size on model performance.
-        We modify two aspects: Model depth (number of layers), and Model width (number of neurons per layer).
-        """
-        for depth_name, depth in zip(["shallow", "moderate", "deep", "very_deep"], [1, 2, 3, 4]):
+    # Setup config for CNN
+    vector_fe = FeatureEngineer()
+    vector_fe.add(complex_24h)
+    vector_fe.add(complex_7d)
+    vector_sfe = StepwiseFeatureEngineer()
+    vector_sfe.add(["current_exposure"], calculate_current_exposure)
+    vector_obs_config = ObsConfig(name='vector_input', fe=vector_fe, sfe=vector_sfe, window=1)
 
-            experiments = []
+    cnn_fe = FeatureEngineer(remove_original_columns=False)
+    ohlc_cols = ['open_bid', 'high_bid', 'low_bid', 'close_bid', "open_ask", "high_ask", "low_ask", "close_ask"]
+    cnn_fe.add(remove_columns, columns=["date_gmt"])
+    for col in ohlc_cols: # convert to returns, and multiply by 100
+        cnn_fe.add(as_pct_change, column=col, periods=1)
+        cnn_fe.add(apply_column, fn=lambda x: x * 100, column=col)
+    cnn_fe.add(as_robust_norm, column="volume", window=500)
+    cnn_obs_config = ObsConfig(name='cnn_input', fe=cnn_fe, sfe=None, window=48)
 
-            for width_name, width, color, marker in zip(["narrow", "moderate", "wide", "very_wide"], [16, 32, 64, 128], CUD_COLORS[:4], MARKERS[:4]):
-                experiments.append(ExperimentConfig(
-                    name = f"{depth_name}-{width_name}",
-                    net_shape = [width] * depth,
-                    line_marker = marker,
-                    line_color = color,
-                ))
+    train_data_config, eval_data_config = DataConfig.from_splits(
+        forex_candle_data=ExperimentConfig.forex_candle_data,
+        split_pcts=[SPLIT_RATIO, 1 - SPLIT_RATIO],
+        obs_configs=[vector_obs_config, cnn_obs_config]
+    )
 
-            self._run_experiments(experiment_group=f"{depth_name}_networks", experiments=experiments)
+    # Run experiments
+    experiments = [
+        ExperimentConfig(
+            name="technical_analysis",
+            net_shape=[64, 64],
+            line_color=CUD_COLORS[0],
+            line_marker="o",
+            train_data_config=train_data_config,
+            eval_data_config=eval_data_config,
+        ),
+        ExperimentConfig(
+            name="cnn_features",
+            net_shape=[64, 64],
+            line_color=CUD_COLORS[1],
+            line_marker="X",
+            train_data_config=train_data_config,
+            eval_data_config=eval_data_config,
+        )
+    ]
+    _run_experiments(
+        experiment_group="cnn_vs_ta",
+        experiments=experiments,
+        n_seeds=3,
+        num_workers=3,
+        add_timestamp=False,
+    )
 
-    def run_activation_experiments(self):
-        """
-        Determine the impact of network activation functions on model performance.
-        All networks are the same size and shape.
-        """
-        experiments = []
+def run():
+    """
+    Parses command-line arguments and executes the chosen experiment(s).
+    """
+    experiments_to_run = {
+        1: run_shape_experiments,
+        2: run_size_experiments,
+        3: run_activation_experiments,
+        4: run_baselines,
+        5: run_division_experiments,
+    }
 
-        for activation_fn, color, marker in zip([nn.ReLU, nn.LeakyReLU, nn.Sigmoid, nn.SiLU, nn.Tanh, nn.ELU], CUD_COLORS[:6], MARKERS[:6]):
-            experiments.append(ExperimentConfig(
-                name = activation_fn.__name__,
-                activation_fn = activation_fn,
-                line_marker = marker,
-                line_color = color,
-            ))
+    def run_all():
+        for fn in experiments_to_run.values():
+            fn()
 
-        self._run_experiments(experiment_group=f"activation_functions", experiments=experiments)
+    experiments_to_run[0] = run_all
+    help_str = "\n".join(f"{exp_id}: {fn.__name__}" for exp_id, fn in experiments_to_run.items())
 
-    def run(self):
-        """
-        Parses command-line arguments and executes the chosen experiment(s).
-        """
-        experiments_to_run = {
-            1: self.run_shape_experiments,
-            2: self.run_size_experiments,
-            3: self.run_activation_experiments,
-            4: self.run_baselines,
-            5: self.run_division_experiments,
-        }
+    parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument("exp_id", default=0, type=int, help=help_str)
+    exp_id = parser.parse_args().exp_id
 
-        def run_all():
-            for fn in experiments_to_run.values():
-                fn()
-
-        experiments_to_run[0] = run_all
-        help_str = "\n".join(f"{exp_id}: {fn.__name__}" for exp_id, fn in experiments_to_run.items())
-
-        parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
-        parser.add_argument("exp_id", default=0, type=int, help=help_str)
-        exp_id = parser.parse_args().exp_id
-
-        if exp_id in experiments_to_run:
-            experiment_fn = experiments_to_run[exp_id]
-            experiment_fn()
-        else:
-            print(f"Error: Unknown experiment ID {exp_id}")
-            parser.print_help()
-            exit(1)
+    if exp_id in experiments_to_run:
+        experiment_fn = experiments_to_run[exp_id]
+        experiment_fn()
+    else:
+        print(f"Error: Unknown experiment ID {exp_id}")
+        parser.print_help()
+        exit(1)
 
 if __name__ == "__main__":
 
-    runner = ExperimentRunner()
-    runner.run()
+    run()
