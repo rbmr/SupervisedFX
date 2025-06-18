@@ -1,6 +1,6 @@
 import warnings
 from functools import partial
-from typing import Callable, List, Self
+from typing import Callable, List, Self, Any
 
 import numpy as np
 import pandas as pd
@@ -11,10 +11,13 @@ warnings.simplefilter(action="ignore", category=PerformanceWarning)
 
 class FeatureEngineer:
 
-    def __init__(self):
+    _UNSET = object()
+
+    def __init__(self, remove_original_columns = _UNSET):
         self._pipeline_steps: List[Callable[[pd.DataFrame], None]] = []
-        
-    def add(self, func: Callable[[pd.DataFrame], None] | Callable[[pd.DataFrame, ...], None], **kwargs) -> Self:
+        self.remove_original_columns = remove_original_columns
+
+    def add(self, func: Callable[..., None], **kwargs) -> Self:
         """
         Add a step to the pipeline. Function should modify dataframe in place.
         """
@@ -26,6 +29,8 @@ class FeatureEngineer:
         Run the pipeline on the given DataFrame.
         Applies each of the steps in the pipeline to the dataframe in place.
         """
+        if self.remove_original_columns is not self._UNSET:
+            remove_original_columns = self.remove_original_columns
 
         df = df.copy(deep=True)  # Avoid modifying the original DataFrame
 
@@ -498,6 +503,18 @@ def ease_of_movement(df: pd.DataFrame, window: int = 14):
 # # NORMALIZATION TRANSFORMATION SCALIUNG       # #
 # ############################################### #
 
+def as_robust_norm(df: pd.DataFrame, column: str, window: int = 500):
+    """
+    Normalizes the specified column in-place using rolling robust normalization.
+    This method uses the rolling median and IQR to reduce the influence of outliers.
+    """
+    log_column = np.log1p(df[column])
+    rolling_median = log_column.rolling(window=window, min_periods=1, center=False).median()
+    q75 = log_column.rolling(window=window, min_periods=1, center=False).quantile(0.75)
+    q25 = log_column.rolling(window=window, min_periods=1, center=False).quantile(0.25)
+    iqr = q75 - q25
+    df[column] = (log_column - rolling_median) / (iqr + 1e-6)
+
 def as_pct_change(df: pd.DataFrame, column: str, periods: int = 1):
     """
     Normalize a column as percentage change.
@@ -523,10 +540,14 @@ def as_z_score(df: pd.DataFrame, column: str, window: int = 50):
     Normalize a column as z-score with a window.
     To reduce NaNs, we use 0:index window for the rows where index<window.
     """
+    assert window >= 0
+    if window == 0:
+        df[column] = (df[column] - df[column].mean()) / df.std()
+    else:
+        df[column] = (df[column] - df[column].rolling(window=window, min_periods=1).mean()) / df[column].rolling(window=window, min_periods=1).std()
 
-    df[f'{column}'] = (df[column] - df[column].rolling(window=window, min_periods=1).mean()) / df[column].rolling(window=window, min_periods=1).std()
-    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
-    df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
+    df[column] = df[column].fillna(0)  # Fill NaN values with 0
+    df[column] = df[column].replace(np.inf, 0)  # Replace inf with 0
 
 def as_min_max_window(df: pd.DataFrame, column: str, window: int = 50):
     """
@@ -562,7 +583,14 @@ def as_below_above_column(df: pd.DataFrame, column: str, other_column: str):
                                                            np.where(df[column] < df[other_column], -1, 0))
     df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
 
+
 ## other
+def apply_column(df: pd.DataFrame, fn: Callable[[Any], Any], column: str):
+    """
+    Applies a function all the values of a column in place.
+    """
+    df[column] = df[column].apply(fn)
+
 def remove_columns(df: pd.DataFrame, columns: List[str]):
     """
     Remove specified columns from the DataFrame.
