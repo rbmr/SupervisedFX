@@ -207,9 +207,9 @@ def get_shapes(inp: int, out: int):
 def add_technical_analysis(df):
     """Default technical analysis features"""
 
-    lookback = 3
+    lookback = 2
 
-    # Trend (4 * lookback)
+    # Trend (4 * (lookback + 1))
 
     parabolic_sar(df)
     as_ratio_of_other_column(df, 'sar', 'close_bid')
@@ -223,7 +223,7 @@ def add_technical_analysis(df):
 
     history_lookback(df, lookback, ["sar", "vwap_4", "vwap_12", "vwap_48"])
 
-    # Momentum (2 * lookback)
+    # Momentum (2 * (lookback + 1))
 
     macd(df, short_window=12, long_window=26, signal_window=9)
     remove_columns(df, ["macd_signal", "macd"])
@@ -234,7 +234,7 @@ def add_technical_analysis(df):
 
     history_lookback(df, lookback, ["macd_hist", "mfi_14"])
 
-    # Technical Analysis (3 * lookback)
+    # Technical Analysis (3 * (lookback + 1))
 
     bollinger_bands(df, window=20, num_std_dev=2)
     as_ratio_of_other_column(df, "bb_upper_20", "close_bid")
@@ -245,6 +245,45 @@ def add_technical_analysis(df):
 
     history_lookback(df, lookback, ["bb_upper_20", "bb_lower_20", "chaikin_vol_10_10"])
 
+def get_default_forex_data() -> ForexCandleData:
+    return ForexCandleData.load(
+        source="dukascopy",
+        instrument="EURUSD",
+        granularity=Timeframe.H1,
+        start_time=datetime(2020, 1, 1, 22, 0, 0, 0),
+        end_time=datetime(2024, 12, 31, 21, 00, 0, 0),
+    )
+
+def get_default_env_config() -> EnvConfig:
+    return EnvConfig(
+        initial_capital=INITIAL_CAPITAL,
+        transaction_cost_pct=TRANSACTION_COST_PCT,
+        reward_function=None
+    )
+
+def get_default_action_config() -> ActionConfig:
+    return ActionConfig(
+        n=N_ACTIONS,
+        low=ACTION_LOW,
+        high=ACTION_HIGH
+    )
+
+def get_default_data_configs() -> tuple[DataConfig, DataConfig]:
+    fe = FeatureEngineer()
+    fe.add(complex_24h)  # 2 features
+    fe.add(complex_7d)  # 2 features
+    fe.add(add_technical_analysis)
+
+    sfe = StepwiseFeatureEngineer()
+    sfe.add(["current_exposure"], calculate_current_exposure)  # 1 feature
+
+    obs_configs = [ObsConfig(name='market_features', fe=fe, sfe=sfe, window=1)]
+    train_data_config, eval_data_config = DataConfig.from_splits(
+        forex_candle_data=get_default_forex_data(),
+        split_pcts=[SPLIT_RATIO, 1 - SPLIT_RATIO],
+        obs_configs=obs_configs
+    )
+    return train_data_config, eval_data_config
 
 @dataclass
 class ExperimentConfig:
@@ -255,19 +294,11 @@ class ExperimentConfig:
     # Matplotlib settings
     line_color: str = "black"
     line_style: str = "-"
-    line_marker: str = None
+    line_marker: Optional[str] = None
 
     # Environment settings
-    env_config: EnvConfig = field(default_factory=lambda: EnvConfig(
-        initial_capital=INITIAL_CAPITAL,
-        transaction_cost_pct=TRANSACTION_COST_PCT,
-        reward_function=None
-    ))
-    action_config: Optional[ActionConfig] = field(default_factory=lambda: ActionConfig(
-        n=N_ACTIONS,
-        low=ACTION_LOW,
-        high=ACTION_HIGH
-    ))
+    env_config: EnvConfig = field(default_factory=get_default_env_config)
+    action_config: ActionConfig = field(default_factory=get_default_action_config)
     train_data_config: Optional[DataConfig] = None
     eval_data_config: Optional[DataConfig] = None
 
@@ -278,51 +309,31 @@ class ExperimentConfig:
     policy: str = "MlpPolicy"
     device: str = "cpu"
     activation_fn: Callable = nn.ReLU
-    net_shape: Optional[list[int]] = None
-    actor_shape: list[int] = [64, 64],
-    critic_shape: list[int] = [64, 64],
-    features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor
-    features_extractor_kwargs: dict = field(default_factory=lambda: dict())
-
-    forex_candle_data = ForexCandleData.load(
-        source="dukascopy",
-        instrument="EURUSD",
-        granularity=Timeframe.H1,
-        start_time=datetime(2020, 1, 1, 22, 0, 0, 0),
-        end_time=datetime(2024, 12, 31, 21, 00, 0, 0),
-    )
+    net_shape: Optional[list[int]] = None # Shortcut for setting actor and critic shape.
+    actor_shape: list[int] = field(default_factory=lambda: [64, 64])
+    critic_shape: list[int] = field(default_factory=lambda: [64, 64])
+    features_extractor_class: Optional[Type[BaseFeaturesExtractor]] = None
+    features_extractor_kwargs: Optional[dict] = None
 
     def __post_init__(self):
         if self.net_shape is not None:
             self.actor_shape = self.net_shape
             self.critic_shape = self.net_shape
         if self.train_data_config is None or self.eval_data_config is None:
-
-
-            fe = FeatureEngineer()
-            fe.add(complex_24h)  # 2 features
-            fe.add(complex_7d)  # 2 features
-            fe.add(add_technical_analysis)
-
-            sfe = StepwiseFeatureEngineer()
-            sfe.add(["current_exposure"], calculate_current_exposure)  # 1 feature
-
-            obs_configs = [ObsConfig(name='market_features', fe=fe, sfe=sfe, window=1)]
-            train_data_config, eval_data_config = DataConfig.from_splits(
-                forex_candle_data=self.forex_candle_data,
-                split_pcts=[SPLIT_RATIO, 1 - SPLIT_RATIO],
-                obs_configs=obs_configs
-            )
+            train_data_config, eval_data_config = get_default_data_configs()
             self.train_data_config = self.train_data_config or train_data_config
             self.eval_data_config = self.eval_data_config or eval_data_config
 
     def get_policy_kwargs(self):
-        return dict(
+        policy_kwargs = dict(
             activation_fn=self.activation_fn,
             net_arch=dict(pi=self.actor_shape, qf=self.critic_shape),
-            features_extractor_class=self.features_extractor_class,
-            features_extractor_kwargs=self.features_extractor_kwargs,
         )
+        if self.features_extractor_class is not None:
+            policy_kwargs["features_extractor_class"] = self.features_extractor_class
+        if self.features_extractor_kwargs is not None:
+            policy_kwargs["features_extractor_kwargs"] = self.features_extractor_kwargs
+        return policy_kwargs
 
     def get_style(self):
         return dict(
@@ -340,7 +351,7 @@ class ExperimentConfig:
             activation_fn = self.activation_fn.__name__,
         )
         experiment_dir.mkdir(parents=True, exist_ok=True)
-        with open(experiment_dir / "info.json", "w") as f:
+        with open(experiment_dir / "experiment_config.json", "w") as f:
             json.dump(info, f, indent=4) # type: ignore
 
 def _run_experiment(experiment_group: str, config: ExperimentConfig, seed: int = SEED):
@@ -371,7 +382,6 @@ def _run_experiment(experiment_group: str, config: ExperimentConfig, seed: int =
     config.log_info(experiment_dir)  # log some info about this experiment
 
     # Train model
-
     if not models_dir.exists():
         model = SAC(
             policy=config.policy,
@@ -385,7 +395,7 @@ def _run_experiment(experiment_group: str, config: ExperimentConfig, seed: int =
         # SaveCallback creates models_dir upon first model save.
         callback = [SaveCallback(models_dir, save_freq=train_env.episode_len),
                     ActionHistogramCallback(train_env, log_freq=train_env.episode_len)]
-        train_model(model, train_env, train_episodes=50, callback=callback)
+        train_model(model, train_env, train_episodes=5, callback=callback)
 
     # Evaluate models
 
@@ -423,12 +433,15 @@ def _run_experiments(experiment_group: str, experiments: List[ExperimentConfig],
 
     combine_finals(RQ1_EXPERIMENTS_DIR / experiment_group, {exp.name : exp.get_style() for exp in experiments}, ext=".svg")
 
-def run_baselines(self):
+def run_baselines():
     """
     Runs the baseline models on the train and eval environments. Used as reference.
     """
-    train_env = ForexEnv(self.action_config, self.env_config, self.train_config)
-    eval_env = ForexEnv(self.action_config, self.env_config, self.eval_config)
+    train_data_config, eval_data_config = get_default_data_configs()
+    action_config = get_default_action_config()
+    env_config = get_default_env_config()
+    train_env = ForexEnv(action_config, env_config, train_data_config)
+    eval_env = ForexEnv(action_config, env_config, eval_data_config)
 
     experiment_group = "baselines"
     experiment_group_dir = RQ1_EXPERIMENTS_DIR / experiment_group
@@ -539,7 +552,7 @@ def run_cnn_experiments():
     cnn_obs_config = ObsConfig(name='cnn_input', fe=cnn_fe, sfe=None, window=48)
 
     train_data_config, eval_data_config = DataConfig.from_splits(
-        forex_candle_data=ExperimentConfig.forex_candle_data,
+        forex_candle_data=get_default_forex_data(),
         split_pcts=[SPLIT_RATIO, 1 - SPLIT_RATIO],
         obs_configs=[vector_obs_config, cnn_obs_config]
     )
@@ -551,9 +564,7 @@ def run_cnn_experiments():
             net_shape=[64, 64],
             line_color=CUD_COLORS[0],
             line_marker="o",
-            train_data_config=train_data_config,
-            eval_data_config=eval_data_config,
-            device="gpu",
+            device="cpu",
         ),
         ExperimentConfig(
             name="cnn_features",
@@ -562,7 +573,7 @@ def run_cnn_experiments():
             line_marker="X",
             train_data_config=train_data_config,
             eval_data_config=eval_data_config,
-            device="gpu",
+            device="cuda",
             policy = "MultiInputPolicy",
             features_extractor_class = CnnCombinedExtractor,
         )
@@ -571,7 +582,6 @@ def run_cnn_experiments():
         experiment_group="cnn_vs_ta",
         experiments=experiments,
         n_seeds=3,
-        num_workers=3,
         add_timestamp=False,
     )
 
@@ -585,6 +595,7 @@ def run():
         3: run_activation_experiments,
         4: run_baselines,
         5: run_division_experiments,
+        6: run_cnn_experiments,
     }
 
     def run_all():
