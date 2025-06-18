@@ -71,13 +71,13 @@ class CnnOnlyExtractor(BaseFeaturesExtractor):
         # Compute the shape of the output of the CNN layers by doing one forward pass
         with torch.no_grad():
             sample_obs = torch.as_tensor(observation_space.sample()[None]).float()
-            n_flatten = self.cnn(sample_obs.unsqueeze(1)).shape[1]
+            n_flatten = self.cnn(sample_obs).shape[1]
 
         self.linear = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
         # Add the channel dimension for the Conv2d layers
-        return self.linear(self.cnn(observations.unsqueeze(1)))
+        return self.linear(self.cnn(observations))
 
 class CnnCombinedExtractor(BaseFeaturesExtractor):
     """
@@ -358,6 +358,7 @@ def _run_experiment(experiment_group: str, config: ExperimentConfig, seed: int =
     """
     Runs a single experiment: trains the model, evaluates it, and analyzes the results.
     """
+    logging.info(f"Running experiment {experiment_group} / {config.name}")
 
     # Set seeds, only important for training, evaluation is deterministic.
     # The environments are entirely deterministic, no seeds need to be set.
@@ -395,7 +396,7 @@ def _run_experiment(experiment_group: str, config: ExperimentConfig, seed: int =
         # SaveCallback creates models_dir upon first model save.
         callback = [SaveCallback(models_dir, save_freq=train_env.episode_len),
                     ActionHistogramCallback(train_env, log_freq=train_env.episode_len)]
-        train_model(model, train_env, train_episodes=5, callback=callback)
+        train_model(model, train_env, train_episodes=50, callback=callback)
 
     # Evaluate models
 
@@ -419,7 +420,7 @@ def _run_experiment_wrapper(config_seed: tuple[ExperimentConfig, int], experimen
     config, seed = config_seed
     _run_experiment(experiment_group, config, seed)
 
-def _run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, num_workers=2, add_timestamp: bool=True):
+def _run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, num_workers=1, add_timestamp: bool=True):
     """
     Runs each of the experiments for a number of seeds.
     """
@@ -582,7 +583,6 @@ def run_cnn_experiments():
         experiment_group="cnn_vs_ta",
         experiments=experiments,
         n_seeds=3,
-        add_timestamp=False,
     )
 
 def run():
