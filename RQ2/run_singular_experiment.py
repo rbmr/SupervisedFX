@@ -12,9 +12,10 @@ from common.data.feature_engineer import *
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer, get_current_exposure
 from common.envs.forex_env import ForexEnv
 from common.envs.rewards import percentage_return
-from common.models.train_eval import run_experiment
+from common.models.train_eval import run_experiment_deprecated
 from common.scripts import *
 from RQ2.parameters import *
+from RQ2.hyperparameter_experiments import apply_cautious_parameters, apply_balanced_parameters
 
 
 def main():
@@ -33,54 +34,37 @@ def main():
     feature_engineer, stepwise_feature_engineer = get_baseline_feature_engineers()
 
     logging.info("Creating environments...")
-    train_env, eval_env = ForexEnv.create_train_eval_envs(
-        split_ratio=RQ2_DATA_SPLIT_RATIO,
+    train_env, eval_env = ForexEnv.create_split_envs(
+        split_pcts=[RQ2_DATA_SPLIT_RATIO, 1-RQ2_DATA_SPLIT_RATIO],
         forex_candle_data=forex_data,
         market_feature_engineer=feature_engineer,
         agent_feature_engineer=stepwise_feature_engineer,
         initial_capital=INITIAL_CAPITAL,
         transaction_cost_pct=TRANSACTION_COST_PCT,
-        n_actions=0,
-        custom_reward_function=percentage_return)
+        n_actions=3,
+        custom_reward_function=percentage_return )
     logging.info("Environments created.")
 
     temp_env = DummyVecEnv([lambda: train_env])
 
 
-    model = SAC(
-        policy="MlpPolicy",
-        env=temp_env,
-        learning_rate=0.0005,
-        buffer_size=60_000,
-        learning_starts=1000,
-        batch_size=512,
-        tau=0.005,
-        gamma=0.95,
-        train_freq=1,
-        gradient_steps=1,
-        target_update_interval=1,
-        ent_coef='auto',
-        policy_kwargs=dict(
-            net_arch=[32, 16],
-            activation_fn=LeakyReLU,
-            optimizer_class=optim.Adam,
-        ),
-        verbose=1
-    )
+    dqn_kwargs = base_dqn_kwargs(temp_env)
+    dqn_kwargs = apply_cautious_parameters(dqn_kwargs)
+    model = DQN(**dqn_kwargs)
 
 
     logging.info("Model created.")
     logging.info("Model architecture:" + str(model.policy))
 
     logging.info("Running train test analyze...")
-    run_experiment(
+    run_experiment_deprecated(
         train_env=train_env,
-        eval_env=eval_env,
+        validate_env=eval_env,
         model=model,
         base_folder_path=RQ2_DIR,
-        experiment_group_name="sac",
-        experiment_name="1",
-        train_episodes=50,
+        group_name="dqn",
+        experiment_name="scaled_rewards",
+        train_episodes=40,
         eval_episodes=1,
         checkpoints=True,
         tensorboard_logging=True,

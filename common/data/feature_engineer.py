@@ -1,5 +1,6 @@
 import warnings
-from typing import Callable, List
+from functools import partial
+from typing import Callable, List, Self, Any
 
 import numpy as np
 import pandas as pd
@@ -10,22 +11,22 @@ warnings.simplefilter(action="ignore", category=PerformanceWarning)
 
 class FeatureEngineer:
 
-    def __init__(self):
+    def __init__(self, remove_original_columns = True):
         self._pipeline_steps: List[Callable[[pd.DataFrame], None]] = []
-        
-    def add(self, func: Callable[[pd.DataFrame], None]) -> 'FeatureEngineer':
+        self.remove_original_columns = remove_original_columns
+
+    def add(self, func: Callable[..., None], **kwargs) -> Self:
         """
         Add a step to the pipeline. Function should modify dataframe in place.
         """
-        self._pipeline_steps.append(func)
+        self._pipeline_steps.append(partial(func, **kwargs))
         return self
     
-    def run(self, df: pd.DataFrame, remove_original_columns=True) -> pd.DataFrame:
+    def run(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Run the pipeline on the given DataFrame.
         Applies each of the steps in the pipeline to the dataframe in place.
         """
-
         df = df.copy(deep=True)  # Avoid modifying the original DataFrame
 
         original_columns = df.columns.tolist()
@@ -33,7 +34,7 @@ class FeatureEngineer:
         for func in self._pipeline_steps:
             func(df)
 
-        if remove_original_columns:
+        if self.remove_original_columns:
             df.drop(columns=original_columns, inplace=True, errors='ignore')
         
         return df
@@ -87,6 +88,18 @@ def sin_24h(df: pd.DataFrame):
         raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
     ntod = _norm_time_of_day(df['date_gmt'])
     df['sin_24h'] = np.sin(ntod * np.pi * 2)
+
+def cos_7d(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    ntow = _norm_time_of_week(df['date_gmt'])
+    df['cos_7d'] = np.cos(ntow * np.pi * 2)
+
+def cos_24h(df: pd.DataFrame):
+    if 'date_gmt' not in df.columns:
+        raise ValueError("DataFrame must contain 'date_gmt' column with datetime values.")
+    ntod = _norm_time_of_day(df['date_gmt'])
+    df['cos_24h'] = np.cos(ntod * np.pi * 2)
 
 def complex_7d(df: pd.DataFrame):
     if 'date_gmt' not in df.columns:
@@ -436,7 +449,41 @@ def chaikin_volatility(df: pd.DataFrame, ema_window: int = 10, roc_period: int =
     roc_ema = ema_high_low.pct_change(periods=roc_period)
     
     df[f'chaikin_vol_{ema_window}_{roc_period}'] = roc_ema
-    df[f'chaikin_vol_{ema_window}_{roc_period}'].fillna(0, inplace=True)
+    df[f'chaikin_vol_{ema_window}_{roc_period}'] = df[f'chaikin_vol_{ema_window}_{roc_period}'].fillna(0)
+
+def ease_of_movement(df: pd.DataFrame, window: int = 14):
+    """
+    Calculate the Ease of Movement (EOM) indicator.
+    EOM highlights the relationship between price change and volume, showing
+    how easily prices move for a given amount of volume.
+    """
+    # Calculate the distance moved from the previous period's midpoint
+    high = df['high_bid']
+    low = df['low_bid']
+    volume = df['volume']
+
+    distance_moved = ((high + low) / 2) - ((high.shift(1) + low.shift(1)) / 2)
+
+    # Calculate the price range for the current period
+    price_range = high - low
+
+    # Replace zero price_range with NaN to avoid division by zero errors.
+    # We will handle the resulting NaNs later.
+    price_range = price_range.replace(0, np.nan)
+
+    # Calculate the Box Ratio, which relates volume to the price range
+    # A large volume scale is used to keep the resulting EOM values in a manageable range.
+    box_ratio = (volume / 100_000_000) / price_range
+
+    # Calculate the 1-period Ease of Movement
+    eom_1_period = distance_moved / box_ratio
+
+    # The EOM indicator is typically a Simple Moving Average of the 1-period EOM
+    eom = eom_1_period.rolling(window=window).mean()
+
+    # Add the new feature to the DataFrame and fill any NaNs with 0
+    df[f'eom_{window}'] = eom
+    df[f'eom_{window}'] = df[f'eom_{window}'].fillna(0)
 
 # ------------------------------- #
 # -- END VOLATILITY Indicators -- #
@@ -450,6 +497,18 @@ def chaikin_volatility(df: pd.DataFrame, ema_window: int = 10, roc_period: int =
 # ############################################### #
 # # NORMALIZATION TRANSFORMATION SCALIUNG       # #
 # ############################################### #
+
+def as_robust_norm(df: pd.DataFrame, column: str, window: int = 500):
+    """
+    Normalizes the specified column in-place using rolling robust normalization.
+    This method uses the rolling median and IQR to reduce the influence of outliers.
+    """
+    log_column = np.log1p(df[column])
+    rolling_median = log_column.rolling(window=window, min_periods=1, center=False).median()
+    q75 = log_column.rolling(window=window, min_periods=1, center=False).quantile(0.75)
+    q25 = log_column.rolling(window=window, min_periods=1, center=False).quantile(0.25)
+    iqr = q75 - q25
+    df[column] = (log_column - rolling_median) / (iqr + 1e-6)
 
 def as_pct_change(df: pd.DataFrame, column: str, periods: int = 1):
     """
@@ -476,10 +535,14 @@ def as_z_score(df: pd.DataFrame, column: str, window: int = 50):
     Normalize a column as z-score with a window.
     To reduce NaNs, we use 0:index window for the rows where index<window.
     """
+    assert window >= 0
+    if window == 0:
+        df[column] = (df[column] - df[column].mean()) / df.std()
+    else:
+        df[column] = (df[column] - df[column].rolling(window=window, min_periods=1).mean()) / df[column].rolling(window=window, min_periods=1).std()
 
-    df[f'{column}'] = (df[column] - df[column].rolling(window=window, min_periods=1).mean()) / df[column].rolling(window=window, min_periods=1).std()
-    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
-    df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
+    df[column] = df[column].fillna(0)  # Fill NaN values with 0
+    df[column] = df[column].replace(np.inf, 0)  # Replace inf with 0
 
 def as_min_max_window(df: pd.DataFrame, column: str, window: int = 50):
     """
@@ -515,7 +578,14 @@ def as_below_above_column(df: pd.DataFrame, column: str, other_column: str):
                                                            np.where(df[column] < df[other_column], -1, 0))
     df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
 
+
 ## other
+def apply_column(df: pd.DataFrame, fn: Callable[[Any], Any], column: str):
+    """
+    Applies a function all the values of a column in place.
+    """
+    df[column] = df[column].apply(fn)
+
 def remove_columns(df: pd.DataFrame, columns: List[str]):
     """
     Remove specified columns from the DataFrame.

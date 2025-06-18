@@ -44,7 +44,6 @@ class EnvConfig:
 
     initial_capital: float = 10_000.0
     transaction_cost_pct: float = 0.0
-    shuffled: bool = False
     reward_function: Optional[Callable[[gym.Env], float]] = None
 
     def __post_init__(self):
@@ -52,8 +51,6 @@ class EnvConfig:
             raise ValueError(f"initial_capital must be positive, was {self.initial_capital}.")
         if self.transaction_cost_pct < 0.0 or self.transaction_cost_pct > 1.0:
             raise ValueError(f"transaction_cost_pct must in [0.0, 1.0], was {self.transaction_cost_pct}.")
-        if self.shuffled:
-            logging.warning("shuffling has been temporarily removed. Shuffled parameter has no effect.")
 
 @dataclass(frozen=True)
 class ObsConfig:
@@ -86,7 +83,7 @@ class EnvObs:
     def from_config(cls, config: ObsConfig, market_data: pd.DataFrame):
         """Create EnvObs from ObsConfig and market data."""
         if config.fe is not None:
-            features_df = config.fe.run(market_data.copy(deep=True), remove_original_columns=True)
+            features_df = config.fe.run(market_data.copy(deep=True))
             features_data = features_df.to_numpy(dtype=np.float32)
             feature_names = features_df.columns.tolist()
         else:
@@ -94,8 +91,15 @@ class EnvObs:
             features_data = np.empty((len(market_data), 0), dtype=np.float32)
             feature_names = []
 
+        if config.sfe is not None:
+            sfe_n_features = config.sfe.num_of_features()
+            sfe_features = config.sfe.get_features()
+        else:
+            sfe_n_features = 0
+            sfe_features = []
+
         logging.info(f"'{config.name}' features ({len(features_data)}, {len(feature_names)}): {feature_names})")
-        logging.info(f"'{config.name}' stepwise features ({config.sfe.num_of_features()}): {config.sfe.get_features()})")
+        logging.info(f"'{config.name}' stepwise features ({sfe_n_features}): {sfe_features})")
 
         return cls(features_data, feature_names, config.sfe, config.name, config.window)
 
@@ -106,7 +110,7 @@ class EnvObs:
             num_features += self.sfe.num_of_features()
         if self.window == 1:
             return spaces.Box(low=-np.inf, high=np.inf, shape=(num_features,), dtype=np.float32)
-        return spaces.Box(low=-np.inf, high=np.inf, shape=(self.window, num_features), dtype=np.float32)
+        return spaces.Box(low=-np.inf, high=np.inf, shape=(1, num_features, self.window), dtype=np.float32)
 
     def get_observation(self, n_steps: int, agent_data: np.ndarray) -> np.ndarray:
         """Get observation for the current step."""
@@ -124,6 +128,7 @@ class EnvObs:
                     pad_size = self.window - len(static_features)
                     padding = np.zeros((pad_size, static_features.shape[1]), dtype=np.float32)
                     static_features = np.vstack((padding, static_features))
+                static_features = static_features.transpose()[np.newaxis, ...]
 
         # Get stepwise features
         stepwise_features = None
@@ -147,13 +152,13 @@ class DataConfig:
     __slots__ = ("market_data", "observations")
 
     @classmethod
-    def get_configs(cls,
+    def from_splits(cls,
                     forex_candle_data: ForexCandleData,
-                    split_ratio: float,
+                    split_pcts: list[float],
                     obs_configs: list[ObsConfig]):
-
-        # Standardize input
-        assert 0.0 <= split_ratio <= 1.0, f"split_ratio ({split_ratio}) must be in [0.0, 1.0]."
+        # --- VALIDATION ---
+        assert abs(sum(split_pcts) - 1.0) < 1e-9, f"split_ratios must sum to 1.0, but sum is {sum(split_pcts)}."
+        assert all(r > 0 for r in split_pcts), f"All split_ratios must be positive, but were {split_pcts}."
 
         # Retrieve market data.
         market_data = forex_candle_data.df.copy(deep=True)
@@ -162,40 +167,43 @@ class DataConfig:
         # Retrieve observations
         observations = [EnvObs.from_config(config, market_data) for config in obs_configs]
 
-        # Split data
-        split_index = int(len(market_data) * split_ratio)
-        train_market_data = market_data.iloc[:split_index]
-        eval_market_data = market_data.iloc[split_index:]
+        # --- DATA SPLITTING LOGIC ---
+        data_configs = []
+        total_len = len(market_data)
 
-        # Split observation data
-        train_env_obs = []
-        eval_env_obs = []
-        for env_ob in observations:
-            train_env_obs.append(EnvObs(
-                features_data = env_ob.features_data[:split_index],
-                feature_names = env_ob.feature_names,
-                sfe = env_ob.sfe,
-                name = env_ob.name,
-                window = env_ob.window
-            ))
-            eval_env_obs.append(EnvObs(
-                features_data = env_ob.features_data[split_index:],
-                feature_names = env_ob.feature_names,
-                sfe = env_ob.sfe,
-                name = env_ob.name,
-                window = env_ob.window
+        # Calculate the absolute indices for splitting the data
+        split_indices = [0] + [int(total_len * sum(split_pcts[:i+1])) for i in range(len(split_pcts))]
+
+        # Ensure the last index goes to the very end of the dataframe
+        split_indices[-1] = total_len
+
+        # Create a DataConfig for each data slice
+        for i in range(len(split_pcts)):
+            start_idx = split_indices[i]
+            end_idx = split_indices[i+1]
+
+            # Slice market data
+            split_market_data = market_data.iloc[start_idx:end_idx]
+
+            # Slice observation data
+            split_env_obs = []
+            for env_ob in observations:
+                split_env_obs.append(EnvObs(
+                    features_data=env_ob.features_data[start_idx:end_idx],
+                    feature_names=env_ob.feature_names,
+                    sfe=env_ob.sfe,
+                    name=env_ob.name,
+                    window=env_ob.window
+                ))
+
+            # Create and store the DataConfig for this split
+            data_configs.append(cls(
+                market_data=split_market_data,
+                observations=split_env_obs
             ))
 
-        # Get configs
-        train_config = cls(
-            market_data=train_market_data,
-            observations=train_env_obs,
-        )
-        eval_config = cls(
-            market_data=eval_market_data,
-            observations=eval_env_obs,
-        )
-        return train_config, eval_config
+        return data_configs
+
 
     def __init__(self, market_data: pd.DataFrame, observations: list[EnvObs]):
 
@@ -235,8 +243,8 @@ class DataConfig:
 class ForexEnv(gym.Env):
 
     @classmethod
-    def create_train_eval_envs(cls,
-                               split_ratio: float,
+    def create_split_envs(cls,
+                               split_pcts: list[float],
                                forex_candle_data: ForexCandleData,
                                market_feature_engineer: FeatureEngineer,
                                agent_feature_engineer: StepwiseFeatureEngineer,
@@ -245,8 +253,8 @@ class ForexEnv(gym.Env):
                                n_actions: int = 3,
                                action_low: float = -1.0,
                                action_high: float = 1.0,
-                               custom_reward_function: Optional[Callable[[Self], float]] = None,
-                               shuffled = False) -> tuple[Self, Self]:
+                               custom_reward_function: Optional[Callable[[Self], float]] = None
+                            ) -> list[Self]:
         obs_configs = [ObsConfig(
             name = 'market_features',
             fe = market_feature_engineer,
@@ -256,7 +264,6 @@ class ForexEnv(gym.Env):
         env_config = EnvConfig(
             initial_capital = initial_capital,
             transaction_cost_pct = transaction_cost_pct,
-            shuffled = shuffled,
             reward_function = custom_reward_function,
         )
         action_config = ActionConfig(
@@ -264,14 +271,14 @@ class ForexEnv(gym.Env):
             low = action_low,
             high = action_high,
         )
-        train_config, eval_config = DataConfig.get_configs(
+        data_configs = DataConfig.from_splits(
             forex_candle_data=forex_candle_data,
-            split_ratio=split_ratio,
+            split_pcts=split_pcts,
             obs_configs=obs_configs,
         )
-        train_env = ForexEnv(action_config, env_config, train_config)
-        eval_env = ForexEnv(action_config, env_config, eval_config)
-        return train_env, eval_env
+
+        return [cls(action_config, env_config, data_config) for data_config in data_configs]
+
 
     def __init__(self, action_config: ActionConfig, env_config: EnvConfig, data_config: DataConfig):
         super(ForexEnv, self).__init__()

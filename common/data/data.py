@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from common.constants import DATA_DIR
-from common.scripts import (date_range, fetch_all, map_input, parallel_run,
+from common.scripts import (date_range, fetch_all, map_input, parallel_map,
                             raise_value_error)
 
 # Mock DATA_DIR for standalone execution
@@ -142,10 +142,10 @@ class DukascopyDataDownloader:
 
         days = list(date_range(start, end, timedelta(days=1)))
         fetch_tick_day = partial(cls._fetch_tick_day, symbol=symbol, tick_format=tick_format)
-        data_files = parallel_run(fetch_tick_day, days, num_workers=2)
+        data_files = parallel_map(fetch_tick_day, days, num_workers=2)
 
         # Load and combine all day files
-        day_dfs = parallel_run(pd.read_csv, data_files, num_workers=2)
+        day_dfs = parallel_map(pd.read_csv, data_files, num_workers=2)
         final_df = pd.concat(day_dfs, ignore_index=True)
 
         # Return ForexTickData Object.
