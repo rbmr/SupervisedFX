@@ -9,6 +9,7 @@ from stable_baselines3 import A2C, DDPG, DQN, PPO, SAC, TD3
 from stable_baselines3.common.base_class import BaseAlgorithm
 
 from RQ5.boltzmann_dqn import BoltzmannDQN, MaxBoltzmannDQN
+from RQ5.noisy_dqn import NoisyDQN
 
 ALGORITHM_MAP = {
     'PPO': PPO,
@@ -20,6 +21,7 @@ ALGORITHM_MAP = {
     'RECURRENTPPO': RecurrentPPO,
     'BOLTZMANNDQN': BoltzmannDQN,
     'MAXBOLTZMANNDQN': MaxBoltzmannDQN,
+    'NOISYDQN': NoisyDQN
 }
 METADATA_FILE = "custom_metadata.json"
 

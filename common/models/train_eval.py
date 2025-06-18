@@ -13,6 +13,8 @@ from matplotlib import pyplot as plt
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
+import torch
+import numpy as np
 from tqdm import tqdm
 
 from common.envs.callbacks import SaveOnEpisodeEndCallback
@@ -259,6 +261,33 @@ def evaluate_model(model_zip: Path,
                   total_steps=eval_episodes * eval_episode_length,
                   deterministic=True,
                   progress_bar=progress_bar)
+
+class ModelQueue:
+    def __init__(self, models_dir: Path, seen, lock: Lock): # type: ignore
+        if not models_dir.is_dir():
+            raise ValueError(f"{models_dir} is not a directory")
+        self.models_dir = models_dir
+        self.seen = seen # Shared list
+        self.lock = lock # Shared lock
+
+    def get(self) -> Path | None:
+        with self.lock:
+            models = sorted(self.models_dir.glob("*.zip"), key=lambda p: p.stat().st_mtime)
+            for model_zip in models:
+                if not model_zip.is_file():
+                    continue
+                if model_zip in self.seen:
+                    continue
+                self.seen.append(model_zip)
+                return model_zip
+        return None
+
+def evaluate_worker(queue: ModelQueue, func: Callable):
+    while True:
+        model_path = queue.get()
+        if model_path is None:
+            break
+        func(model_path)
 
 def evaluate_models(models_dir: Path,
                     results_dir: Path,
@@ -600,3 +629,222 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
             plt.close(fig)
 
     return processed
+
+def train_model_with_curiosity(
+    model, curiosity_module, train_env, train_episodes, beta, model_save_path, callback=None
+):
+    import logging
+    from collections import Counter
+    from tqdm import tqdm
+    import numpy as np
+    import torch
+
+    logging.info(f"Training with curiosity for {train_episodes} episodes...")
+
+    env = DummyVecEnv([lambda: train_env])
+    total_steps = train_episodes * train_env.episode_len
+    obs = env.reset()
+
+    # Initialize callbacks
+    if callback:
+        for cb in callback:
+            cb.init_callback(model)
+            cb.num_timesteps = 0
+
+    curiosity_batch = []
+    curiosity_batch_size = 32
+    intrinsic_episode_rewards = []
+    episode_idx = 0
+    previous_action = None
+
+    # Debug metrics
+    action_counts = Counter()
+    intrinsic_vals = []
+    extrinsic_vals = []
+    combined_vals = []
+    curiosity_losses = []
+    inverse_losses = []
+    forward_losses = []
+    log_interval = 5000
+
+    # Much shorter forced exploration with gradual transition
+    forced_exploration_steps = 2000  # Reduced significantly
+    logging.info(f"⚠️  Epsilon-greedy exploration for first {forced_exploration_steps} steps, then continuing with lower epsilon.")
+
+    # Track Q-values for debugging
+    q_value_history = []
+
+    for step in tqdm(range(total_steps)):
+        state_tensor = torch.FloatTensor(obs).to(model.device)
+
+        # Epsilon-greedy with gradual decay throughout training
+        if step < forced_exploration_steps:
+            # High exploration initially
+            epsilon = 0.9 - (step / forced_exploration_steps) * 0.4  # 0.9 -> 0.5
+        else:
+            # Continue with lower but non-zero exploration
+            remaining_steps = total_steps - forced_exploration_steps
+            progress = (step - forced_exploration_steps) / remaining_steps
+            epsilon = 0.5 * (1 - progress) + 0.1  # 0.5 -> 0.1
+
+        # Action selection with epsilon-greedy
+        if np.random.random() < epsilon:
+            # Ensure truly uniform random selection
+            action = np.random.randint(0, train_env.n_actions)
+        else:
+            # Model prediction
+            action, _ = model.predict(obs, deterministic=False)
+            action = int(action)
+
+        # Debug: Track Q-values periodically
+        if step % 1000 == 0 and step >= model.learning_starts:
+            with torch.no_grad():
+                if hasattr(model, 'q_net'):
+                    q_vals = model.q_net(state_tensor).cpu().numpy().flatten()
+                    q_value_history.append((step, q_vals.copy()))
+                    if len(q_value_history) > 10:
+                        q_value_history.pop(0)
+
+        mapped_action = float(train_env.actions[action])
+        action_idx_tensor = torch.tensor([action], dtype=torch.long, device=model.device)
+        action_one_hot = np.zeros(train_env.n_actions, dtype=np.float32)
+        action_one_hot[action] = 1.0
+        action_one_hot_tensor = torch.FloatTensor(action_one_hot).unsqueeze(0).to(model.device)
+
+        # Step environment
+        next_obs, extrinsic_reward, done, info = env.step([action])
+        next_state_tensor = torch.FloatTensor(next_obs).to(model.device)
+
+        # Curiosity reward with better scaling
+        intrinsic_reward = curiosity_module.compute_intrinsic_reward(
+            state_tensor, next_state_tensor, action_one_hot_tensor
+        )[0]
+        
+        # More conservative clipping to avoid overwhelming extrinsic rewards
+        clipped_intrinsic = np.clip(intrinsic_reward, 0.0, 0.5)
+
+        # Less aggressive beta decay
+        progress = min(step / (total_steps * 0.8), 1.0)  # Cap progress at 80% of training
+        dynamic_beta = beta * (1.0 - 0.3 * progress)  # Much less decay
+        combined_reward = extrinsic_reward + dynamic_beta * clipped_intrinsic
+
+        # Remove entropy penalty - it might be causing bias
+        # if previous_action is not None and action == previous_action:
+        #     combined_reward -= entropy_penalty_weight
+        previous_action = action
+
+        # Save to buffer
+        infos = [{"TimeLimit.truncated": done}]
+        model.replay_buffer.add(obs, next_obs, np.array([action]), combined_reward, done, infos=infos)
+
+        # More frequent model training - FIXED: Handle TrainFreq object and logger properly
+        if step >= model.learning_starts:
+            # Get the actual frequency value from TrainFreq object
+            if hasattr(model.train_freq, 'frequency'):
+                train_freq_val = model.train_freq.frequency
+            else:
+                # Fallback: try to get the value directly or use a default
+                train_freq_val = getattr(model.train_freq, 'value', model.train_freq)
+            
+            if step % max(1, train_freq_val // 2) == 0:
+                # Ensure logger is available before training
+                if not hasattr(model, '_logger') or model._logger is None:
+                    from stable_baselines3.common.logger import configure
+                    model._logger = configure(folder=None, format_strings=[])
+                
+                # DQN.train() requires gradient_steps parameter
+                model.train(gradient_steps=model.gradient_steps)
+
+        # Curiosity batch training
+        curiosity_batch.append((state_tensor, next_state_tensor, action_idx_tensor, action_one_hot_tensor))
+        if len(curiosity_batch) >= curiosity_batch_size:
+            states, next_states, action_idxs, action_one_hots = zip(*curiosity_batch)
+            loss, inv_loss, fwd_loss = curiosity_module.update_batch(states, next_states, action_idxs, action_one_hots)
+            curiosity_batch.clear()
+            curiosity_losses.append(loss)
+            inverse_losses.append(inv_loss)
+            forward_losses.append(fwd_loss)
+
+        # Log metrics
+        action_counts[mapped_action] += 1
+        intrinsic_vals.append(clipped_intrinsic)
+        extrinsic_vals.append(extrinsic_reward)
+        combined_vals.append(combined_reward)
+        intrinsic_episode_rewards.append(clipped_intrinsic)
+
+        if step > 0 and step % log_interval == 0:
+            # More detailed logging
+            total_actions = sum(action_counts.values())
+            action_dist = {}
+            for action_val in train_env.actions:  # Ensure we check all actions
+                count = action_counts.get(action_val, 0)
+                action_dist[action_val] = f"{count}/{total_actions} ({count/total_actions:.2%})"
+            
+            logging.info(f"[Step {step}] Epsilon: {epsilon:.3f}")
+            logging.info(f"[Step {step}] Action distribution: {action_dist}")
+            logging.info(f"[Step {step}] Avg intrinsic: {np.mean(intrinsic_vals):.5f}, "
+                         f"extrinsic: {np.mean(extrinsic_vals):.5f}, "
+                         f"combined: {np.mean(combined_vals):.5f}, "
+                         f"beta: {dynamic_beta:.3f}")
+            
+            if curiosity_losses:
+                logging.info(f"[Step {step}] Curiosity loss: {np.mean(curiosity_losses):.4f}, "
+                             f"Inverse: {np.mean(inverse_losses):.4f}, Forward: {np.mean(forward_losses):.4f}")
+            
+            # Log Q-values if available
+            if q_value_history and step >= model.learning_starts:
+                latest_step, latest_q_vals = q_value_history[-1]
+                logging.info(f"[Step {step}] Q-values [short={latest_q_vals[0]:.3f}, hold={latest_q_vals[1]:.3f}, long={latest_q_vals[2]:.3f}]")
+            
+            # Check if all actions are being explored
+            missing_actions = set(train_env.actions) - set(action_counts.keys())
+            if missing_actions:
+                logging.warning(f"[Step {step}] Missing actions in recent window: {missing_actions}")
+            
+            action_counts.clear()
+            intrinsic_vals.clear()
+            extrinsic_vals.clear()
+            combined_vals.clear()
+            curiosity_losses.clear()
+            inverse_losses.clear()
+            forward_losses.clear()
+
+        # End of episode
+        obs = next_obs if not done else env.reset()
+        if done:
+            avg_intrinsic = np.mean(intrinsic_episode_rewards)
+            logging.info(f"[Episode {episode_idx}] Avg intrinsic reward: {avg_intrinsic:.4f}")
+            intrinsic_episode_rewards.clear()
+            episode_idx += 1
+
+        # Callbacks
+        model.num_timesteps += 1
+        if callback:
+            for cb in callback:
+                cb.num_timesteps = model.num_timesteps
+                cb.locals = {
+                    'obs': obs,
+                    'actions': np.array([action]),
+                    'rewards': combined_reward,
+                    'dones': done,
+                    'infos': infos
+                }
+                cb.on_step()
+
+    save_model_with_metadata(model, model_save_path / "model_final.zip")
+    torch.save(curiosity_module.state_dict(), model_save_path / "curiosity_module.pth")
+
+    logging.info("Curiosity training complete.")
+
+def evaluate_and_analyze_model(exp_dir, train_env, eval_env, eval_episodes=1):
+    models_dir = exp_dir / "models"
+    results_dir = exp_dir / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    # Evaluate
+    logging.info("Evaluating model...")
+    evaluate_models(models_dir, results_dir, {"train": train_env, "eval": eval_env}, eval_episodes)
+
+    # Analyze
+    logging.info("Analyzing results...")
+    analyse_results(results_dir)
