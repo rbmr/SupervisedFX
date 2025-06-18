@@ -224,6 +224,10 @@ def run_experiment(exploration_strategy: str, use_optimal_reward=False):
 
         save_model_with_metadata(model, models_dir / "model_final.zip")
 
+    elif exploration_strategy == "noisy":
+        from RQ5.noisy_dqn import NoisyDQN
+        model = NoisyDQN(**dqn_args)
+
     else:
         raise ValueError(f"Unknown exploration strategy: {exploration_strategy}")
 
@@ -248,7 +252,7 @@ def run_experiment(exploration_strategy: str, use_optimal_reward=False):
     evaluate_and_analyze_model(exp_dir, train_env, eval_env)
 
 if __name__ == "__main__":
-    strategies = ["epsilon_greedy", "boltzmann", "max_boltzmann", "curiosity"]
+    strategies = ["epsilon_greedy", "boltzmann", "max_boltzmann", "curiosity", "noisy"]
     options = [(f"run_{s}", lambda s=s: run_experiment(s)) for s in strategies]
     options += [("run_optimal", lambda: run_experiment("optimal_reward", use_optimal_reward=True))]
 
