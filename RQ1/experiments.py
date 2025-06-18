@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Callable, Type
 import gymnasium as gym
 import numpy as np
 import torch
@@ -26,7 +26,7 @@ from common.data.feature_engineer import (FeatureEngineer, as_min_max_fixed,
                                           bollinger_bands, chaikin_volatility,
                                           complex_7d, complex_24h,
                                           history_lookback, macd, mfi,
-                                          parabolic_sar, remove_columns, vwap, copy_columns, as_pct_change,
+                                          parabolic_sar, remove_columns, vwap, as_pct_change,
                                           apply_column, as_robust_norm)
 from common.data.stepwise_feature_engineer import (StepwiseFeatureEngineer,
                                                    calculate_current_exposure)
@@ -275,14 +275,14 @@ class ExperimentConfig:
     out: int = 1
 
     # Model settings
-    policy = "MlpPolicy"
-    device = "cpu"
-    activation_fn = nn.ReLU
+    policy: str = "MlpPolicy"
+    device: str = "cpu"
+    activation_fn: Callable = nn.ReLU
     net_shape: Optional[list[int]] = None
     actor_shape: list[int] = [64, 64],
     critic_shape: list[int] = [64, 64],
-    features_extractor_class = FlattenExtractor
-    features_extractor_kwargs = {}
+    features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor
+    features_extractor_kwargs: dict = field(default_factory=lambda: dict())
 
     forex_candle_data = ForexCandleData.load(
         source="dukascopy",
@@ -409,7 +409,7 @@ def _run_experiment_wrapper(config_seed: tuple[ExperimentConfig, int], experimen
     config, seed = config_seed
     _run_experiment(experiment_group, config, seed)
 
-def _run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, num_workers=3, add_timestamp: bool=True):
+def _run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, num_workers=1, add_timestamp: bool=True):
     """
     Runs each of the experiments for a number of seeds.
     """
@@ -553,6 +553,7 @@ def run_cnn_experiments():
             line_marker="o",
             train_data_config=train_data_config,
             eval_data_config=eval_data_config,
+            device="gpu",
         ),
         ExperimentConfig(
             name="cnn_features",
@@ -561,6 +562,9 @@ def run_cnn_experiments():
             line_marker="X",
             train_data_config=train_data_config,
             eval_data_config=eval_data_config,
+            device="gpu",
+            policy = "MultiInputPolicy",
+            features_extractor_class = CnnCombinedExtractor,
         )
     ]
     _run_experiments(
