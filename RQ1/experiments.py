@@ -38,12 +38,12 @@ from common.envs.rewards import DPRewardFunction
 from common.models.train_eval import (analyse_results, combine_finals,
                                       evaluate_dummy, evaluate_models,
                                       train_model)
-from common.scripts import parallel_apply
+from common.scripts import parallel_apply, lazy_singleton
 from RQ1.constants import (ACTION_HIGH, ACTION_LOW, CUD_COLORS, DUMMY_MODELS,
                            INITIAL_CAPITAL, MARKERS, N_ACTIONS,
                            RQ1_EXPERIMENTS_DIR, SAC_HYPERPARAMS, SEED,
                            SPLIT_RATIO, TRANSACTION_COST_PCT)
-from RQ1.scripts import get_n_flops, get_n_neurons, get_n_params, get_widths
+from RQ1.utils import get_n_params, get_widths, get_shapes
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor, FlattenExtractor
 
 
@@ -56,28 +56,40 @@ class CnnOnlyExtractor(BaseFeaturesExtractor):
 
     def __init__(self, observation_space: gym.spaces.Box, features_dim: int = 59):
         super().__init__(observation_space, features_dim)
-        # Input to Conv2d should be: (batch_size, 1, num_features, lookback_window)
-        # We add the channel dimension '1' before passing data to the network.
+        # Expected shapes (channels=1, features, time_steps)
+        assert len(observation_space.shape) == 3, f"unexpected observation_space shape {observation_space.shape}"
+        assert observation_space.shape[0] == 1, f"first dim (channel) should be of size 1, got {observation_space.shape}"
+
+        n_input_channels, n_features, seq_len = observation_space.shape
+
+        # Define CNN: first conv collapses feature dimension, then temporal conv
         self.cnn = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=(3, 3), stride=1, padding=1),
+            # Conv across all features and small temporal window
+            nn.Conv2d(n_input_channels, 32, kernel_size=(n_features, 3), stride=(1, 1), padding=(0, 1)),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=(1, 2), stride=(1, 2)),
-            nn.Conv2d(32, 64, kernel_size=(3, 3), stride=1, padding=1),
+            # Further temporal convolution
+            nn.Conv2d(32, 64, kernel_size=(1, 5), stride=(1, 1), padding=(0, 2)),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=(1, 2), stride=(1, 2)),
+            # Optional pooling to reduce temporal dimension
+            nn.MaxPool2d(kernel_size=(1, 2)),
             nn.Flatten(),
         )
 
-        # Compute the shape of the output of the CNN layers by doing one forward pass
+        # Compute output dimension of CNN
         with torch.no_grad():
-            sample_obs = torch.as_tensor(observation_space.sample()[None]).float()
-            n_flatten = self.cnn(sample_obs).shape[1]
+            sample = torch.zeros(1, n_input_channels, n_features, seq_len)
+            cnn_output = self.cnn(sample)
+        cnn_out_dim = cnn_output.shape[1]
 
-        self.linear = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
+        # Final linear layer to get desired features_dim
+        self.linear = nn.Sequential(
+            nn.Linear(cnn_out_dim, features_dim),
+            nn.ReLU(),
+        )
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        # Add the channel dimension for the Conv2d layers
-        return self.linear(self.cnn(observations))
+        # observations: (batch_size, 1, features, time_steps)
+        return self.linear(self.cnn(observations.float()))
 
 class CnnCombinedExtractor(BaseFeaturesExtractor):
     """
@@ -109,100 +121,6 @@ class CnnCombinedExtractor(BaseFeaturesExtractor):
             extractor(observations[key]) for key, extractor in self.extractors.items()
         ]
         return torch.cat(encoded_tensor_list, dim=1)
-
-def get_shapes(inp: int, out: int):
-    """
-    Given some network shapes, and constraints on these shapes, determines the division
-    of neurons across these layers such that the difference in number of parameters is minimized.
-    Works in polynomial time.
-    """
-
-    logging.info("Setting up valid configurations")
-
-    # Hard constraints:
-    # (1) No layer has an absurd size: level_low <= x, a, (a*b), c, (c*d), (c*d*d), e, (e*f), (e*f*f) <= level_high
-    # (2) The difference in shape is significant: 1.5 <= b, d, f <= 2.0
-
-    fac_range = np.linspace(1.5, 2.0, 100)
-    level_low = 32
-    level_high = 80
-
-    shape_layers_fn = {
-        "flat": lambda x: (int(x), int(x), int(x)),
-        "diamond": lambda a, b: (int(a), int(a*b), int(a)),
-        "inv_funnel": lambda c, d: (int(c), int(c*d), int(c*d*d)),
-        "funnel": lambda e, f: (int(e*f*f), int(e*f), int(e)),
-        "shallow": lambda g: (int(g), int(g)),
-    }
-
-    shape_configs = {
-        "flat": [(x,) for x in range(level_low, level_high + 1)],
-        "diamond": [(a, float(b)) for b in fac_range for a in range(level_low, int(level_high / b) + 1)],
-        "inv_funnel": [(c, float(d)) for d in fac_range for c in range(level_low, int(level_high / (d * d)) + 1)],
-        "funnel": [(e, float(f)) for f in fac_range for e in range(level_low, int(level_high / (f * f)) + 1)],
-        "shallow" : [(g,) for g in range(level_low, level_high + 1)]
-    }
-
-    logging.info("Sorting and caching shape info")
-
-    shapes = set(shape_configs.keys()) & set(shape_layers_fn.keys())
-
-    shape_arch_params_pairs = {}
-    for s in shapes:
-        layers_fn = shape_layers_fn[s]
-        configs = shape_configs[s]
-        archs = [layers_fn(*config) for config in configs]
-        arch_params_pairs = [(arch, get_n_params(inp, *arch, out)) for arch in archs]
-        shape_arch_params_pairs[s] = arch_params_pairs
-
-    for config_params in shape_arch_params_pairs.values():
-        config_params.sort(key=lambda x: x[1])
-
-    logging.info("Finding optimal solution")
-
-    # Loop over all configurations to find the minimal combination.
-    # We loop in order of minimal n_params, repeatedly taking the difference between the min and max.
-    # Every iteration we increment the index for the shape corresponding to min n_params.
-    # This either gives:
-    # (1) An equal or better min max diff (since the new value is in [old min, old max] and new min >= old min)
-    # (2) A different max (the new value is > old max), which could have a worse, better, or equal min max diff.
-    # We can exit when any value reaches the last element because that means the index that was incremented
-    # corresponded to the minimum, and incrementing any other will therefore cause the min max diff to increase.
-    shape_i = {s: 0 for s in shapes}
-    min_diff = float("inf")
-    solution = None
-
-    while all(shape_i[s] < len(shape_arch_params_pairs[s]) for s in shapes):
-
-        params = tuple(shape_arch_params_pairs[s][shape_i[s]][1] for s in shapes)
-        max_params = max(params)
-        min_params = min(params)
-        diff = max_params - min_params
-
-        if diff < min_diff:
-            min_diff = diff
-            solution = shape_i.copy()
-
-        for s in shapes:
-            i = shape_i[s]
-            arch_params_pairs = shape_arch_params_pairs[s]
-            arch, n_params = arch_params_pairs[i]
-            if n_params == min_params:
-                shape_i[s] = i + 1
-
-    assert solution is not None, "No solution could be found."
-
-    logging.info("Found optimal solution.")
-
-    result = {}
-    for shape, arch_params_pairs in shape_arch_params_pairs.items():
-        arch, n_params = arch_params_pairs[solution[shape]]
-        n_neurons = get_n_neurons(inp, *arch, out)
-        n_flops = get_n_flops(inp, *arch, out)
-        logging.info(f"{shape} {arch}: {n_params} params, {n_neurons} neurons, {n_flops} flops")
-        result[shape] = arch
-
-    return result
 
 def add_technical_analysis(df):
     """Default technical analysis features"""
@@ -245,6 +163,37 @@ def add_technical_analysis(df):
 
     history_lookback(df, lookback, ["bb_upper_20", "bb_lower_20", "chaikin_vol_10_10"])
 
+def add_cnn_features(df):
+    """Feature engineering for CNN input"""
+
+    ohlc_cols = ['open_bid', 'high_bid', 'low_bid', 'close_bid',
+                 'open_ask', 'high_ask', 'low_ask', 'close_ask']
+
+    # Remove date column
+    remove_columns(df, columns=["date_gmt"])
+
+    # Convert to log returns
+    for col in ohlc_cols:
+        ratio = np.array(df[col] / df[col].shift(1))
+        return_pct = ratio - 1 # within [-0.01, 0.01] for almost all data.
+        df[f'{col}_return'] = return_pct * 100 # scaled return
+        df[f'{col}_return'] = df[f'{col}_return'].fillna(0)
+
+    # Add volume normalization
+    as_robust_norm(df, column="volume", window=100)
+
+    # Add some technical indicators as raw features
+    df['hl_ratio'] = (df['high_bid'] - df['low_bid']) / df['close_bid']
+    df['oc_ratio'] = (df['open_bid'] - df['close_bid']) / df['close_bid']
+    df['spread'] = (df['close_ask'] - df['close_bid']) / df['close_bid']
+
+    # Remove original OHLC columns
+    remove_columns(df, columns=ohlc_cols)
+
+    return df
+
+
+@lazy_singleton
 def get_default_forex_data() -> ForexCandleData:
     return ForexCandleData.load(
         source="dukascopy",
@@ -254,6 +203,7 @@ def get_default_forex_data() -> ForexCandleData:
         end_time=datetime(2024, 12, 31, 21, 00, 0, 0),
     )
 
+@lazy_singleton
 def get_default_env_config() -> EnvConfig:
     return EnvConfig(
         initial_capital=INITIAL_CAPITAL,
@@ -261,6 +211,7 @@ def get_default_env_config() -> EnvConfig:
         reward_function=None
     )
 
+@lazy_singleton
 def get_default_action_config() -> ActionConfig:
     return ActionConfig(
         n=N_ACTIONS,
@@ -268,6 +219,7 @@ def get_default_action_config() -> ActionConfig:
         high=ACTION_HIGH
     )
 
+@lazy_singleton
 def get_default_data_configs() -> tuple[DataConfig, DataConfig]:
     fe = FeatureEngineer()
     fe.add(complex_24h)  # 2 features
@@ -285,6 +237,9 @@ def get_default_data_configs() -> tuple[DataConfig, DataConfig]:
     )
     return train_data_config, eval_data_config
 
+DEFAULT_INP = 32 # default input size
+DEFAULT_OUT = 1 # default output sizes
+
 @dataclass
 class ExperimentConfig:
 
@@ -301,9 +256,6 @@ class ExperimentConfig:
     action_config: ActionConfig = field(default_factory=get_default_action_config)
     train_data_config: Optional[DataConfig] = None
     eval_data_config: Optional[DataConfig] = None
-
-    inp: int = 32
-    out: int = 1
 
     # Model settings
     policy: str = "MlpPolicy"
@@ -361,7 +313,8 @@ def _run_experiment(experiment_group: str, config: ExperimentConfig, seed: int =
     logging.info(f"Running experiment {experiment_group} / {config.name}")
 
     # Set seeds, only important for training, evaluation is deterministic.
-    # The environments are entirely deterministic, no seeds need to be set.
+    # The ForexEnvs are entirely deterministic, taking the same sequence of actions,
+    # always leads to the same result.
     # Model seed is set upon model creation.
     np.random.seed(seed)
     random.seed(seed)
@@ -464,7 +417,7 @@ def run_shape_experiments():
     Determine the impact of network shapes on model performance.
     Number of parameters remains roughly equal.
     """
-    shapes = get_shapes(ExperimentConfig.inp, ExperimentConfig.out)
+    shapes = get_shapes(DEFAULT_INP, DEFAULT_OUT)
 
     experiments = [
         ExperimentConfig(name="shape_flat", net_shape=shapes["flat"], line_color=CUD_COLORS[0], line_marker="s"),
@@ -488,13 +441,13 @@ def run_division_experiments():
 
     # Slight bias
     n_layers = 2
-    total_params = get_n_params(ExperimentConfig.inp, *base_net, ExperimentConfig.out) * 2
-    w1, w2 = get_widths(ExperimentConfig.inp, ExperimentConfig.out, n_layers, total_params, 0.60)
+    total_params = get_n_params(DEFAULT_INP, *base_net, DEFAULT_OUT) * 2
+    w1, w2 = get_widths(DEFAULT_INP, DEFAULT_OUT, n_layers, total_params, 0.60)
     experiments.append(ExperimentConfig(name="moderate_actor_bias",actor_shape=[w1]*n_layers,critic_shape=[w2]*n_layers))
     experiments.append(ExperimentConfig(name="moderate_critic_bias",actor_shape=[w2]*n_layers,critic_shape=[w1]*n_layers))
 
     # Large bias
-    w1, w2 = get_widths(ExperimentConfig.inp, ExperimentConfig.out, n_layers, total_params, 0.75)
+    w1, w2 = get_widths(DEFAULT_INP, DEFAULT_OUT, n_layers, total_params, 0.75)
     experiments.append(ExperimentConfig(name="large_actor_bias",actor_shape=[w1]*n_layers,critic_shape=[w2]*n_layers))
     experiments.append(ExperimentConfig(name="large_critic_bias",actor_shape=[w2]*n_layers,critic_shape=[w1]*n_layers))
 
@@ -544,12 +497,7 @@ def run_cnn_experiments():
     vector_obs_config = ObsConfig(name='vector_input', fe=vector_fe, sfe=vector_sfe, window=1)
 
     cnn_fe = FeatureEngineer(remove_original_columns=False)
-    ohlc_cols = ['open_bid', 'high_bid', 'low_bid', 'close_bid', "open_ask", "high_ask", "low_ask", "close_ask"]
-    cnn_fe.add(remove_columns, columns=["date_gmt"])
-    for col in ohlc_cols: # convert to returns, and multiply by 100
-        cnn_fe.add(as_pct_change, column=col, periods=1)
-        cnn_fe.add(apply_column, fn=lambda x: x * 100, column=col)
-    cnn_fe.add(as_robust_norm, column="volume", window=500)
+    cnn_fe.add(add_cnn_features)
     cnn_obs_config = ObsConfig(name='cnn_input', fe=cnn_fe, sfe=None, window=48)
 
     train_data_config, eval_data_config = DataConfig.from_splits(
@@ -561,22 +509,22 @@ def run_cnn_experiments():
     # Run experiments
     experiments = [
         ExperimentConfig(
-            name="technical_analysis",
-            net_shape=[64, 64],
-            line_color=CUD_COLORS[0],
-            line_marker="o",
-            device="cpu",
-        ),
-        ExperimentConfig(
             name="cnn_features",
             net_shape=[64, 64],
             line_color=CUD_COLORS[1],
             line_marker="X",
             train_data_config=train_data_config,
             eval_data_config=eval_data_config,
-            device="cuda",
-            policy = "MultiInputPolicy",
-            features_extractor_class = CnnCombinedExtractor,
+            device="auto", # use cuda if available
+            policy="MultiInputPolicy",
+            features_extractor_class=CnnCombinedExtractor,
+        ),
+        ExperimentConfig(
+            name="technical_analysis",
+            net_shape=[64, 64],
+            line_color=CUD_COLORS[0],
+            line_marker="o",
+            device="cpu",
         )
     ]
     _run_experiments(
@@ -613,7 +561,7 @@ def run():
         experiment_fn = experiments_to_run[exp_id]
         experiment_fn()
     else:
-        print(f"Error: Unknown experiment ID {exp_id}")
+        logging.error(f"Error: Unknown experiment ID {exp_id}")
         parser.print_help()
         exit(1)
 

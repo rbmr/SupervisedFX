@@ -1,4 +1,3 @@
-import itertools
 from pathlib import Path
 
 from common.models.dummy_models import long_model, cash_model, short_model, dp_perfect_model, random_model
@@ -32,4 +31,3 @@ CUD_COLORS = ['#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', '#D55E00', 
 MARKERS = ["o", "v", "s", "*", "D", "P", "X"]
 
 SEED = 42
-SEEDS = itertools.count(SEED)
