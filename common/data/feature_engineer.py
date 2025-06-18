@@ -11,9 +11,7 @@ warnings.simplefilter(action="ignore", category=PerformanceWarning)
 
 class FeatureEngineer:
 
-    _UNSET = object()
-
-    def __init__(self, remove_original_columns = _UNSET):
+    def __init__(self, remove_original_columns = True):
         self._pipeline_steps: List[Callable[[pd.DataFrame], None]] = []
         self.remove_original_columns = remove_original_columns
 
@@ -24,14 +22,11 @@ class FeatureEngineer:
         self._pipeline_steps.append(partial(func, **kwargs))
         return self
     
-    def run(self, df: pd.DataFrame, remove_original_columns=True) -> pd.DataFrame:
+    def run(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Run the pipeline on the given DataFrame.
         Applies each of the steps in the pipeline to the dataframe in place.
         """
-        if self.remove_original_columns is not self._UNSET:
-            remove_original_columns = self.remove_original_columns
-
         df = df.copy(deep=True)  # Avoid modifying the original DataFrame
 
         original_columns = df.columns.tolist()
@@ -39,7 +34,7 @@ class FeatureEngineer:
         for func in self._pipeline_steps:
             func(df)
 
-        if remove_original_columns:
+        if self.remove_original_columns:
             df.drop(columns=original_columns, inplace=True, errors='ignore')
         
         return df
