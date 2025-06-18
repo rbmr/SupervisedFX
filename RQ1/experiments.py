@@ -419,7 +419,7 @@ def _run_experiment_wrapper(config_seed: tuple[ExperimentConfig, int], experimen
     config, seed = config_seed
     _run_experiment(experiment_group, config, seed)
 
-def _run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, num_workers=1, add_timestamp: bool=True):
+def _run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, num_workers=2, add_timestamp: bool=True):
     """
     Runs each of the experiments for a number of seeds.
     """
