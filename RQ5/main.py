@@ -14,11 +14,39 @@ from common.data.feature_engineer import FeatureEngineer, as_pct_change, ema, rs
 from common.constants import SEED
 from RQ5.constants import EXPERIMENTS_DIR, EXPERIMENT_NAME_FORMAT
 from common.envs.callbacks import *
-from common.models.train_eval import train_model
+from common.models.train_eval import evaluate_and_analyze_model, train_model, analyse_results, evaluate_models
 from common.models.utils import save_model_with_metadata
 from common.scripts import picker, has_nonempty_subdir, n_children
+from common.envs.dp import get_dp_table_from_env
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+PARAM_PRESETS = {
+    "M30_0.7": {
+        "granularity": Timeframe.M30,
+        "start_time": datetime(2020, 1, 1, 22),
+        "end_time": datetime(2024, 12, 31, 21, 30),
+        "split_ratio": 0.7
+    },
+    "M15_0.8": {
+        "granularity": Timeframe.M15,
+        "start_time": datetime(2017, 1, 1, 22),
+        "end_time": datetime(2024, 12, 31, 21, 45),
+        "split_ratio": 0.8
+    },
+    "M15_0.7": {
+        "granularity": Timeframe.M15,
+        "start_time": datetime(2017, 1, 1, 22),
+        "end_time": datetime(2024, 12, 31, 21, 45),
+        "split_ratio": 0.7
+    },
+    "M30_0.8": {
+        "granularity": Timeframe.M30,
+        "start_time": datetime(2020, 1, 1, 22),
+        "end_time": datetime(2024, 12, 31, 21, 30),
+        "split_ratio": 0.8
+    }
+}
 
 def get_feature_engineer():
     fe = FeatureEngineer()
@@ -44,14 +72,14 @@ def get_feature_engineer():
     fe.add(oscillator)
     return fe
 
-def get_environments():
+def get_environments(data_config, use_optimal_reward=False):
     logging.info("Loading market data...")
     data = ForexCandleData.load(
         source="dukascopy",
         instrument="EURUSD",
-        granularity=Timeframe.M15,
-        start_time=datetime(2022, 1, 2, 22),
-        end_time=datetime(2025, 5, 16, 20, 45),
+        granularity=data_config["granularity"],
+        start_time=data_config["start_time"],
+        end_time=data_config["end_time"],
     )
 
     logging.info("Creating feature pipelines...")
@@ -59,21 +87,55 @@ def get_environments():
     agent_fe = StepwiseFeatureEngineer()
     agent_fe.add(["current_exposure"], calculate_current_exposure)
 
-    logging.info("Building environments...")
-    return ForexEnv.create_split_envs(
-        split_pcts=[0.8,0.2],
-        forex_candle_data=data,
-        market_feature_engineer=market_fe,
-        agent_feature_engineer=agent_fe,
-        initial_capital=10000.0,
-        transaction_cost_pct=0.0,
-        n_actions=1,
-        custom_reward_function=log_equity_change
-    )
+    split_ratio = data_config.get("split_ratio", 0.8)
 
-def train(exploration_strategy: str):
-    train_env, _ = get_environments()
-    logging.info("Instantiating DQN model...")
+    logging.info("Building environments...")
+    if use_optimal_reward:
+        train_env, eval_env = ForexEnv.create_split_envs(
+            split_pcts=[split_ratio, 1.0 - split_ratio],
+            forex_candle_data=data,
+            market_feature_engineer=market_fe,
+            agent_feature_engineer=agent_fe,
+            initial_capital=10000.0,
+            transaction_cost_pct=0.0,
+            custom_reward_function=None
+        )
+
+        table = get_dp_table_from_env(train_env)
+        dp_reward = DPRewardFunction(table)
+
+        train_env.custom_reward_fn = dp_reward
+        return train_env, eval_env
+    else:
+        return ForexEnv.create_split_envs(
+            split_pcts=[split_ratio, 1.0 - split_ratio],
+            forex_candle_data=data,
+            market_feature_engineer=market_fe,
+            agent_feature_engineer=agent_fe,
+            initial_capital=10000.0,
+            transaction_cost_pct=0.0,
+            custom_reward_function=log_equity_change
+        )
+    
+def run_experiment(exploration_strategy: str, use_optimal_reward=False):
+    note = input("Enter a short note for this experiment: ").strip().replace(' ', '_')
+
+    print("Available data configs:", ', '.join(PARAM_PRESETS.keys()))
+    config_options = list(PARAM_PRESETS.keys())
+    config_key = picker([(key, key) for key in config_options], default="M15_0.8").strip()
+    config_key = config_key if config_key in PARAM_PRESETS else "M15_0.8"
+    data_config = PARAM_PRESETS[config_key]
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    exp_name = f"{exploration_strategy}_{note}_{config_key}_{timestamp}"
+    exp_dir = EXPERIMENTS_DIR / exp_name
+
+    train_episodes = input("Enter number of training episodes (default 25): ")
+    train_episodes = int(train_episodes) if train_episodes.isdigit() else 25
+
+    # Train
+    train_env, eval_env = get_environments(data_config, use_optimal_reward=use_optimal_reward)
+    logging.info(f"Instantiating {exploration_strategy.upper()} model...")
 
     dqn_args = dict(
         policy="MlpPolicy",
@@ -92,72 +154,107 @@ def train(exploration_strategy: str):
     )
 
     if exploration_strategy == "epsilon_greedy":
-        from stable_baselines3 import DQN
+        eps_init = input("Epsilon initial (default 1.0): ")
+        eps_final = input("Epsilon final (default 0.05): ")
+        exploration_fraction = input("Exploration fraction (default 0.8): ")
+
         dqn_args.update({
-            "exploration_initial_eps": 1.0,
-            "exploration_final_eps": 0.05,
-            "exploration_fraction": 0.8
+            "exploration_initial_eps": float(eps_init) if eps_init else 1.0,
+            "exploration_final_eps": float(eps_final) if eps_final else 0.05,
+            "exploration_fraction": float(exploration_fraction) if exploration_fraction else 0.8
         })
+        from stable_baselines3 import DQN
         model = DQN(**dqn_args)
 
     elif exploration_strategy == "boltzmann":
-        from RQ5.boltzmann_dqn import BoltzmannDQN 
-        model = BoltzmannDQN(**dqn_args, temperature=1.0)
+        temperature = input("Temperature (default 1.0): ")
+        from RQ5.boltzmann_dqn import BoltzmannDQN
+        model = BoltzmannDQN(**dqn_args, temperature=float(temperature) if temperature else 1.0)
+
     elif exploration_strategy == "max_boltzmann":
+        temperature = input("Temperature (default 1.0): ")
+        epsilon = input("Epsilon (default 0.1): ")
         from RQ5.boltzmann_dqn import MaxBoltzmannDQN
-        model = MaxBoltzmannDQN(**dqn_args, epsilon=0.1, temperature=1.0)
+        model = MaxBoltzmannDQN(
+            **dqn_args,
+            temperature=float(temperature) if temperature else 1.0,
+            epsilon=float(epsilon) if epsilon else 0.1
+        )
+    elif exploration_strategy == "curiosity":
+        from RQ5.curiosity import CuriosityModule
+        from stable_baselines3 import DQN
+        from common.models.train_eval import train_model_with_curiosity
+
+        curiosity_beta = input("Curiosity beta (intrinsic reward scaling, default 0.2): ")
+        curiosity_beta = float(curiosity_beta) if curiosity_beta else 0.2
+
+        dqn_args.update({
+            "exploration_initial_eps": 0.1,
+            "exploration_final_eps": 0.01,
+            "exploration_fraction": 0.8
+        })
+
+        model = DQN(**dqn_args)
+
+        curiosity_module = CuriosityModule(
+            state_dim=train_env.observation_space.shape[0],
+            action_dim=train_env.action_space.n,
+            hidden_dim=128,
+            lr=1e-4
+        )
+
+        models_dir = exp_dir / "models"
+        models_dir.mkdir(parents=True, exist_ok=True)
+
+        callback = [
+            SaveCallback(models_dir, save_freq=train_env.episode_len),
+            ActionHistogramCallback(train_env, log_freq=train_env.episode_len),
+            SneakyLogger(verbose=0)  # reduce logging to avoid slowdowns
+        ]
+
+        logging.info("Starting curiosity-driven training...")
+        train_model_with_curiosity(
+            model=model,
+            curiosity_module=curiosity_module,
+            train_env=train_env,
+            train_episodes=train_episodes,
+            beta=curiosity_beta,
+            model_save_path=models_dir,
+            callback=callback
+        )
+
+        save_model_with_metadata(model, models_dir / "model_final.zip")
+
+    elif exploration_strategy == "noisy":
+        from RQ5.noisy_dqn import NoisyDQN
+        model = NoisyDQN(**dqn_args)
 
     else:
         raise ValueError(f"Unknown exploration strategy: {exploration_strategy}")
 
-    exp_name = f"{datetime.now().strftime(EXPERIMENT_NAME_FORMAT)}_{exploration_strategy}"
-    exp_dir = EXPERIMENTS_DIR / exp_name
-    models_dir = exp_dir / "models"
-    models_dir.mkdir(parents=True, exist_ok=True)
+        
+    # Only train again if strategy is not curiosity (already trained above)
+    if exploration_strategy != "curiosity":
+        models_dir = exp_dir / "models"
+        models_dir.mkdir(parents=True, exist_ok=True)
 
-    callback = [SaveCallback(models_dir, save_freq=train_env.episode_len),
+        callback = [
+            SaveCallback(models_dir, save_freq=train_env.episode_len),
             ActionHistogramCallback(train_env, log_freq=train_env.episode_len),
-            SneakyLogger(verbose=1)]
+            SneakyLogger(verbose=1)
+        ]
 
-    logging.info("Training...")
-    train_model(model, train_env, train_episodes=20, callback=callback)
-    save_model_with_metadata(model, models_dir / "model_final.zip")
+        logging.info("Starting training...")
+        train_model(model, train_env, train_episodes=train_episodes, callback=callback)
+        save_model_with_metadata(model, models_dir / "model_final.zip")
 
-def evaluate(experiments_dir, limit=10):
-    from common.models.train_eval import evaluate_models
-
-    dirs = sorted([
-        f for f in experiments_dir.iterdir() if has_nonempty_subdir(f, "models")
-    ], key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
-
-    exp_dir = picker([(f"{f.name} ({n_children(f / 'models')})", f) for f in dirs])
-    models_dir = exp_dir / "models"
-    results_dir = exp_dir / "results"
-    results_dir.mkdir(parents=True, exist_ok=True)
-
-    train_env, eval_env = get_environments()
-    evaluate_models(models_dir, results_dir, {"train": train_env, "eval": eval_env}, eval_episodes=1)
-
-def analyze(experiments_dir, limit=10):
-    from common.models.train_eval import analyse_results
-
-    dirs = sorted([
-        f for f in experiments_dir.iterdir() if has_nonempty_subdir(f, "results")
-    ], key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
-
-    exp_dir = picker([(f"{f.name} ({n_children(f / 'results')})", f) for f in dirs])
-    analyse_results(exp_dir / "results")
+    # Evaluate and analyze model (always done regardless of strategy)
+    logging.info("Evaluating and Analyzing results...")
+    evaluate_and_analyze_model(exp_dir, train_env, eval_env)
 
 if __name__ == "__main__":
-    import sys
-    import os
+    strategies = ["epsilon_greedy", "boltzmann", "max_boltzmann", "curiosity", "noisy"]
+    options = [(f"run_{s}", lambda s=s: run_experiment(s)) for s in strategies]
+    options += [("run_optimal", lambda: run_experiment("optimal_reward", use_optimal_reward=True))]
 
-    # Add the root directory to sys.path
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-    strategies = ["epsilon_greedy", "boltzmann", "max_boltzmann"]
-    options = [(f"train_{s}", lambda s=s: train(s)) for s in strategies]
-    options += [
-        ("eval", lambda: evaluate(EXPERIMENTS_DIR)),
-        ("analyze", lambda: analyze(EXPERIMENTS_DIR)),
-    ]
     picker(options, default=None)()
