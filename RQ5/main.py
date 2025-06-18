@@ -91,8 +91,8 @@ def get_environments(data_config, use_optimal_reward=False):
 
     logging.info("Building environments...")
     if use_optimal_reward:
-        train_env, eval_env = ForexEnv.create_train_eval_envs(
-            split_ratio=split_ratio,
+        train_env, eval_env = ForexEnv.create_split_envs(
+            split_pcts=[split_ratio, 1.0 - split_ratio],
             forex_candle_data=data,
             market_feature_engineer=market_fe,
             agent_feature_engineer=agent_fe,
@@ -100,14 +100,15 @@ def get_environments(data_config, use_optimal_reward=False):
             transaction_cost_pct=0.0,
             custom_reward_function=None
         )
+
         table = get_dp_table_from_env(train_env)
         dp_reward = DPRewardFunction(table)
 
         train_env.custom_reward_fn = dp_reward
         return train_env, eval_env
     else:
-        return ForexEnv.create_train_eval_envs(
-            split_ratio=split_ratio,
+        return ForexEnv.create_split_envs(
+            split_pcts=[split_ratio, 1.0 - split_ratio],
             forex_candle_data=data,
             market_feature_engineer=market_fe,
             agent_feature_engineer=agent_fe,
