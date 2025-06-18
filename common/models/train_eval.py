@@ -445,6 +445,7 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
     Combines the results of an experiment group.
     - Generates combined plots for each metric and environment with meaningful x-axes.
     - Generates a graphical summary table for each individual model run.
+    <experiment_group>/<experiment_name>/[seed_<seed>/]results/<model_name>/<environment_name>/info.json
     """
     if style_map is None:
         style_map = {}
@@ -464,7 +465,7 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
             else:
                 seed = None
                 rel = parts
-            assert len(rel) == 4 and rel[0] == "results"
+            assert len(rel) == 4 and rel[0] == "results", f"unexpected paths {info_path}"
             env_name = rel[-2]
             model_name = info_path.parent.parent.name
             model_key = extract_key(info_path) # model_key is the (bool, int) tuple
