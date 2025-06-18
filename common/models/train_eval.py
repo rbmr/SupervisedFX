@@ -262,33 +262,6 @@ def evaluate_model(model_zip: Path,
                   deterministic=True,
                   progress_bar=progress_bar)
 
-class ModelQueue:
-    def __init__(self, models_dir: Path, seen, lock: Lock): # type: ignore
-        if not models_dir.is_dir():
-            raise ValueError(f"{models_dir} is not a directory")
-        self.models_dir = models_dir
-        self.seen = seen # Shared list
-        self.lock = lock # Shared lock
-
-    def get(self) -> Path | None:
-        with self.lock:
-            models = sorted(self.models_dir.glob("*.zip"), key=lambda p: p.stat().st_mtime)
-            for model_zip in models:
-                if not model_zip.is_file():
-                    continue
-                if model_zip in self.seen:
-                    continue
-                self.seen.append(model_zip)
-                return model_zip
-        return None
-
-def evaluate_worker(queue: ModelQueue, func: Callable):
-    while True:
-        model_path = queue.get()
-        if model_path is None:
-            break
-        func(model_path)
-
 def evaluate_models(models_dir: Path,
                     results_dir: Path,
                     eval_envs: dict[str, ForexEnv],
