@@ -478,7 +478,7 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
     if style_map is None:
         style_map = {}
 
-    # Data capture remains the same, as the model_key already contains the numerical value
+    # Data capture
     results: Dict[str, Dict[str, Dict[str, Dict[Optional[int], List[Tuple[Tuple[bool, int], float, str]]]]]] = {}
     experiment_names = set()
     for exp_dir in experiment_group.iterdir():
@@ -506,14 +506,13 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
                 seed_list = exp_dict.setdefault(seed, [])
                 seed_list.append((model_key, val, model_name))
 
-    # Color generation logic remains the same
+    # Color generation logic
     sorted_experiment_names = sorted(list(experiment_names))
     experiments_to_color = [
         exp_name for exp_name in sorted_experiment_names
         if exp_name not in style_map or 'color' not in style_map.get(exp_name, {})
     ]
     if experiments_to_color:
-        # ... (color generation logic is unchanged) ...
         num_experiments_to_color = len(experiments_to_color)
         if num_experiments_to_color <= 10: cmap = plt.cm.get_cmap('tab10')
         elif num_experiments_to_color <= 20: cmap = plt.cm.get_cmap('tab20')
@@ -525,8 +524,7 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
             if exp_name not in style_map: style_map[exp_name] = {}
             style_map[exp_name]['color'] = colors[i]
 
-    # --- CHANGE 1: Capture X-Values During Data Processing ---
-    # We now create model_x_values alongside the other dictionaries
+    # --- Capture X-Values During Data Processing ---
     processed: Dict[str, Dict[str, List[float]]] = {}
     model_identifiers: Dict[str, Dict[str, List[str]]] = {}
     model_x_values: Dict[str, Dict[str, List[int]]] = {} # New dictionary to hold x-axis values
@@ -565,7 +563,7 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
     combined_dir.mkdir(exist_ok=True)
 
     for env, metrics_data in processed.items():
-        # Table generation logic is unchanged
+        # Table generation logic
         base_metrics = sorted(list(set(k.split('.')[0] for k in metrics_data)))
         if model_identifiers.get(env):
             for exp_name in sorted(model_identifiers.get(env, {}).keys()):
@@ -573,7 +571,6 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
                 output_dir_exp = combined_dir / env / exp_name
                 output_dir_exp.mkdir(parents=True, exist_ok=True)
                 for i, run_name in enumerate(run_identifiers):
-                    # ... (table generation logic is unchanged) ...
                     table_data = []
                     for metric in base_metrics:
                         mean_val = metrics_data.get(f"{metric}.mean.{exp_name}", [])[i]
@@ -590,7 +587,6 @@ def combine_finals(experiment_group: Path, style_map: Optional[dict[str, dict[st
                     plt.close(fig)
             logging.info(f"Generated analysis tables for environment '{env}'")
 
-        # --- CHANGE 2 & 3: Modify Plotting Logic ---
         env_plot_dir = combined_dir / env
         for base in base_metrics:
             fig, ax = plt.subplots(figsize=(12, 6))
