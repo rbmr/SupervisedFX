@@ -26,9 +26,9 @@ DATA_HASH_LENGTH = 16
 @dataclass(frozen=True)
 class DPTable:
 
-    value_table: NDArray[np.float32] # shape: (n_timesteps, n_exposures)
+    value_table: NDArray[np.float64] # shape: (n_timesteps, n_exposures)
     policy_table: NDArray[np.uint8] # shape: (n_timesteps, n_exposures)
-    q_min_table: NDArray[np.float32] # shape: (n_timesteps, n_exposures)
+    q_min_table: NDArray[np.float64] # shape: (n_timesteps, n_exposures)
     n_actions: int
     n_exposures: int
     n_timesteps: int
@@ -84,7 +84,7 @@ def get_bins(n: int) -> np.ndarray:
     """
     n -> {-1, -1 + 2/n, ..., 1}
     """
-    return np.linspace(-1.0, 1.0, n, dtype=np.float32)
+    return np.linspace(-1.0, 1.0, n, dtype=np.float64)
 
 def get_bin_idx(x: float, n: int) -> int:
     """
@@ -142,9 +142,9 @@ def compute_dp_table(market_data: np.ndarray,
     logging.info(f"Generating {get_dp_table_name(data_hash, transaction_cost_pct, n_actions, n_exposures)}")
 
     # Initialize tables
-    value_table = np.empty((n_timesteps, n_exposures), dtype=np.float32)
+    value_table = np.empty((n_timesteps, n_exposures), dtype=np.float64)
     policy_table = np.empty((n_timesteps, n_exposures), dtype=np.uint8)
-    q_min_table = np.empty((n_timesteps, n_exposures), dtype=np.float32)
+    q_min_table = np.empty((n_timesteps, n_exposures), dtype=np.float64)
 
     # Set terminals
     value_table[-1, :] = 0
