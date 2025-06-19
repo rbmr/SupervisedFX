@@ -373,10 +373,11 @@ def _run_experiment_wrapper(config_seed: tuple[ExperimentConfig, int], experimen
     config, seed = config_seed
     _run_experiment(experiment_group, config, seed)
 
-def _run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, num_workers=1, add_timestamp: bool=True):
+def _run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, num_workers=3, add_timestamp: bool=True):
     """
     Runs each of the experiments for a number of seeds.
     """
+    logging.info(f"Running {experiment_group}, with {len(experiments)} experiments, for {n_seeds} seeds.")
     if add_timestamp:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         experiment_group = f"{timestamp}_{experiment_group}"
@@ -391,8 +392,6 @@ def run_baselines():
     """
     Runs the baseline models on the train and eval environments. Used as reference.
     """
-    logging.info("Running baseline experiments...")
-
     train_data_config, eval_data_config = get_default_data_configs()
     action_config = get_default_action_config()
     env_config = get_default_env_config()
@@ -419,8 +418,6 @@ def run_shape_experiments():
     Determine the impact of network shapes on model performance.
     Number of parameters remains roughly equal.
     """
-    logging.info("Running network shape experiments...")
-
     shapes = get_shapes(DEFAULT_INP, DEFAULT_OUT, level_low=16, level_high=64)
 
     experiments = [
@@ -438,8 +435,6 @@ def run_division_experiments():
     Determine the impact of dividing parameters over the actor and the critic networks.
     Number of parameters remains roughly equal.
     """
-    logging.info("Running network division experiments...")
-
     # No bias
     base_net = [32, 32]
     experiments = [ExperimentConfig(name="no_bias", net_shape=base_net, line_color=CUD_COLORS[0], line_marker="o"),]
@@ -456,15 +451,13 @@ def run_division_experiments():
     experiments.append(ExperimentConfig(name="large_actor_bias",actor_shape=[w1]*n_layers,critic_shape=[w2]*n_layers, line_color=CUD_COLORS[3], line_marker=">"))
     experiments.append(ExperimentConfig(name="large_critic_bias",actor_shape=[w2]*n_layers,critic_shape=[w1]*n_layers, line_color=CUD_COLORS[4], line_marker="<"))
 
-    _run_experiments(experiment_group="20250618-151433_network_division", experiments=experiments, n_seeds=5, add_timestamp=False)
+    _run_experiments(experiment_group="network_division", experiments=experiments, n_seeds=5)
 
 def run_size_experiments():
     """
     Determine the impact of network size on model performance.
     We modify two aspects: Model depth (number of layers), and Model width (number of neurons per layer).
     """
-    logging.info("Running network size experiments...")
-
     for depth_name, depth in zip(["shallow", "moderate", "deep", "very_deep"], [1, 2, 3, 4]):
         experiments = [
             ExperimentConfig(name=f"{depth_name}-{width_name}", net_shape=[width] * depth, line_marker=marker, line_color=color)
@@ -489,7 +482,7 @@ def run_activation_experiments():
             activation_fn=activation_fn,
         ))
 
-    _run_experiments(experiment_group=f"activation_functions", experiments=experiments, n_seeds=5)
+    _run_experiments(experiment_group=f"activation_functions", experiments=experiments, n_seeds=3)
 
 def run_cnn_experiments():
     """
@@ -568,41 +561,27 @@ def run_decay_experiments():
         n_seeds=1,
     )
 
-def run_single():
-    """
-    Runs a single handpicked experiment, used for testing.
-    """
-    experiments = [
-        ExperimentConfig(
-            name=f"decay_{1e-5}",
-            net_shape=[32, 32],
-            line_color=CUD_COLORS[0],
-            line_marker=MARKERS[0],
-            device="cpu",
-            optimizer_class=torch.optim.Adam,
-            optimizer_kwargs=dict(weight_decay=1e-5),
-        )
-    ]
-    _run_experiments(
-        experiment_group="weight_decay",
-        experiments=experiments,
-        n_seeds=1,
-    )
-
 def run():
     """
     Parses command-line arguments and executes the chosen experiment(s).
     """
-    experiments_to_run = {
-        0: run_single,
-        1: run_shape_experiments,
-        2: run_size_experiments,
-        3: run_activation_experiments,
-        4: run_baselines,
-        5: run_division_experiments,
-        6: run_cnn_experiments,
-        7: run_decay_experiments
-    }
+
+    experiments = [
+        run_baselines,
+        run_decay_experiments,
+        run_size_experiments,
+        run_shape_experiments,
+        run_activation_experiments,
+        run_division_experiments,
+        run_cnn_experiments,
+    ]
+
+    def run_all():
+        for f in experiments:
+            f()
+
+    experiments_to_run = {i+1: f for i, f in enumerate(experiments)}
+    experiments_to_run[0] = run_all
 
     help_str = "\n".join(f"{exp_id}: {fn.__name__}" for exp_id, fn in experiments_to_run.items())
 
