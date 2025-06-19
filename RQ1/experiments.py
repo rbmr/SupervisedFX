@@ -428,7 +428,7 @@ def run_shape_experiments():
     Determine the impact of network shapes on model performance.
     Number of parameters remains roughly equal.
     """
-    shapes = get_shapes(DEFAULT_INP, DEFAULT_OUT, level_low=16, level_high=64)
+    shapes = get_shapes(DEFAULT_INP, DEFAULT_OUT, level_low=16, level_high=48)
 
     experiments = [
         ExperimentConfig(name="shape_flat", net_shape=shapes["flat"], line_color=CUD_COLORS[0], line_marker="s"),
