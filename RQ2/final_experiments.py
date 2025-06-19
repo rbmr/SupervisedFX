@@ -167,7 +167,7 @@ def S1_AG_ALL() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
 # --------------------------- #
 
 def S1_COMBO_COMBO() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
-    factory = RQ2FeatureEngineerFactory.create_core_factory()
+    factory = RQ2FeatureEngineerFactory.create_core_factory(time=False, trend=False, momentum=False, volatility=False, agent=False)
     factory.add_lin_24h().add_sin_24h().add_cos_24h() \
            .add_parabolic_sar().add_vwap() \
            .add_macd().add_mfi() \
@@ -176,7 +176,7 @@ def S1_COMBO_COMBO() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
     return factory.give_me_them_engineers()
 
 def S1_COMBO_ALL() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
-    factory = RQ2FeatureEngineerFactory.create_core_factory()
+    factory = RQ2FeatureEngineerFactory.create_core_factory(time=False, trend=False, momentum=False, volatility=False, agent=False)
     factory.add_lin_24h().add_lin_7d().add_sin_24h().add_cos_24h().add_sin_7d().add_cos_7d() \
            .add_parabolic_sar().add_vwap().add_kama() \
            .add_macd().add_mfi().add_cci() \
@@ -187,4 +187,112 @@ def S1_COMBO_ALL() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
 # ########################
 # # -- Sub-Question 2 -- #
 # ########################
+
+
+def _S2_small_factory(lookback: int):
+    factory = RQ2FeatureEngineerFactory.create_core_factory(looky_backy=lookback)
+    return factory
+
+def _S2_medium_factory(lookback: int):
+    factory = RQ2FeatureEngineerFactory.create_core_factory(looky_backy=lookback, time=False, trend=False, momentum=False, volatility=False, agent=False)
+    factory.add_lin_24h().add_sin_24h().add_cos_24h() \
+           .add_parabolic_sar().add_vwap() \
+           .add_macd().add_mfi() \
+           .add_bollinger_bands().add_eom() \
+           .add_current_exposure().add_duration_of_current_trade()
+    return factory
+
+def _S2_large_factory(lookback: int):
+    factory = RQ2FeatureEngineerFactory.create_core_factory(looky_backy=lookback, time=False, trend=False, momentum=False, volatility=False, agent=False)
+    factory.add_lin_24h().add_lin_7d().add_sin_24h().add_cos_24h().add_sin_7d().add_cos_7d() \
+           .add_parabolic_sar().add_vwap().add_kama() \
+           .add_macd().add_mfi().add_cci() \
+           .add_bollinger_bands().add_eom().add_atr() \
+           .add_current_exposure().add_duration_of_current_trade()
+    return factory
+
+def S2_SMALL_0() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_small_factory(0)
+    return factory.give_me_them_engineers()
+
+def S2_SMALL_1() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_small_factory(1)
+    return factory.give_me_them_engineers()
+
+def S2_SMALL_2() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_small_factory(2)
+    return factory.give_me_them_engineers()
+
+def S2_SMALL_4() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_small_factory(4)
+    return factory.give_me_them_engineers()
+
+def S2_SMALL_8() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_small_factory(8)
+    return factory.give_me_them_engineers()
+
+def S2_SMALL_16() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_small_factory(16)
+    return factory.give_me_them_engineers()
+
+def S2_SMALL_32() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_small_factory(32)
+    return factory.give_me_them_engineers()
+
+def S2_MEDIUM_0() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_medium_factory(0)
+    return factory.give_me_them_engineers()
+
+def S2_MEDIUM_1() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_medium_factory(1)
+    return factory.give_me_them_engineers()
+
+def S2_MEDIUM_2() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_medium_factory(2)
+    return factory.give_me_them_engineers()
+
+def S2_MEDIUM_4() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_medium_factory(4)
+    return factory.give_me_them_engineers()
+
+def S2_MEDIUM_8() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_medium_factory(8)
+    return factory.give_me_them_engineers()
+
+def S2_MEDIUM_16() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_medium_factory(16)
+    return factory.give_me_them_engineers()
+
+def S2_MEDIUM_32() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_medium_factory(32)
+    return factory.give_me_them_engineers()
+
+def S2_LARGE_0() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_large_factory(0)
+    return factory.give_me_them_engineers()
+
+def S2_LARGE_1() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_large_factory(1)
+    return factory.give_me_them_engineers()
+
+def S2_LARGE_2() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_large_factory(2)
+    return factory.give_me_them_engineers()
+
+def S2_LARGE_4() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_large_factory(4)
+    return factory.give_me_them_engineers()
+
+def S2_LARGE_8() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_large_factory(8)
+    return factory.give_me_them_engineers()
+
+def S2_LARGE_16() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_large_factory(16)
+    return factory.give_me_them_engineers()
+
+def S2_LARGE_32() -> tuple[FeatureEngineer, StepwiseFeatureEngineer]:
+    factory = _S2_large_factory(32)
+    return factory.give_me_them_engineers()
+
 

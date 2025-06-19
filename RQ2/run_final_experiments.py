@@ -1,4 +1,5 @@
 import logging
+import operator
 
 import torch.optim as optim
 from stable_baselines3 import DQN
@@ -26,8 +27,8 @@ def get_data():
         source="dukascopy",
         instrument="EURUSD",
         granularity=Timeframe.H1,
-        start_time=RQ2_HYPERPARAMETERS_START_DATE,
-        end_time= RQ2_HYPERPARAMETERS_END_DATE_1H,
+        start_time=RQ2_EXPERIMENTS_START_DATE,
+        end_time=RQ2_EXPERIMENTS_END_DATE,
     )
 
 def get_model(forex_env: ForexEnv, seed: int) -> DQN:
@@ -94,13 +95,49 @@ def get_s1_experiment_functions() -> Dict[str, List[Callable]]:
         ]
     }
 
+def get_s2_experiment_functions() -> Dict[str, List[Callable]]:
+    return {
+        "SMALL": [
+            S2_SMALL_0,
+            S2_SMALL_1,
+            S2_SMALL_2,
+            S2_SMALL_4,
+            S2_SMALL_8,
+            S2_SMALL_16,
+            S2_SMALL_32,
+        ],
+        "MEDIUM": [
+            S2_MEDIUM_0,
+            S2_MEDIUM_1,
+            S2_MEDIUM_2,
+            S2_MEDIUM_4,
+            S2_MEDIUM_8,
+            S2_MEDIUM_16,
+            S2_MEDIUM_32,
+        ],
+        "LARGE": [
+            S2_LARGE_0,
+            S2_LARGE_1,
+            S2_LARGE_2,
+            S2_LARGE_4,
+            S2_LARGE_8,
+            S2_LARGE_16,
+            S2_LARGE_32,
+        ],
+    }
 
-def main(experiment_type: str = "Combinatory"):
+def get_all_experiments_functions() -> Dict[str, List[Callable]]:
+    return {
+        "S1": get_s1_experiment_functions(),
+        "S2": get_s2_experiment_functions()
+    }
+
+def main(experiment_group: str, experiment_type: str):
     
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     
-    group_name = "FE_S1_" + experiment_type
-    experiments: List[Callable[[], tuple[FeatureEngineer, StepwiseFeatureEngineer]]] = get_s1_experiment_functions()[experiment_type]
+    group_name = f"[FE_{experiment_group}_{experiment_type}]"
+    experiments: List[Callable[[], tuple[FeatureEngineer, StepwiseFeatureEngineer]]] = get_all_experiments_functions()[experiment_group][experiment_type]
 
     blueprints = []
     for experiment in experiments:
@@ -121,19 +158,79 @@ def main(experiment_type: str = "Combinatory"):
                     num_workers=1)
 
 
+
+
+def create_workload_partitions(num_parts: int) -> list[list[tuple[str, str]]]:
+    """
+    Analyzes all experiments and divides them into balanced partitions.
+    
+    Returns:
+        A list of partitions, where each partition is a list of (experiment_group, experiment_type) tuples.
+    """
+    all_experiments = get_all_experiments_functions()
+    
+    # 1. Create a flat list of all work items with their size (number of experiments)
+    work_items = []
+    for group, types in all_experiments.items():
+        for type_name, experiments in types.items():
+            work_items.append({
+                "group": group,
+                "type": type_name,
+                "workload": len(experiments)
+            })
+
+    # 2. Sort work items by workload, descending. This helps balance the partitions.
+    work_items.sort(key=operator.itemgetter("workload"), reverse=True)
+    
+    # 3. Distribute work items into partitions using a greedy algorithm
+    partitions = [[] for _ in range(num_parts)]
+    partition_loads = [0] * num_parts
+    
+    for item in work_items:
+        # Find the partition with the minimum current load
+        min_load_idx = partition_loads.index(min(partition_loads))
+        
+        # Add the work item to that partition
+        partitions[min_load_idx].append((item["group"], item["type"]))
+        
+        # Update the load of that partition
+        partition_loads[min_load_idx] += item["workload"]
+        
+    return partitions, partition_loads
+
+
 if __name__ == '__main__':
-    # let the user choose the experiment type with input
-    options = get_s1_experiment_functions().keys()
-    print("Available experiment types:")
-    for i, option in enumerate(options):
-        print(f"{i + 1}: {option}")
-    choice = input("Choose an experiment type (number): ")
-    try:
-        choice_index = int(choice) - 1
-        if 0 <= choice_index < len(options):
-            selected_experiment_type = list(options)[choice_index]
-            main(selected_experiment_type)
-        else:
-            print("Invalid choice. Please select a valid option.")
-    except ValueError:
-        print("Invalid input. Please enter a number corresponding to the options.")
+    NUM_WORKLOADS = 4
+    partitions, loads = create_workload_partitions(NUM_WORKLOADS)
+
+    print("The total workload has been divided into the following parts:")
+    print("-" * 50)
+    for i, (part, load) in enumerate(zip(partitions, loads)):
+        print(f"Part {i + 1} (Total Experiments: {load}):")
+        for group, type_name in part:
+            print(f"  - Group: '{group}', Type: '{type_name}'")
+        print()
+    print("-" * 50)
+
+    # 4. Let the user choose which partition to run
+    choice = 0
+    while choice not in range(1, NUM_WORKLOADS + 1):
+        try:
+            raw_choice = input(f"Choose a workload part to run (1-{NUM_WORKLOADS}): ")
+            choice = int(raw_choice)
+            if choice not in range(1, NUM_WORKLOADS + 1):
+                print("Invalid input. Please enter a number shown above.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+
+    selected_partition_idx = choice - 1
+    partition_to_run = partitions[selected_partition_idx]
+    
+    print(f"\nExecuting workload Part {choice}...")
+    print("-" * 50)
+    
+    # 5. Run main() for each experiment type in the chosen partition
+    for experiment_group, experiment_type in partition_to_run:
+        main(experiment_group, experiment_type)
+        
+    print(f"\nAll experiments in Part {choice} have been completed.")
