@@ -359,7 +359,7 @@ def _run_experiment(experiment_group: str, config: ExperimentConfig, seed: int =
         # SaveCallback creates models_dir upon first model save.
         callback = [SaveCallback(models_dir, save_freq=train_env.episode_len),
                     ActionHistogramCallback(train_env, log_freq=train_env.episode_len)]
-        train_model(model, train_env, train_episodes=80, callback=callback)
+        train_model(model, train_env, train_episodes=50, callback=callback)
 
     # Evaluate models
 
