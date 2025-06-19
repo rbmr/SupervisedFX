@@ -437,21 +437,21 @@ def run_division_experiments():
 
     # No bias
     base_net = [64, 64]
-    experiments = [ExperimentConfig(name="no_bias", net_shape=base_net)]
+    experiments = [ExperimentConfig(name="no_bias", net_shape=base_net, line_color=CUD_COLORS[0], line_marker="o"),]
 
     # Slight bias
     n_layers = 2
     total_params = get_n_params(DEFAULT_INP, *base_net, DEFAULT_OUT) * 2
     w1, w2 = get_widths(DEFAULT_INP, DEFAULT_OUT, n_layers, total_params, 0.60)
-    experiments.append(ExperimentConfig(name="moderate_actor_bias",actor_shape=[w1]*n_layers,critic_shape=[w2]*n_layers))
-    experiments.append(ExperimentConfig(name="moderate_critic_bias",actor_shape=[w2]*n_layers,critic_shape=[w1]*n_layers))
+    experiments.append(ExperimentConfig(name="moderate_actor_bias",actor_shape=[w1]*n_layers,critic_shape=[w2]*n_layers, line_color=CUD_COLORS[1], line_marker="s"))
+    experiments.append(ExperimentConfig(name="moderate_critic_bias",actor_shape=[w2]*n_layers,critic_shape=[w1]*n_layers, line_color=CUD_COLORS[2], line_marker="D"))
 
     # Large bias
     w1, w2 = get_widths(DEFAULT_INP, DEFAULT_OUT, n_layers, total_params, 0.75)
-    experiments.append(ExperimentConfig(name="large_actor_bias",actor_shape=[w1]*n_layers,critic_shape=[w2]*n_layers))
-    experiments.append(ExperimentConfig(name="large_critic_bias",actor_shape=[w2]*n_layers,critic_shape=[w1]*n_layers))
+    experiments.append(ExperimentConfig(name="large_actor_bias",actor_shape=[w1]*n_layers,critic_shape=[w2]*n_layers, line_color=CUD_COLORS[3], line_marker=">"))
+    experiments.append(ExperimentConfig(name="large_critic_bias",actor_shape=[w2]*n_layers,critic_shape=[w1]*n_layers, line_color=CUD_COLORS[4], line_marker="<"))
 
-    _run_experiments(experiment_group="network_division", experiments=experiments, n_seeds=5)
+    _run_experiments(experiment_group="20250618-151433_network_division", experiments=experiments, n_seeds=5, add_timestamp=False)
 
 def run_size_experiments():
     """
