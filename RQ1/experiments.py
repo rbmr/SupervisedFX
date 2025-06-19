@@ -121,7 +121,7 @@ class CnnCombinedExtractor(BaseFeaturesExtractor):
 def add_technical_analysis(df):
     """Default technical analysis features"""
 
-    # Trend (4 features)
+    # Trend (3 features)
 
     parabolic_sar(df)
     as_ratio_of_other_column(df, 'sar', 'close_bid')
@@ -132,10 +132,10 @@ def add_technical_analysis(df):
     ema(df, window=72)
     as_ratio_of_other_column(df, 'ema_72_close_bid', 'close_bid')
 
+    # Momentum and reversal (4 features)
+
     adx(df, window=14)
     as_min_max_fixed(df, "adx", min=0, max=100)
-
-    # Momentum and reversal (5 features)
 
     rsi(df, window=14)
     as_min_max_fixed(df, "rsi_14", min=0, max=100)
@@ -148,18 +148,15 @@ def add_technical_analysis(df):
     as_min_max_fixed(df, 'stoch_k', min=0, max=100)
     remove_columns(df, ["stoch_d"])
 
-    cci(df, window=20)
-    as_z_score(df, 'cci_20', window=50)
-
-    # Volatility (3 features)
+    # Volatility (4 features)
 
     atr(df, window=14)
     as_ratio_of_other_column(df, 'atr_14', 'close_bid')
 
     bollinger_bands(df, window=20)
-    df['bb_width'] = df['bb_upper_20'] - df['bb_lower_20']
-    as_ratio_of_other_column(df, 'bb_width', 'close_bid')
-    remove_columns(df, ['bb_upper_20', 'bb_lower_20', 'atr_14'])
+    as_ratio_of_other_column(df, 'bb_upper_20', 'close_bid')
+    as_ratio_of_other_column(df, 'bb_lower_20', 'close_bid')
+    remove_columns(df, ["sma_20_close_bid"])
 
     df["spread_ratio"] = (df["close_ask"] - df["close_bid"]) / df["close_bid"]
     as_z_score(df, 'spread_ratio', window=50) # Normalize to see if spread is high/low
@@ -551,7 +548,7 @@ def run_cnn_experiments():
 
 def run_decay_experiments():
     """
-
+    Compares model performance across different levels of weight decay.
     """
     logging.info("Running decay experiments...")
 
