@@ -334,7 +334,7 @@ def analyse_results(results_dir: Path, model_name_suffix: str = "", num_workers 
 
     # Evaluate runs
     func = partial(analyze_result, model_name_suffix=model_name_suffix)
-    result_files = list(results_dir.rglob("data.csv"))
+    result_files = list(f for f in results_dir.rglob("data.csv") if not (f.parent / "info.json").exists())
     result_files.sort(key=extract_key) # Old to new
     parallel_apply(func, result_files, num_workers=num_workers)
 

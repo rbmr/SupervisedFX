@@ -55,14 +55,9 @@ def analyse_individual_run(results_file: Path, model_name: str):
         raise ValueError(f"results_file must have .csv extension, was {results_file.suffix}")
     output_dir = results_file.parent
     info_file = output_dir / "info.json"
-    # Skip if the final info file already exists and the contents are readable.
+    # Skip if the final info file already exists.
     if info_file.exists():
-        try:
-            with open(info_file, "r") as f:
-                _ = json.load(f)
-            return
-        except Exception:
-            pass
+        return
 
     # Load results
     all_columns = pd.read_csv(results_file, nrows=0).columns.tolist()
