@@ -256,8 +256,8 @@ class ExperimentConfig:
     critic_shape: list[int] = field(default_factory=lambda: [64, 64])
     features_extractor_class: Optional[Type[BaseFeaturesExtractor]] = None
     features_extractor_kwargs: Optional[dict] = None
-    optimizer_kwargs: dict = field(default_factory=lambda: dict(weight_decay=1e-6))
-    optimizer_class: Optimizer = torch.optim.Adam
+    optimizer_kwargs: Optional[dict] = None
+    optimizer_class: Optional[Type[Optimizer]] = None
 
     def __post_init__(self):
         if self.net_shape is not None:
@@ -272,14 +272,12 @@ class ExperimentConfig:
         policy_kwargs = dict(
             activation_fn=self.activation_fn,
             net_arch=dict(pi=self.actor_shape, qf=self.critic_shape),
-            optimizer_kwargs=self.optimizer_kwargs,
             optimizer_class=self.optimizer_class,
+            optimizer_kwargs=self.optimizer_kwargs,
+            features_extractor_class=self.features_extractor_class,
+            features_extractor_kwargs=self.features_extractor_kwargs,
         )
-        if self.features_extractor_class is not None:
-            policy_kwargs["features_extractor_class"] = self.features_extractor_class
-        if self.features_extractor_kwargs is not None:
-            policy_kwargs["features_extractor_kwargs"] = self.features_extractor_kwargs
-        return policy_kwargs
+        return {k: v for k, v in policy_kwargs.items() if v is not None}
 
     def get_style(self):
         return dict(
@@ -351,7 +349,7 @@ def _run_experiment(experiment_group: str, config: ExperimentConfig, seed: int =
         # SaveCallback creates models_dir upon first model save.
         callback = [SaveCallback(models_dir, save_freq=train_env.episode_len),
                     ActionHistogramCallback(train_env, log_freq=train_env.episode_len)]
-        train_model(model, train_env, train_episodes=50, callback=callback)
+        train_model(model, train_env, train_episodes=80, callback=callback)
 
     # Evaluate models
 
@@ -496,7 +494,7 @@ def run_activation_experiments():
 def run_cnn_experiments():
     """
     Compares a model using technical analysis features against one using a CNN
-    to process raw candlestick data.
+    to process normalized candlestick data.
     """
     logging.info("Running CNN experiments...")
 
@@ -545,36 +543,65 @@ def run_cnn_experiments():
         n_seeds=3,
     )
 
-def run_baseline():
+def run_decay_experiments():
+    """
+
+    """
+    logging.info("Running decay experiments...")
 
     experiments = [
         ExperimentConfig(
-            name="baseline",
+            name=f"decay_{weight_decay}",
             net_shape=[32, 32],
-            line_color=CUD_COLORS[0],
-            line_marker="o",
+            line_color=color,
+            line_marker=marker,
             device="cpu",
+            optimizer_class=torch.optim.Adam,
+            optimizer_kwargs=dict(weight_decay=weight_decay),
         )
+        for weight_decay, marker, color in zip([1e-6, 2e-6, 4e-6, 8e-6, 16e-6], MARKERS, CUD_COLORS)
     ]
+
     _run_experiments(
-        experiment_group="baseline",
+        experiment_group="weight_decay",
         experiments=experiments,
         n_seeds=1,
     )
 
+def run_single():
+    """
+    Runs a single handpicked experiment, used for testing.
+    """
+    experiments = [
+        ExperimentConfig(
+            name=f"decay_{1e-5}",
+            net_shape=[32, 32],
+            line_color=CUD_COLORS[0],
+            line_marker=MARKERS[0],
+            device="cpu",
+            optimizer_class=torch.optim.Adam,
+            optimizer_kwargs=dict(weight_decay=1e-5),
+        )
+    ]
+    _run_experiments(
+        experiment_group="weight_decay",
+        experiments=experiments,
+        n_seeds=1,
+    )
 
 def run():
     """
     Parses command-line arguments and executes the chosen experiment(s).
     """
     experiments_to_run = {
-        0: run_baseline,
+        0: run_single,
         1: run_shape_experiments,
         2: run_size_experiments,
         3: run_activation_experiments,
         4: run_baselines,
         5: run_division_experiments,
         6: run_cnn_experiments,
+        7: run_decay_experiments
     }
 
     help_str = "\n".join(f"{exp_id}: {fn.__name__}" for exp_id, fn in experiments_to_run.items())
