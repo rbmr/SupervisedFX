@@ -1,5 +1,7 @@
 import os
 
+from torch.optim import Optimizer
+
 from common.data.data import ForexCandleData, Timeframe
 
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
@@ -23,11 +25,9 @@ from torch import nn
 
 from common.data.feature_engineer import (FeatureEngineer, as_min_max_fixed,
                                           as_ratio_of_other_column, as_z_score,
-                                          bollinger_bands, chaikin_volatility,
-                                          complex_7d, complex_24h,
+                                          bollinger_bands, complex_7d, complex_24h,
                                           history_lookback, macd, mfi,
-                                          parabolic_sar, remove_columns, vwap, as_pct_change,
-                                          apply_column, as_robust_norm)
+                                          parabolic_sar, remove_columns, vwap, as_robust_norm)
 from common.data.stepwise_feature_engineer import (StepwiseFeatureEngineer,
                                                    calculate_current_exposure)
 from common.envs.callbacks import ActionHistogramCallback, SaveCallback
@@ -39,10 +39,7 @@ from common.models.train_eval import (analyse_results, combine_finals,
                                       evaluate_dummy, evaluate_models,
                                       train_model)
 from common.scripts import parallel_apply, lazy_singleton
-from RQ1.constants import (ACTION_HIGH, ACTION_LOW, CUD_COLORS, DUMMY_MODELS,
-                           INITIAL_CAPITAL, MARKERS, N_ACTIONS,
-                           RQ1_EXPERIMENTS_DIR, SAC_HYPERPARAMS, SEED,
-                           SPLIT_RATIO, TRANSACTION_COST_PCT)
+from RQ1.constants import CUD_COLORS, DUMMY_MODELS, RQ1_EXPERIMENTS_DIR, SEED, SPLIT_RATIO, MARKERS
 from RQ1.utils import get_n_params, get_widths, get_shapes
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor, FlattenExtractor
 
@@ -54,7 +51,7 @@ class CnnOnlyExtractor(BaseFeaturesExtractor):
     :param features_dim: (int) Number of features to be extracted.
     """
 
-    def __init__(self, observation_space: gym.spaces.Box, features_dim: int = 59):
+    def __init__(self, observation_space: gym.spaces.Box, features_dim: int = 27):
         super().__init__(observation_space, features_dim)
         # Expected shapes (channels=1, features, time_steps)
         assert len(observation_space.shape) == 3, f"unexpected observation_space shape {observation_space.shape}"
@@ -96,7 +93,7 @@ class CnnCombinedExtractor(BaseFeaturesExtractor):
     Feature extractor that combines the output of a CNN for image-like data
     and a simple FlattenExtractor for vector data.
     """
-    cnn_output_dim = 59
+    cnn_output_dim = 27
 
     def __init__(self, observation_space: gym.spaces.Dict):
 
@@ -125,23 +122,19 @@ class CnnCombinedExtractor(BaseFeaturesExtractor):
 def add_technical_analysis(df):
     """Default technical analysis features"""
 
-    lookback = 2
-
-    # Trend (4 * (lookback + 1))
+    # Trend (6 features)
 
     parabolic_sar(df)
     as_ratio_of_other_column(df, 'sar', 'close_bid')
 
-    vwap(df, window=4)
     vwap(df, window=12)
     vwap(df, window=48)
-    as_ratio_of_other_column(df, 'vwap_4', 'close_bid')
     as_ratio_of_other_column(df, 'vwap_12', 'close_bid')
     as_ratio_of_other_column(df, 'vwap_48', 'close_bid')
 
-    history_lookback(df, lookback, ["sar", "vwap_4", "vwap_12", "vwap_48"])
+    history_lookback(df, 1, ["sar", "vwap_12", "vwap_48"])
 
-    # Momentum (2 * (lookback + 1))
+    # Momentum (4 features)
 
     macd(df, short_window=12, long_window=26, signal_window=9)
     remove_columns(df, ["macd_signal", "macd"])
@@ -150,18 +143,15 @@ def add_technical_analysis(df):
     mfi(df, window=14)
     as_min_max_fixed(df, "mfi_14", min=0, max=100)
 
-    history_lookback(df, lookback, ["macd_hist", "mfi_14"])
+    history_lookback(df, 1, ["macd_hist", "mfi_14"])
 
-    # Technical Analysis (3 * (lookback + 1))
+    # Technical Analysis (4 features)
 
     bollinger_bands(df, window=20, num_std_dev=2)
     as_ratio_of_other_column(df, "bb_upper_20", "close_bid")
     as_ratio_of_other_column(df, "bb_lower_20", "close_bid")
 
-    chaikin_volatility(df, ema_window=10, roc_period=10) # adds chaikin_vol_{ema_window}_{roc_period}
-    as_z_score(df, "chaikin_vol_10_10", window=50)
-
-    history_lookback(df, lookback, ["bb_upper_20", "bb_lower_20", "chaikin_vol_10_10"])
+    history_lookback(df, 1, ["bb_upper_20", "bb_lower_20"])
 
 def add_cnn_features(df):
     """Feature engineering for CNN input"""
@@ -206,17 +196,17 @@ def get_default_forex_data() -> ForexCandleData:
 @lazy_singleton
 def get_default_env_config() -> EnvConfig:
     return EnvConfig(
-        initial_capital=INITIAL_CAPITAL,
-        transaction_cost_pct=TRANSACTION_COST_PCT,
+        initial_capital=10_000,
+        transaction_cost_pct=5 / 100_000,
         reward_function=None
     )
 
 @lazy_singleton
 def get_default_action_config() -> ActionConfig:
     return ActionConfig(
-        n=N_ACTIONS,
-        low=ACTION_LOW,
-        high=ACTION_HIGH
+        n=0, # continuous actions
+        low=-1.0,
+        high=1.0
     )
 
 @lazy_singleton
@@ -266,6 +256,8 @@ class ExperimentConfig:
     critic_shape: list[int] = field(default_factory=lambda: [64, 64])
     features_extractor_class: Optional[Type[BaseFeaturesExtractor]] = None
     features_extractor_kwargs: Optional[dict] = None
+    optimizer_kwargs: dict = field(default_factory=lambda: dict(weight_decay=1e-6))
+    optimizer_class: Optimizer = torch.optim.Adam
 
     def __post_init__(self):
         if self.net_shape is not None:
@@ -280,6 +272,8 @@ class ExperimentConfig:
         policy_kwargs = dict(
             activation_fn=self.activation_fn,
             net_arch=dict(pi=self.actor_shape, qf=self.critic_shape),
+            optimizer_kwargs=self.optimizer_kwargs,
+            optimizer_class=self.optimizer_class,
         )
         if self.features_extractor_class is not None:
             policy_kwargs["features_extractor_class"] = self.features_extractor_class
@@ -310,7 +304,7 @@ def _run_experiment(experiment_group: str, config: ExperimentConfig, seed: int =
     """
     Runs a single experiment: trains the model, evaluates it, and analyzes the results.
     """
-    logging.info(f"Running experiment {experiment_group} / {config.name}")
+    logging.info(f"Running experiment {experiment_group} / {config.name} / seed_{seed}")
 
     # Set seeds, only important for training, evaluation is deterministic.
     # The ForexEnvs are entirely deterministic, taking the same sequence of actions,
@@ -340,7 +334,15 @@ def _run_experiment(experiment_group: str, config: ExperimentConfig, seed: int =
         model = SAC(
             policy=config.policy,
             env=train_env,
-            **SAC_HYPERPARAMS,
+            learning_rate=3e-4,
+            buffer_size=200_000,
+            learning_starts=1000,
+            batch_size=256,
+            tau=0.005,
+            gamma=1.0,
+            ent_coef='auto',
+            gradient_steps=2,
+            train_freq=48,
             policy_kwargs=config.get_policy_kwargs(),
             verbose=0,
             device=config.device,
@@ -391,6 +393,8 @@ def run_baselines():
     """
     Runs the baseline models on the train and eval environments. Used as reference.
     """
+    logging.info("Running baseline experiments...")
+
     train_data_config, eval_data_config = get_default_data_configs()
     action_config = get_default_action_config()
     env_config = get_default_env_config()
@@ -417,7 +421,9 @@ def run_shape_experiments():
     Determine the impact of network shapes on model performance.
     Number of parameters remains roughly equal.
     """
-    shapes = get_shapes(DEFAULT_INP, DEFAULT_OUT)
+    logging.info("Running network shape experiments...")
+
+    shapes = get_shapes(DEFAULT_INP, DEFAULT_OUT, level_low=16, level_high=64)
 
     experiments = [
         ExperimentConfig(name="shape_flat", net_shape=shapes["flat"], line_color=CUD_COLORS[0], line_marker="s"),
@@ -434,9 +440,10 @@ def run_division_experiments():
     Determine the impact of dividing parameters over the actor and the critic networks.
     Number of parameters remains roughly equal.
     """
+    logging.info("Running network division experiments...")
 
     # No bias
-    base_net = [64, 64]
+    base_net = [32, 32]
     experiments = [ExperimentConfig(name="no_bias", net_shape=base_net, line_color=CUD_COLORS[0], line_marker="o"),]
 
     # Slight bias
@@ -458,10 +465,12 @@ def run_size_experiments():
     Determine the impact of network size on model performance.
     We modify two aspects: Model depth (number of layers), and Model width (number of neurons per layer).
     """
+    logging.info("Running network size experiments...")
+
     for depth_name, depth in zip(["shallow", "moderate", "deep", "very_deep"], [1, 2, 3, 4]):
         experiments = [
             ExperimentConfig(name=f"{depth_name}-{width_name}", net_shape=[width] * depth, line_marker=marker, line_color=color)
-            for width_name, width, color, marker in zip(["narrow", "moderate", "wide", "very_wide"], [16, 32, 64, 128], CUD_COLORS[:4], MARKERS[:4])
+            for width_name, width, color, marker in zip(["narrow", "moderate", "wide", "very_wide"], [8, 16, 32, 64], CUD_COLORS[:4], MARKERS[:4])
         ]
         _run_experiments(experiment_group=f"{depth_name}_networks", experiments=experiments)
 
@@ -470,6 +479,8 @@ def run_activation_experiments():
     Determine the impact of network activation functions on model performance.
     All networks are the same size and shape.
     """
+    logging.info("Running activation function experiments...")
+
     experiments = []
 
     for activation_fn, color, marker in zip([nn.ReLU, nn.LeakyReLU, nn.Sigmoid, nn.SiLU, nn.Tanh, nn.ELU], CUD_COLORS[:6], MARKERS[:6]):
@@ -487,6 +498,7 @@ def run_cnn_experiments():
     Compares a model using technical analysis features against one using a CNN
     to process raw candlestick data.
     """
+    logging.info("Running CNN experiments...")
 
     # Setup config for CNN
     vector_fe = FeatureEngineer()
@@ -533,11 +545,30 @@ def run_cnn_experiments():
         n_seeds=3,
     )
 
+def run_baseline():
+
+    experiments = [
+        ExperimentConfig(
+            name="baseline",
+            net_shape=[32, 32],
+            line_color=CUD_COLORS[0],
+            line_marker="o",
+            device="cpu",
+        )
+    ]
+    _run_experiments(
+        experiment_group="baseline",
+        experiments=experiments,
+        n_seeds=1,
+    )
+
+
 def run():
     """
     Parses command-line arguments and executes the chosen experiment(s).
     """
     experiments_to_run = {
+        0: run_baseline,
         1: run_shape_experiments,
         2: run_size_experiments,
         3: run_activation_experiments,
@@ -546,15 +577,10 @@ def run():
         6: run_cnn_experiments,
     }
 
-    def run_all():
-        for fn in experiments_to_run.values():
-            fn()
-
-    experiments_to_run[0] = run_all
     help_str = "\n".join(f"{exp_id}: {fn.__name__}" for exp_id, fn in experiments_to_run.items())
 
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument("exp_id", default=0, type=int, help=help_str)
+    parser.add_argument("--exp_id", default=0, type=int, help=help_str)
     exp_id = parser.parse_args().exp_id
 
     if exp_id in experiments_to_run:

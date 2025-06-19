@@ -11,7 +11,7 @@ from common.envs.callbacks import SaveCallback, ActionHistogramCallback
 from common.envs.forex_env import ForexEnv
 from common.models.train_eval import train_model, evaluate_models, analyse_results
 
-def get_shapes(inp: int, out: int):
+def get_shapes(inp: int, out: int, level_low=32, level_high=80):
     """
     Given some network shapes, and constraints on these shapes, determines the division
     of neurons across these layers such that the difference in number of parameters is minimized.
@@ -25,8 +25,6 @@ def get_shapes(inp: int, out: int):
     # (2) The difference in shape is significant: 1.5 <= b, d, f <= 2.0
 
     fac_range = np.linspace(1.5, 2.0, 100)
-    level_low = 32
-    level_high = 80
 
     shape_layers_fn = {
         "flat": lambda x: (int(x), int(x), int(x)),
