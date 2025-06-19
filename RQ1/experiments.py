@@ -26,8 +26,7 @@ from torch import nn
 from common.data.feature_engineer import (FeatureEngineer, as_min_max_fixed,
                                           as_ratio_of_other_column, as_z_score,
                                           bollinger_bands, complex_7d, complex_24h,
-                                          history_lookback, macd, mfi,
-                                          parabolic_sar, remove_columns, vwap, as_robust_norm)
+                                          macd, parabolic_sar, remove_columns, as_robust_norm, adx, ema, cci, stochastic_oscillator, rsi, atr)
 from common.data.stepwise_feature_engineer import (StepwiseFeatureEngineer,
                                                    calculate_current_exposure)
 from common.envs.callbacks import ActionHistogramCallback, SaveCallback
@@ -122,36 +121,48 @@ class CnnCombinedExtractor(BaseFeaturesExtractor):
 def add_technical_analysis(df):
     """Default technical analysis features"""
 
-    # Trend (6 features)
+    # Trend (4 features)
 
     parabolic_sar(df)
     as_ratio_of_other_column(df, 'sar', 'close_bid')
 
-    vwap(df, window=12)
-    vwap(df, window=48)
-    as_ratio_of_other_column(df, 'vwap_12', 'close_bid')
-    as_ratio_of_other_column(df, 'vwap_48', 'close_bid')
+    ema(df, window=24)
+    as_ratio_of_other_column(df, 'ema_24_close_bid', 'close_bid')
 
-    history_lookback(df, 1, ["sar", "vwap_12", "vwap_48"])
+    ema(df, window=72)
+    as_ratio_of_other_column(df, 'ema_72_close_bid', 'close_bid')
 
-    # Momentum (4 features)
+    adx(df, window=14)
+    as_min_max_fixed(df, "adx", min=0, max=100)
+
+    # Momentum and reversal (5 features)
+
+    rsi(df, window=14)
+    as_min_max_fixed(df, "rsi_14", min=0, max=100)
 
     macd(df, short_window=12, long_window=26, signal_window=9)
-    remove_columns(df, ["macd_signal", "macd"])
     as_z_score(df, 'macd_hist', window=50)
+    remove_columns(df, ["macd", "macd_signal"])
 
-    mfi(df, window=14)
-    as_min_max_fixed(df, "mfi_14", min=0, max=100)
+    stochastic_oscillator(df, window=14)
+    as_min_max_fixed(df, 'stoch_k', min=0, max=100)
+    remove_columns(df, ["stoch_d"])
 
-    history_lookback(df, 1, ["macd_hist", "mfi_14"])
+    cci(df, window=20)
+    as_z_score(df, 'cci_20', window=50)
 
-    # Technical Analysis (4 features)
+    # Volatility (3 features)
 
-    bollinger_bands(df, window=20, num_std_dev=2)
-    as_ratio_of_other_column(df, "bb_upper_20", "close_bid")
-    as_ratio_of_other_column(df, "bb_lower_20", "close_bid")
+    atr(df, window=14)
+    as_ratio_of_other_column(df, 'atr_14', 'close_bid')
 
-    history_lookback(df, 1, ["bb_upper_20", "bb_lower_20"])
+    bollinger_bands(df, window=20)
+    df['bb_width'] = df['bb_upper_20'] - df['bb_lower_20']
+    as_ratio_of_other_column(df, 'bb_width', 'close_bid')
+    remove_columns(df, ['bb_upper_20', 'bb_lower_20', 'atr_14'])
+
+    df["spread_ratio"] = (df["close_ask"] - df["close_bid"]) / df["close_bid"]
+    as_z_score(df, 'spread_ratio', window=50) # Normalize to see if spread is high/low
 
 def add_cnn_features(df):
     """Feature engineering for CNN input"""
@@ -211,6 +222,8 @@ def get_default_action_config() -> ActionConfig:
 
 @lazy_singleton
 def get_default_data_configs() -> tuple[DataConfig, DataConfig]:
+
+    # Setup features
     fe = FeatureEngineer()
     fe.add(complex_24h)  # 2 features
     fe.add(complex_7d)  # 2 features
@@ -219,11 +232,11 @@ def get_default_data_configs() -> tuple[DataConfig, DataConfig]:
     sfe = StepwiseFeatureEngineer()
     sfe.add(["current_exposure"], calculate_current_exposure)  # 1 feature
 
-    obs_configs = [ObsConfig(name='market_features', fe=fe, sfe=sfe, window=1)]
+    # Get data configs
     train_data_config, eval_data_config = DataConfig.from_splits(
         forex_candle_data=get_default_forex_data(),
         split_pcts=[SPLIT_RATIO, 1 - SPLIT_RATIO],
-        obs_configs=obs_configs
+        obs_configs=[ObsConfig(name='market_features', fe=fe, sfe=sfe, window=1)]
     )
     return train_data_config, eval_data_config
 
