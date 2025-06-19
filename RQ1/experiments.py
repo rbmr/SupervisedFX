@@ -265,8 +265,8 @@ class ExperimentConfig:
     device: str = "cpu"
     activation_fn: Callable = nn.ReLU
     net_shape: Optional[list[int]] = None # Shortcut for setting actor and critic shape.
-    actor_shape: list[int] = field(default_factory=lambda: [64, 64])
-    critic_shape: list[int] = field(default_factory=lambda: [64, 64])
+    actor_shape: list[int] = field(default_factory=lambda: [32, 32])
+    critic_shape: list[int] = field(default_factory=lambda: [32, 32])
     features_extractor_class: Optional[Type[BaseFeaturesExtractor]] = None
     features_extractor_kwargs: Optional[dict] = None
     optimizer_kwargs: Optional[dict] = None
@@ -386,11 +386,11 @@ def _run_experiment_wrapper(config_seed: tuple[ExperimentConfig, int], experimen
     config, seed = config_seed
     _run_experiment(experiment_group, config, seed)
 
-def _run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, num_workers=3, add_timestamp: bool=True):
+def _run_experiments(experiment_group: str, experiments: List[ExperimentConfig], n_seeds=1, num_workers=1, add_timestamp: bool=True):
     """
     Runs each of the experiments for a number of seeds.
     """
-    logging.info(f"Running {experiment_group}, with {len(experiments)} experiments, for {n_seeds} seeds.")
+    logging.info(f"Running experiment group ({experiment_group}), with ({len(experiments)}) experiments, for ({n_seeds}) seeds.")
     if add_timestamp:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         experiment_group = f"{timestamp}_{experiment_group}"
@@ -401,7 +401,7 @@ def _run_experiments(experiment_group: str, experiments: List[ExperimentConfig],
 
     combine_finals(RQ1_EXPERIMENTS_DIR / experiment_group, {exp.name : exp.get_style() for exp in experiments}, ext=".svg")
 
-def run_baselines():
+def run_dummies():
     """
     Runs the baseline models on the train and eval environments. Used as reference.
     """
@@ -474,7 +474,7 @@ def run_size_experiments():
     for depth_name, depth in zip(["shallow", "moderate", "deep", "very_deep"], [1, 2, 3, 4]):
         experiments = [
             ExperimentConfig(name=f"{depth_name}-{width_name}", net_shape=[width] * depth, line_marker=marker, line_color=color)
-            for width_name, width, color, marker in zip(["narrow", "moderate", "wide", "very_wide"], [8, 16, 32, 64], CUD_COLORS[:4], MARKERS[:4])
+            for width_name, width, color, marker in zip(["narrow", "moderate", "wide", "very_wide"], [8, 16, 32, 64], CUD_COLORS, MARKERS)
         ]
         _run_experiments(experiment_group=f"{depth_name}_networks", experiments=experiments)
 
@@ -487,7 +487,7 @@ def run_activation_experiments():
 
     experiments = []
 
-    for activation_fn, color, marker in zip([nn.ReLU, nn.LeakyReLU, nn.Sigmoid, nn.SiLU, nn.Tanh, nn.ELU], CUD_COLORS[:6], MARKERS[:6]):
+    for activation_fn, color, marker in zip([nn.ReLU, nn.LeakyReLU, nn.Sigmoid, nn.SiLU, nn.Tanh, nn.ELU], CUD_COLORS, MARKERS):
         experiments.append(ExperimentConfig(
             name = activation_fn.__name__,
             line_marker = marker,
@@ -526,7 +526,7 @@ def run_cnn_experiments():
     experiments = [
         ExperimentConfig(
             name="cnn_features",
-            net_shape=[64, 64],
+            net_shape=[32, 32],
             line_color=CUD_COLORS[1],
             line_marker="X",
             train_data_config=train_data_config,
@@ -537,7 +537,7 @@ def run_cnn_experiments():
         ),
         ExperimentConfig(
             name="technical_analysis",
-            net_shape=[64, 64],
+            net_shape=[32, 32],
             line_color=CUD_COLORS[0],
             line_marker="o",
             device="cpu",
@@ -565,11 +565,49 @@ def run_decay_experiments():
             optimizer_class=torch.optim.Adam,
             optimizer_kwargs=dict(weight_decay=weight_decay),
         )
-        for weight_decay, marker, color in zip([1e-6, 2e-6, 4e-6, 8e-6, 16e-6], MARKERS, CUD_COLORS)
+        for weight_decay, marker, color in zip([1e-6, 5e-5, 1e-5, 5e-5, 1e-4], MARKERS, CUD_COLORS)
     ]
 
     _run_experiments(
         experiment_group="weight_decay",
+        experiments=experiments,
+        n_seeds=3,
+    )
+
+def run_baseline():
+
+    experiments = [
+        ExperimentConfig(
+            name=f"SAC_64x32_decay_2e-6",
+            net_shape=[64, 32],
+            line_color=CUD_COLORS[0],
+            line_marker=MARKERS[0],
+            device="cpu",
+            optimizer_class=torch.optim.AdamW,
+            optimizer_kwargs=dict(weight_decay=2e-6),
+        ),
+        ExperimentConfig(
+            name=f"SAC_48x24_decay_2e-6",
+            net_shape=[48, 24],
+            line_color=CUD_COLORS[1],
+            line_marker=MARKERS[1],
+            device="cpu",
+            optimizer_class=torch.optim.AdamW,
+            optimizer_kwargs=dict(weight_decay=2e-6),
+        ),
+        ExperimentConfig(
+            name=f"SAC_32x16_decay_2e-6",
+            net_shape=[32, 16],
+            line_color=CUD_COLORS[1],
+            line_marker=MARKERS[1],
+            device="cpu",
+            optimizer_class=torch.optim.AdamW,
+            optimizer_kwargs=dict(weight_decay=2e-6),
+        )
+    ]
+
+    _run_experiments(
+        experiment_group="baseline",
         experiments=experiments,
         n_seeds=1,
     )
@@ -580,7 +618,8 @@ def run():
     """
 
     experiments = [
-        run_baselines,
+        run_baseline,
+        run_dummies,
         run_decay_experiments,
         run_size_experiments,
         run_shape_experiments,
@@ -589,12 +628,7 @@ def run():
         run_cnn_experiments,
     ]
 
-    def run_all():
-        for f in experiments:
-            f()
-
-    experiments_to_run = {i+1: f for i, f in enumerate(experiments)}
-    experiments_to_run[0] = run_all
+    experiments_to_run = {i: f for i, f in enumerate(experiments)}
 
     help_str = "\n".join(f"{exp_id}: {fn.__name__}" for exp_id, fn in experiments_to_run.items())
 
