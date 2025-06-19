@@ -12,7 +12,8 @@ from common.data.data import ForexCandleData
 from common.data.feature_engineer import FeatureEngineer
 from common.data.stepwise_feature_engineer import StepwiseFeatureEngineer
 from common.envs.trade import calculate_ohlc_equity, execute_trade, calculate_equity
-from common.scripts import find_first_row_with_nan, find_first_row_without_nan
+from common.scripts import first_row_without_nan_or_inf, contains_nan_or_inf, first_row_with_nan_or_inf
+
 
 class ActionConfig:
     """
@@ -212,29 +213,30 @@ class DataConfig:
         actual_columns = set(market_data.columns)
         assert expected_columns.issubset(actual_columns), f"market_data is missing columns: {expected_columns - actual_columns}."
 
-        # Find initial NaNs in market data.
+        # Find initial NaNs or Infs in market data.
         market_data = market_data.copy(deep=True)[MarketDataCol.all_names()]
-        start_index = find_first_row_without_nan(market_data)
+        start_index = first_row_without_nan_or_inf(market_data)
 
-        # Find initial NaNs in features.
+        # Find initial NaNs of Infs in features.
         for env_ob in observations:
             if len(env_ob.feature_names) > 0:
                 temp_df = pd.DataFrame(env_ob.features_data, columns=env_ob.feature_names)
-                start_index = max(start_index, find_first_row_without_nan(temp_df))
+                start_index = max(start_index, first_row_without_nan_or_inf(temp_df))
 
-        # Clean and market data.
+        # Clean and validate market data.
+        logging.info(f"Removing first {start_index} rows with NaNs or infinities.")
         market_data = market_data.iloc[start_index:]
         market_data.reset_index(drop=True, inplace=True)
-        assert not market_data.isna().any().any(), f"market_data contains NaN values at index {find_first_row_with_nan(market_data)}"
+        assert not contains_nan_or_inf(market_data), f"market_data contains NaN or Inf values at index {first_row_with_nan_or_inf(market_data)}"
 
         # Clean and validate features.
         final_env_obs = []
         for env_ob in observations:
-            adjusted_features_data = env_ob.features_data[start_index:]
-            temp_df = pd.DataFrame(adjusted_features_data, columns=env_ob.feature_names)
-            assert not temp_df.isna().any().any(), f"market_data contains NaN values at index {find_first_row_with_nan(market_data)}"
-            assert len(market_data) == len(adjusted_features_data), f"len market_data ({len(market_data)}) != len features for '{env_ob.name}' ({len(adjusted_features_data)})"
-            final_env_obs.append(EnvObs(adjusted_features_data, env_ob.feature_names, env_ob.sfe, env_ob.name, env_ob.window))
+            adj_features_data = env_ob.features_data[start_index:]
+            adj_features_df = pd.DataFrame(adj_features_data, columns=env_ob.feature_names)
+            assert not contains_nan_or_inf(adj_features_df), f"adjusted_features_df contains NaN or Inf values at index {first_row_with_nan_or_inf(adj_features_df)}"
+            assert len(market_data) == len(adj_features_data), f"len market_data ({len(market_data)}) != len features for '{env_ob.name}' ({len(adj_features_data)})"
+            final_env_obs.append(EnvObs(adj_features_data, env_ob.feature_names, env_ob.sfe, env_ob.name, env_ob.window))
 
         # Set parameters
         self.market_data = market_data

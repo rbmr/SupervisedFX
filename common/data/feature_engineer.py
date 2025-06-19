@@ -177,7 +177,6 @@ def vwap(df: pd.DataFrame, window: int = 14):
     cumulative_volume = df['volume'].cumsum()
     cumulative_vwap = (df['close_bid'] * df['volume']).cumsum() / cumulative_volume
     df[f'vwap_{window}'] = cumulative_vwap.rolling(window=window).mean()
-    df[f'vwap_{window}'] = df[f'vwap_{window}'].fillna(0)  # Fill NaN values with 0
 
 def adx(df: pd.DataFrame, window: int = 14):
     """
@@ -296,11 +295,6 @@ def rsi(df, window=14):
     loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
     rs = gain / loss
 
-    # replace rs with 1 if NaN, 100 if rs is np.inf, or 0 if rs is -np.inf
-    rs = rs.fillna(1)
-    rs = rs.replace(np.inf, 100)
-    rs = rs.replace(-np.inf, 0)
-
     rsi = 100 - (100 / (1 + rs))
     df[f'rsi_{window}'] = rsi
 
@@ -322,7 +316,6 @@ def historic_pct_change(df: pd.DataFrame, window: int = 14):
     This is a momentum indicator that shows how much the price has changed over the window.
     """
     df[f'historic_pct_change_{window}'] = df['close_bid'].pct_change(periods=window) * 100
-    df[f'historic_pct_change_{window}'] = df[f'historic_pct_change_{window}'].fillna(0)  # Fill NaN values with 0
 
 def cci(df: pd.DataFrame, window: int = 20):
     """
@@ -344,7 +337,6 @@ def williams_r(df: pd.DataFrame, window: int = 14):
     low_min = df['low_bid'].rolling(window=window).min()
     
     df[f'williams_r_{window}'] = -100 * (high_max - df['close_bid']) / (high_max - low_min)
-    df[f'williams_r_{window}'] = df[f'williams_r_{window}'].fillna(0)  # Fill NaN values with 0
 
 def mfi(df: pd.DataFrame, window: int = 14):
     """
@@ -357,8 +349,7 @@ def mfi(df: pd.DataFrame, window: int = 14):
     positive_flow = money_flow.where(df['close_bid'].diff() > 0, 0).rolling(window=window).sum()
     negative_flow = money_flow.where(df['close_bid'].diff() < 0, 0).rolling(window=window).sum()
     
-    mfi = 100 - (100 / (1 + positive_flow / negative_flow))
-    df[f'mfi_{window}'] = mfi.fillna(0)  # Fill NaN values with 0
+    df[f'mfi_{window}'] = 100 - (100 / (1 + positive_flow / negative_flow))
 
 def cmf(df: pd.DataFrame, window: int = 20):
     """
@@ -369,7 +360,6 @@ def cmf(df: pd.DataFrame, window: int = 20):
     money_flow_volume = money_flow_multiplier * df['volume']
     
     df[f'cmf_{window}'] = money_flow_volume.rolling(window=window).sum() / df['volume'].rolling(window=window).sum()
-    df[f'cmf_{window}'] = df[f'cmf_{window}'].fillna(0)  # Fill NaN values with 0
 
 def obv(df: pd.DataFrame):
     """
@@ -434,7 +424,7 @@ def atr(df: pd.DataFrame, window: int = 14, column_high: str = "high_bid", colum
 
     true_range = pd.Series(true_range_array, index=df.index)
 
-    df[f"atr_{window}"] = true_range.rolling(window=window, min_periods=1).mean().fillna(0)
+    df[f"atr_{window}"] = true_range.rolling(window=window, min_periods=1).mean()
 
 def chaikin_volatility(df: pd.DataFrame, ema_window: int = 10, roc_period: int = 10):
     """
@@ -449,7 +439,6 @@ def chaikin_volatility(df: pd.DataFrame, ema_window: int = 10, roc_period: int =
     roc_ema = ema_high_low.pct_change(periods=roc_period)
     
     df[f'chaikin_vol_{ema_window}_{roc_period}'] = roc_ema
-    df[f'chaikin_vol_{ema_window}_{roc_period}'] = df[f'chaikin_vol_{ema_window}_{roc_period}'].fillna(0)
 
 def ease_of_movement(df: pd.DataFrame, window: int = 14):
     """
@@ -481,9 +470,8 @@ def ease_of_movement(df: pd.DataFrame, window: int = 14):
     # The EOM indicator is typically a Simple Moving Average of the 1-period EOM
     eom = eom_1_period.rolling(window=window).mean()
 
-    # Add the new feature to the DataFrame and fill any NaNs with 0
+    # Add the new feature to the DataFrame
     df[f'eom_{window}'] = eom
-    df[f'eom_{window}'] = df[f'eom_{window}'].fillna(0)
 
 # ------------------------------- #
 # -- END VOLATILITY Indicators -- #
@@ -515,7 +503,6 @@ def as_pct_change(df: pd.DataFrame, column: str, periods: int = 1):
     Normalize a column as percentage change.
     """
     df[f'{column}'] = df[column].pct_change(periods=periods)
-    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
 
 def as_ratio_of_other_column(df: pd.DataFrame, column: str, other_column: str):
     """
@@ -525,10 +512,6 @@ def as_ratio_of_other_column(df: pd.DataFrame, column: str, other_column: str):
 
     # minus 1 to center around 0
     df[f'{column}'] = df[f'{column}'] - 1
-
-    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
-    df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)
-      # Replace inf with 0
 
 def as_z_score(df: pd.DataFrame, column: str, window: int = 50):
     """
@@ -541,9 +524,6 @@ def as_z_score(df: pd.DataFrame, column: str, window: int = 50):
     else:
         df[column] = (df[column] - df[column].rolling(window=window, min_periods=1).mean()) / df[column].rolling(window=window, min_periods=1).std()
 
-    df[column] = df[column].fillna(0)  # Fill NaN values with 0
-    df[column] = df[column].replace(np.inf, 0)  # Replace inf with 0
-
 def as_min_max_window(df: pd.DataFrame, column: str, window: int = 50):
     """
     Normalize a column as min-max scaling with a rolling window.
@@ -552,9 +532,6 @@ def as_min_max_window(df: pd.DataFrame, column: str, window: int = 50):
     
     # center around 0
     df[f'{column}'] = 2 * df[f'{column}'] - 1
-    
-    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
-    df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
 
 def as_min_max_fixed(df: pd.DataFrame, column: str, min: int = 0, max: int = 100):
     """
@@ -566,18 +543,13 @@ def as_min_max_fixed(df: pd.DataFrame, column: str, min: int = 0, max: int = 100
     # center around 0
     df[f'{column}'] = 2 * df[f'{column}'] - 1
 
-    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
-    df[f'{column}'] = df[f'{column}'].replace(np.inf, 0)  # Replace inf with 0
-
 def as_below_above_column(df: pd.DataFrame, column: str, other_column: str):
     """
     Normalize a column as below/above another column.
     This will create a new column with 1 if the value is above the other column, -1 if below, and 0 if equal.
     """
-    df[f'{column}'] = np.where(df[column] > df[other_column], 1, 
+    df[f'{column}'] = np.where(df[column] > df[other_column], 1,
                                                            np.where(df[column] < df[other_column], -1, 0))
-    df[f'{column}'] = df[f'{column}'].fillna(0)  # Fill NaN values with 0
-
 
 ## other
 def apply_column(df: pd.DataFrame, fn: Callable[[Any], Any], column: str):
@@ -630,8 +602,6 @@ def copy_column(df: pd.DataFrame, source_column: str, target_column: str):
     Copy a column from source to target.
     """
     df[target_column] = df[source_column].copy()
-    df[target_column] = df[target_column].fillna(0)  # Fill NaN values with 0
-    df[target_column] = df[target_column].replace(np.inf, 0)  # Replace inf with 0
 
 # ############################################### #
 # # END NORMALIZATION TRANSFORMATION SCALIUNG   # #

@@ -12,7 +12,7 @@ from asyncio import FIRST_EXCEPTION
 from concurrent.futures import ProcessPoolExecutor, wait
 from datetime import datetime, timedelta
 from functools import partial
-from multiprocessing import cpu_count, get_context
+from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, TypeVar
 
@@ -284,23 +284,37 @@ def split_df(df: pd.DataFrame, ratio: float):
     df2 = df.iloc[split_index:].reset_index(drop=True)
     return df1, df2
 
-def find_first_row_without_nan(df: pd.DataFrame) -> int:
+def contains_nan_or_inf(df: pd.DataFrame):
     """
-    Returns the index of the first row that contains no NaN values.
+    Returns True if any numeric column contains NaNs or infinities.
+    """
+    numeric_df = df.select_dtypes(include=[np.number])
+    assert len(numeric_df.columns) > 0, "cannot check for nans or infinities in non-numeric dataframes"
+    return numeric_df.isna().values.any() or np.isinf(numeric_df.values).any()
+
+def first_row_without_nan_or_inf(df: pd.DataFrame) -> int:
+    """
+    Returns the index of the first row where all numeric columns are finite.
     Returns -1 if no such row exists.
     """
+    numeric_df = df.select_dtypes(include=[np.number])
+    assert len(numeric_df.columns) > 0, "cannot check for nans or infinities in non-numeric dataframes"
     for i in range(len(df)):
-        if not df.iloc[i].isnull().any():
+        row = numeric_df.iloc[i].values
+        if not (np.isnan(row).any() or np.isinf(row).any()):
             return i
     return -1
 
-def find_first_row_with_nan(df: pd.DataFrame) -> int:
+def first_row_with_nan_or_inf(df: pd.DataFrame) -> int:
     """
-    Returns the index of the first row that contains a NaN value.
+    Returns the index of the first row where not all numeric columns are finite.
     Returns -1 if no such row exists.
     """
+    numeric_df = df.select_dtypes(include=[np.number])
+    assert len(numeric_df.columns) > 0, "cannot check for nans or infinities in non-numeric dataframes"
     for i in range(len(df)):
-        if df.iloc[i].isnull().any():
+        row = numeric_df.iloc[i].values
+        if np.isnan(row).any() or np.isinf(row).any():
             return i
     return -1
 
