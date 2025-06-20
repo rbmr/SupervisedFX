@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, Generator, TypeVar
 import numpy as np
 import pandas as pd
 import requests
+from scipy.stats import rankdata
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -53,6 +54,16 @@ class lazy_singleton:
         if self.cache is self._NOT_COMPUTED:
             self.cache = self.func()
         return self.cache
+
+def to_percentiles(data: np.ndarray) -> np.ndarray:
+    """
+    Converts a NumPy array of float64s to their percentiles in [0, 1].
+    """
+    # Handle the edge case of a single-element array to avoid division by zero.
+    if data.size <= 1:
+        return np.full(data.shape, 0.5)
+    percentiles = (rankdata(data.flatten(), method='average') - 1) / (data.size - 1)
+    return percentiles.reshape(data.shape)
 
 def parallel_apply(func: Callable[[K], V], inputs: list[K], num_workers: int) -> None:
     """

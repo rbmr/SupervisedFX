@@ -7,6 +7,7 @@ from common.envs.dp import interp, get_bins, DPTable
 from common.envs.forex_env import ForexEnv
 from common.models.dummy_models import cash_model, DummyModelFactory
 from common.models.train_eval import run_model
+from common.scripts import to_percentiles
 
 
 def equity_change(env: ForexEnv) -> float:
@@ -93,7 +94,7 @@ class DPRewardFunctionC:
         self.T = self.v.shape[0]
         importance = self.v - self.q_min
         importance = importance[importance > 1e-9]
-        self.lambda_robust = np.log(2) / np.median(importance) if len(importance) > 0 else 1.0
+        self.importance = to_percentiles(importance)
 
     def __call__(self, env) -> float:
         t = env.n_steps
@@ -109,7 +110,7 @@ class DPRewardFunctionC:
 
         raw_importance = v_current - q_min_current
         if raw_importance < 1e-9:
-            return 0.5
+            return 0.0
 
         next_cash = env.agent_data[t, AgentDataCol.cash]
         next_equity = env.agent_data[t+1, AgentDataCol.pre_action_equity]
@@ -120,7 +121,7 @@ class DPRewardFunctionC:
         q_taken = true_log_return + v_next
 
         goodness = ((q_taken - q_min_current) / raw_importance) * 2 - 1
-        importance = 1.0 - np.exp(-self.lambda_robust * raw_importance)
+        importance = interp(self.importance[t], curr_exposure, self.n_exposures)
 
         r = importance * goodness
 
