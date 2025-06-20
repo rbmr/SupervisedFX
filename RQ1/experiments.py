@@ -33,13 +33,13 @@ from common.envs.callbacks import ActionHistogramCallback, SaveCallback
 from common.envs.dp import get_dp_table_from_env
 from common.envs.forex_env import (ActionConfig, DataConfig, EnvConfig,
                                    ForexEnv, ObsConfig)
-from common.envs.rewards import DPRewardFunction
+from common.envs.rewards import DPRewardFunction, DPRewardFunctionB, DPRewardFunctionC, percentage_return
 from common.models.train_eval import (analyse_results, combine_finals,
                                       evaluate_dummy, evaluate_models,
                                       train_model)
 from common.scripts import parallel_apply, lazy_singleton
 from RQ1.constants import CUD_COLORS, DUMMY_MODELS, RQ1_EXPERIMENTS_DIR, SEED, SPLIT_RATIO, MARKERS
-from RQ1.utils import get_n_params, get_widths, get_shapes
+from RQ1.utils import get_n_params, get_widths, get_shapes, get_n_flops
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor, FlattenExtractor
 
 
@@ -256,6 +256,8 @@ class ExperimentConfig:
     action_config: ActionConfig = field(default_factory=get_default_action_config)
     train_data_config: Optional[DataConfig] = None
     eval_data_config: Optional[DataConfig] = None
+    reward_fn: Callable = DPRewardFunctionB
+    is_dp_reward_fn: bool = True
 
     # Model settings
     policy: str = "MlpPolicy"
@@ -325,10 +327,12 @@ def _run_experiment(experiment_group: str, config: ExperimentConfig, seed: int =
     # Get environments
 
     train_env = ForexEnv(config.action_config, config.env_config, config.train_data_config)
-    train_env.custom_reward_fn = DPRewardFunction(get_dp_table_from_env(train_env))
+    custom_reward_fn = config.reward_fn(get_dp_table_from_env(train_env)) if config.is_dp_reward_fn else config.reward_fn
+    train_env.custom_reward_fn = custom_reward_fn
 
     eval_env = ForexEnv(config.action_config, config.env_config, config.eval_data_config)
-    eval_env.custom_reward_fn = DPRewardFunction(get_dp_table_from_env(eval_env))
+    custom_reward_fn = config.reward_fn(get_dp_table_from_env(eval_env)) if config.is_dp_reward_fn else config.reward_fn
+    eval_env.custom_reward_fn = custom_reward_fn
 
     # Setup directories
 
@@ -347,7 +351,7 @@ def _run_experiment(experiment_group: str, config: ExperimentConfig, seed: int =
             learning_starts=1000,
             batch_size=256,
             tau=0.005,
-            gamma=1.0,
+            gamma=0.99,
             ent_coef='auto',
             gradient_steps=2,
             train_freq=48,
@@ -447,21 +451,37 @@ def run_division_experiments():
     """
     # No bias
     base_net = [32, 32]
+    total_params = get_n_params(DEFAULT_INP, *base_net, DEFAULT_OUT) * 2
+    total_flops = get_n_flops(DEFAULT_INP, *base_net, DEFAULT_OUT) * 2
     experiments = [ExperimentConfig(name="no_bias", net_shape=base_net, line_color=CUD_COLORS[0], line_marker="o"),]
+    logging.info(f"No bias: W1: 32, W2: 32, Total params {total_params}, Flops {total_flops}")
 
     # Slight bias
     n_layers = 2
-    total_params = get_n_params(DEFAULT_INP, *base_net, DEFAULT_OUT) * 2
     w1, w2 = get_widths(DEFAULT_INP, DEFAULT_OUT, n_layers, total_params, 0.60)
-    experiments.append(ExperimentConfig(name="moderate_actor_bias",actor_shape=[w1]*n_layers,critic_shape=[w2]*n_layers, line_color=CUD_COLORS[1], line_marker="s"))
-    experiments.append(ExperimentConfig(name="moderate_critic_bias",actor_shape=[w2]*n_layers,critic_shape=[w1]*n_layers, line_color=CUD_COLORS[2], line_marker="D"))
+    shape1 = [w1]*n_layers
+    shape2 = [w2]*n_layers
+    n_params1 = get_n_params(DEFAULT_INP, *shape1, DEFAULT_OUT)
+    n_params2 = get_n_params(DEFAULT_INP, *shape2, DEFAULT_OUT)
+    flops1 = get_n_flops(DEFAULT_INP, *shape1, DEFAULT_OUT)
+    flops2 = get_n_flops(DEFAULT_INP, *shape2, DEFAULT_OUT)
+    logging.info(f"Slight bias: W1: {w1}, W2: {w2}, Total params {n_params1 + n_params2}, Flops {flops1 + flops2}")
+    experiments.append(ExperimentConfig(name="moderate_actor_bias",actor_shape=shape1,critic_shape=shape2, line_color=CUD_COLORS[1], line_marker="s"))
+    experiments.append(ExperimentConfig(name="moderate_critic_bias",actor_shape=shape2,critic_shape=shape1, line_color=CUD_COLORS[2], line_marker="D"))
 
     # Large bias
     w1, w2 = get_widths(DEFAULT_INP, DEFAULT_OUT, n_layers, total_params, 0.75)
-    experiments.append(ExperimentConfig(name="large_actor_bias",actor_shape=[w1]*n_layers,critic_shape=[w2]*n_layers, line_color=CUD_COLORS[3], line_marker=">"))
-    experiments.append(ExperimentConfig(name="large_critic_bias",actor_shape=[w2]*n_layers,critic_shape=[w1]*n_layers, line_color=CUD_COLORS[4], line_marker="<"))
+    shape1 = [w1]*n_layers
+    shape2 = [w2]*n_layers
+    n_params1 = get_n_params(DEFAULT_INP, *shape1, DEFAULT_OUT)
+    n_params2 = get_n_params(DEFAULT_INP, *shape2, DEFAULT_OUT)
+    flops1 = get_n_flops(DEFAULT_INP, *shape1, DEFAULT_OUT)
+    flops2 = get_n_flops(DEFAULT_INP, *shape2, DEFAULT_OUT)
+    logging.info(f"Slight bias: W1: {w1}, W2: {w2}, Total params {n_params1 + n_params2}, Flops {flops1 + flops2}")
+    experiments.append(ExperimentConfig(name="large_actor_bias",actor_shape=shape1,critic_shape=shape2, line_color=CUD_COLORS[3], line_marker=">"))
+    experiments.append(ExperimentConfig(name="large_critic_bias",actor_shape=shape2,critic_shape=shape1, line_color=CUD_COLORS[4], line_marker="<"))
 
-    _run_experiments(experiment_group="network_division", experiments=experiments, n_seeds=5)
+    _run_experiments(experiment_group="20250620-144037_network_division", experiments=experiments, n_seeds=5, add_timestamp=False)
 
 def run_size_experiments():
     """
@@ -492,7 +512,7 @@ def run_activation_experiments():
             activation_fn=activation_fn,
         ))
 
-    _run_experiments(experiment_group=f"activation_functions", experiments=experiments, n_seeds=3)
+    _run_experiments(experiment_group=f"activation_functions", experiments=experiments, n_seeds=5)
 
 def run_cnn_experiments():
     """
@@ -562,7 +582,7 @@ def run_decay_experiments():
             optimizer_class=torch.optim.Adam,
             optimizer_kwargs=dict(weight_decay=weight_decay),
         )
-        for weight_decay, marker, color in zip([1e-6, 5e-5, 1e-5, 5e-5, 1e-4], MARKERS, CUD_COLORS)
+        for weight_decay, marker, color in zip([1e-6, 1e-5, 1e-4, 1e-3], MARKERS, CUD_COLORS)
     ]
 
     _run_experiments(
@@ -575,31 +595,13 @@ def run_baseline():
 
     experiments = [
         ExperimentConfig(
-            name=f"SAC_64x32_decay_2e-6",
-            net_shape=[64, 32],
+            name=f"SAC_32x32",
+            net_shape=[32, 32],
             line_color=CUD_COLORS[0],
             line_marker=MARKERS[0],
             device="cpu",
             optimizer_class=torch.optim.AdamW,
-            optimizer_kwargs=dict(weight_decay=2e-6),
-        ),
-        ExperimentConfig(
-            name=f"SAC_48x24_decay_2e-6",
-            net_shape=[48, 24],
-            line_color=CUD_COLORS[1],
-            line_marker=MARKERS[1],
-            device="cpu",
-            optimizer_class=torch.optim.AdamW,
-            optimizer_kwargs=dict(weight_decay=2e-6),
-        ),
-        ExperimentConfig(
-            name=f"SAC_32x16_decay_2e-6",
-            net_shape=[32, 16],
-            line_color=CUD_COLORS[1],
-            line_marker=MARKERS[1],
-            device="cpu",
-            optimizer_class=torch.optim.AdamW,
-            optimizer_kwargs=dict(weight_decay=2e-6),
+            optimizer_kwargs=dict(weight_decay=1e-6),
         )
     ]
 
@@ -607,6 +609,31 @@ def run_baseline():
         experiment_group="baseline",
         experiments=experiments,
         n_seeds=1,
+    )
+
+def run_reward_experiments():
+    reward_functions = [
+        # (DPRewardFunction, True),
+        # (DPRewardFunctionB, True),
+        (DPRewardFunctionC, True),
+        (percentage_return, False)
+    ]
+    experiments = [
+        ExperimentConfig(
+            name=reward_fn.__name__,
+            net_shape=[32, 32],
+            line_color=color,
+            line_marker=marker,
+            device="cpu",
+            reward_fn=reward_fn,
+            is_dp_reward_fn=is_dp_reward,
+        )
+        for (reward_fn, is_dp_reward), color, marker in zip(reward_functions, CUD_COLORS, MARKERS)
+    ]
+    _run_experiments(
+        experiment_group="rewards",
+        experiments=experiments,
+        n_seeds=5,
     )
 
 def run():
@@ -623,6 +650,7 @@ def run():
         run_activation_experiments,
         run_division_experiments,
         run_cnn_experiments,
+        run_reward_experiments,
     ]
 
     experiments_to_run = {i: f for i, f in enumerate(experiments)}
@@ -630,7 +658,7 @@ def run():
     help_str = "\n".join(f"{exp_id}: {fn.__name__}" for exp_id, fn in experiments_to_run.items())
 
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument("--exp_id", default=0, type=int, help=help_str)
+    parser.add_argument("exp_id", type=int, help=help_str)
     exp_id = parser.parse_args().exp_id
 
     if exp_id in experiments_to_run:

@@ -120,7 +120,7 @@ def get_width(inp: int, out: int, n_layers: int, n_params: float):
     D = b * b - 4 * a * c
     if D < 0:
         raise ValueError('No solution')
-    return int(-b + np.sqrt(D) / (2 * a))
+    return int( (-b + np.sqrt(D)) / (2 * a) )
 
 def get_widths(inp: int, out: int, n_layers: int, n_params: int, division: float):
     """

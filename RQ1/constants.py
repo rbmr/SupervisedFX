@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import torch
-
 from common.models.dummy_models import long_model, cash_model, short_model, dp_perfect_model, random_model
 
 RQ1_DIR = Path(__file__).resolve().parent 
