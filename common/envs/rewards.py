@@ -85,28 +85,62 @@ def empirical_rewards(env: ForexEnv, models: list[DummyModelFactory] | None = No
 
     return all_rewards
 
-class DPRewardFunction:
-
+class DPRewardFunctionC:
     def __init__(self, table: DPTable):
-        # Reward computation
         self.v = table.value_table
-        self.pi = table.policy_table
         self.q_min = table.q_min_table
-        self.n_actions = table.n_actions
-        self.actions = get_bins(table.n_actions)
+        self.n_exposures = table.n_exposures
         self.T = self.v.shape[0]
-        self.c = table.transaction_cost_pct
-        step_diffs = (self.v - self.q_min)[:-1].flatten() # Exclude terminal state, and flatten
-        self.max_diff = np.percentile(step_diffs, 98)
-        if self.max_diff <= 1e-9:
-            raise ValueError("Unexpected table values, step importance is almost non-existent.")
+        importance = self.v - self.q_min
+        importance = importance[importance > 1e-9]
+        self.lambda_robust = np.log(2) / np.median(importance) if len(importance) > 0 else 1.0
 
     def __call__(self, env) -> float:
         t = env.n_steps
         if t >= self.T - 1:
             return 0.0
 
-        # Unwrap env.agent_data for exposures and equities
+        curr_cash = env.agent_data[t-1, AgentDataCol.cash]
+        curr_equity = env.agent_data[t, AgentDataCol.pre_action_equity]
+        curr_exposure = (curr_equity - curr_cash) / curr_equity
+
+        v_current = interp(self.v[t], curr_exposure, self.n_exposures)
+        q_min_current = interp(self.q_min[t], curr_exposure, self.n_exposures)
+
+        raw_importance = v_current - q_min_current
+        if raw_importance < 1e-9:
+            return 0.5
+
+        next_cash = env.agent_data[t, AgentDataCol.cash]
+        next_equity = env.agent_data[t+1, AgentDataCol.pre_action_equity]
+        next_exposure = (next_equity - next_cash) / next_equity
+
+        true_log_return = np.log(next_equity / curr_equity)
+        v_next = interp(self.v[t+1], next_exposure, self.n_exposures)
+        q_taken = true_log_return + v_next
+
+        goodness = ((q_taken - q_min_current) / raw_importance) * 2 - 1
+        importance = 1.0 - np.exp(-self.lambda_robust * raw_importance)
+
+        r = importance * goodness
+
+        return np.clip(r, -1.0, 1.0)
+
+class DPRewardFunctionB:
+    def __init__(self, table: DPTable):
+        self.v = table.value_table
+        self.q_min = table.q_min_table
+        self.n_exposures = table.n_exposures
+        self.T = self.v.shape[0]
+        importance = self.v - self.q_min
+        importance = importance[importance > 1e-9]
+        self.norm = 1 / np.percentile(importance, 99) if len(importance) > 0 else 1.0
+
+    def __call__(self, env) -> float:
+        t = env.n_steps
+        if t >= self.T - 1:
+            return 0.0
+
         curr_cash = env.agent_data[t-1, AgentDataCol.cash]
         curr_equity = env.agent_data[t, AgentDataCol.pre_action_equity]
         curr_exposure = (curr_equity - curr_cash) / curr_equity
@@ -115,16 +149,45 @@ class DPRewardFunction:
         next_equity = env.agent_data[t+1, AgentDataCol.pre_action_equity]
         next_exposure = (next_equity - next_cash) / next_equity
 
-        # True one-step log-return
         true_log_return = np.log(next_equity / curr_equity)
 
-        # Interpolated DP expected cumulative log-equity from current/next state
-        exp_log_next_optimal = interp(self.v[t+1], next_exposure, self.n_actions)
-        exp_log_worst = interp(self.q_min[t], curr_exposure, self.n_actions)
+        v_current = interp(self.v[t], curr_exposure, self.n_exposures)
+        v_next = interp(self.v[t+1], next_exposure, self.n_exposures)
 
-        # How much was the action better than the worst action you could have taken?
-        # and how significant was this difference? (Normalize)
-        r = (true_log_return + exp_log_next_optimal - exp_log_worst) / self.max_diff
+        r = (true_log_return + v_next - v_current) * self.norm
 
-        # Clip and adjust
+        return np.clip(r+1, 0.0, 1.0)
+
+class DPRewardFunction:
+
+    def __init__(self, table: DPTable):
+        # Reward computation
+        self.v = table.value_table
+        self.q_min = table.q_min_table
+        self.n_exposures = table.n_exposures
+        self.T = self.v.shape[0]
+        importance = self.v - self.q_min
+        importance = importance[importance > 1e-9]
+        self.norm = np.percentile(importance, 99) if len(importance) > 0 else 1.0
+
+    def __call__(self, env) -> float:
+        t = env.n_steps
+        if t >= self.T - 1:
+            return 0.0
+
+        curr_cash = env.agent_data[t-1, AgentDataCol.cash]
+        curr_equity = env.agent_data[t, AgentDataCol.pre_action_equity]
+        curr_exposure = (curr_equity - curr_cash) / curr_equity
+
+        next_cash = env.agent_data[t, AgentDataCol.cash]
+        next_equity = env.agent_data[t+1, AgentDataCol.pre_action_equity]
+        next_exposure = (next_equity - next_cash) / next_equity
+
+        true_log_return = np.log(next_equity / curr_equity)
+
+        v_next = interp(self.v[t+1], next_exposure, self.n_exposures)
+        q_min_current = interp(self.q_min[t], curr_exposure, self.n_exposures)
+
+        r = (true_log_return + v_next - q_min_current) / self.norm
+
         return np.clip(r, 0.0, 1.0)
