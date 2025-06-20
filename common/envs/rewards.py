@@ -93,7 +93,6 @@ class DPRewardFunctionC:
         self.n_exposures = table.n_exposures
         self.T = self.v.shape[0]
         importance = self.v - self.q_min
-        importance = importance[importance > 1e-9]
         self.importance = to_percentiles(importance)
 
     def __call__(self, env) -> float:
