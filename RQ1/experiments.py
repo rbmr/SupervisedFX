@@ -12,7 +12,7 @@ import argparse
 import itertools
 import json
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -26,7 +26,8 @@ from torch import nn
 from common.data.feature_engineer import (FeatureEngineer, as_min_max_fixed,
                                           as_ratio_of_other_column, as_z_score,
                                           bollinger_bands, complex_7d, complex_24h,
-                                          macd, parabolic_sar, remove_columns, as_robust_norm, adx, ema, cci, stochastic_oscillator, rsi, atr)
+                                          macd, parabolic_sar, remove_columns, as_robust_norm, adx, ema,
+                                          stochastic_oscillator, rsi, atr)
 from common.data.stepwise_feature_engineer import (StepwiseFeatureEngineer,
                                                    calculate_current_exposure)
 from common.envs.callbacks import ActionHistogramCallback, SaveCallback
@@ -190,6 +191,21 @@ def add_cnn_features(df):
 
     return df
 
+def custom_serializer(obj):
+    """
+    A custom JSON serializer for objects not serializable by default json code.
+    This function will be passed to the `default` parameter of `json.dumps()`.
+    """
+    if isinstance(obj, type):
+        return obj.__name__
+    if callable(obj):
+        return obj.__name__
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    try:
+        return str(obj)
+    except (TypeError, AttributeError):
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 @lazy_singleton
 def get_default_forex_data() -> ForexCandleData:
@@ -300,15 +316,9 @@ class ExperimentConfig:
 
     def log_info(self, experiment_dir: Path):
         """Logs some information about this experiment to a JSON file inside experiment_dir."""
-        info = dict(
-            name = self.name,
-            actor_shape = self.actor_shape,
-            critic_shape = self.critic_shape,
-            activation_fn = self.activation_fn.__name__,
-        )
         experiment_dir.mkdir(parents=True, exist_ok=True)
         with open(experiment_dir / "experiment_config.json", "w") as f:
-            json.dump(info, f, indent=4) # type: ignore
+            json.dump(asdict(self), f, default=custom_serializer, indent=4) # type: ignore
 
 def _run_experiment(experiment_group: str, config: ExperimentConfig, seed: int = SEED):
     """
@@ -477,11 +487,11 @@ def run_division_experiments():
     n_params2 = get_n_params(DEFAULT_INP, *shape2, DEFAULT_OUT)
     flops1 = get_n_flops(DEFAULT_INP, *shape1, DEFAULT_OUT)
     flops2 = get_n_flops(DEFAULT_INP, *shape2, DEFAULT_OUT)
-    logging.info(f"Slight bias: W1: {w1}, W2: {w2}, Total params {n_params1 + n_params2}, Flops {flops1 + flops2}")
+    logging.info(f"Large bias: W1: {w1}, W2: {w2}, Total params {n_params1 + n_params2}, Flops {flops1 + flops2}")
     experiments.append(ExperimentConfig(name="large_actor_bias",actor_shape=shape1,critic_shape=shape2, line_color=CUD_COLORS[3], line_marker=">"))
     experiments.append(ExperimentConfig(name="large_critic_bias",actor_shape=shape2,critic_shape=shape1, line_color=CUD_COLORS[4], line_marker="<"))
 
-    _run_experiments(experiment_group="20250620-144037_network_division", experiments=experiments, n_seeds=5, add_timestamp=False)
+    _run_experiments(experiment_group="network_division", experiments=experiments, n_seeds=4)
 
 def run_size_experiments():
     """
@@ -493,7 +503,7 @@ def run_size_experiments():
             ExperimentConfig(name=f"{depth_name}-{width_name}", net_shape=[width] * depth, line_marker=marker, line_color=color)
             for width_name, width, color, marker in zip(["narrow", "moderate", "wide", "very_wide"], [8, 16, 32, 64], CUD_COLORS, MARKERS)
         ]
-        _run_experiments(experiment_group=f"{depth_name}_networks", experiments=experiments)
+        _run_experiments(experiment_group=f"{depth_name}_networks", experiments=experiments, n_seeds=3, num_workers=3)
 
 def run_activation_experiments():
     """
@@ -512,7 +522,7 @@ def run_activation_experiments():
             activation_fn=activation_fn,
         ))
 
-    _run_experiments(experiment_group=f"activation_functions", experiments=experiments, n_seeds=5)
+    _run_experiments(experiment_group=f"activation_functions", experiments=experiments, n_seeds=4)
 
 def run_cnn_experiments():
     """
@@ -563,7 +573,7 @@ def run_cnn_experiments():
     _run_experiments(
         experiment_group="cnn_vs_ta",
         experiments=experiments,
-        n_seeds=3,
+        n_seeds=5,
     )
 
 def run_decay_experiments():
@@ -582,39 +592,19 @@ def run_decay_experiments():
             optimizer_class=torch.optim.Adam,
             optimizer_kwargs=dict(weight_decay=weight_decay),
         )
-        for weight_decay, marker, color in zip([1e-6, 1e-5, 1e-4, 1e-3], MARKERS, CUD_COLORS)
+        for weight_decay, marker, color in zip([1e-6, 1e-5, 1e-4, 1e-3, 1e-2], MARKERS, CUD_COLORS)
     ]
 
     _run_experiments(
         experiment_group="weight_decay",
         experiments=experiments,
-        n_seeds=3,
-    )
-
-def run_baseline():
-
-    experiments = [
-        ExperimentConfig(
-            name=f"SAC_32x32",
-            net_shape=[32, 32],
-            line_color=CUD_COLORS[0],
-            line_marker=MARKERS[0],
-            device="cpu",
-            optimizer_class=torch.optim.AdamW,
-            optimizer_kwargs=dict(weight_decay=1e-6),
-        )
-    ]
-
-    _run_experiments(
-        experiment_group="baseline",
-        experiments=experiments,
-        n_seeds=1,
+        n_seeds=4,
     )
 
 def run_reward_experiments():
     reward_functions = [
-        # (DPRewardFunction, True),
-        # (DPRewardFunctionB, True),
+        (DPRewardFunction, True),
+        (DPRewardFunctionB, True),
         (DPRewardFunctionC, True),
         (percentage_return, False)
     ]
@@ -642,7 +632,6 @@ def run():
     """
 
     experiments = [
-        run_baseline,
         run_dummies,
         run_decay_experiments,
         run_size_experiments,
