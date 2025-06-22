@@ -30,8 +30,8 @@ PARAM_PRESETS = {
     },
     "M15_0.8": {
         "granularity": Timeframe.M15,
-        "start_time": datetime(2017, 1, 1, 22),
-        "end_time": datetime(2024, 12, 31, 21, 45),
+        "start_time": datetime(2022, 1, 2, 22),
+        "end_time": datetime(2025, 5, 16, 20, 45),
         "split_ratio": 0.8
     },
     "M15_0.7": {
