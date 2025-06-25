@@ -7,6 +7,7 @@ COMMON_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = COMMON_DIR.parent
 DATA_DIR = PROJECT_DIR / "data"
 DP_CACHE_DIR = DATA_DIR / "dp_cache"
+MODEL_DIR = DATA_DIR / "models"
 
 SEED = 42
 
