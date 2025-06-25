@@ -3,7 +3,7 @@ from scipy import stats
 import numpy as np
 from pathlib import Path
 
-from common.envs.dp import DPTable
+from src.envs.dp import DPTable
 
 table = DPTable.load(Path("C:\\Users\\rober\\CSE3000\\data\\dp_cache\\dp_table_a15_e15_tc0p0001_dataf8695d276f0e966c.npz"))
 
