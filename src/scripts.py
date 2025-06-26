@@ -1,6 +1,7 @@
 """
 This file contains some simple scripts that can be useful anywhere during the project.
 """
+import ast
 import functools
 import json
 import os
@@ -14,15 +15,57 @@ from datetime import datetime, timedelta
 from functools import partial
 from multiprocessing import get_context
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, TypeVar
+from typing import Any, Callable, Dict, Generator, TypeVar, Optional
 
 import numpy as np
 import pandas as pd
 import requests
-from scipy.stats import rankdata
 
 K = TypeVar("K")
 V = TypeVar("V")
+
+def safe_literal_eval(s: Optional[str]):
+    if s is None:
+        return None
+    try:
+        return ast.literal_eval(s)
+    except ValueError or SyntaxError:
+        return None
+
+def rolling_apply(arr: np.ndarray, window: int, fn: Callable[[np.ndarray], np.float64]):
+    assert window > 0, f"window must be positive, was {window}"
+    result = np.full(arr.shape[0], np.nan, dtype=np.float64)
+    for end in range(window, arr.shape[0]+1):
+        result[end-1] = fn(arr[end-window:end])
+    return result
+
+def shift(arr: np.ndarray, num: int) -> np.array:
+    """Helper function to shift an array similar to Pandas shift"""
+    shifted_arr = np.full_like(arr, np.nan)
+    if num > 0:
+        shifted_arr[num:] = arr[:-num]
+    elif num < 0:
+        shifted_arr[:num] = arr[-num:]
+    else:
+        shifted_arr[:] = arr
+    return shifted_arr
+
+def df_to_np_dict(df: pd.DataFrame) -> dict[str, np.ndarray]:
+    """
+    Converts a Pandas DataFrame to a dictionary of NumPy arrays.
+    """
+    numpy_dict = {}
+    for col_name in df.columns:
+        col_data = df[col_name]
+        assert col_data.dtype != 'object'
+        if col_data.dtype == 'object':
+            raise TypeError(f"Column '{col_name}' has 'object' dtype, which is not allowed. "
+                            "Please ensure all columns are numeric, datetime, or boolean.")
+        if pd.api.types.is_datetime64_any_dtype(col_data):
+            numpy_dict[col_name] = col_data.to_numpy(dtype='datetime64[ns]')
+        else:
+            numpy_dict[col_name] = col_data.to_numpy()
+    return numpy_dict
 
 def compute_sliding_window(arr: np.ndarray, window: int, fns: list[Callable[[np.ndarray], float]]):
     """
@@ -54,16 +97,6 @@ class lazy_singleton:
         if self.cache is self._NOT_COMPUTED:
             self.cache = self.func()
         return self.cache
-
-def to_percentiles(data: np.ndarray) -> np.ndarray:
-    """
-    Converts a NumPy array of float64s to their percentiles in [0, 1].
-    """
-    # Handle the edge case of a single-element array to avoid division by zero.
-    if data.size <= 1:
-        return np.full(data.shape, 0.5)
-    percentiles = (rankdata(data.flatten(), method='average') - 1) / (data.size - 1)
-    return percentiles.reshape(data.shape)
 
 def parallel_apply(func: Callable[[K], V], inputs: list[K], num_workers: int) -> None:
     """
@@ -377,82 +410,3 @@ def flatten_dict(d: Dict[str, Any], sep=".") -> Dict[str, Any]:
         else:
             flat_dict[key] = value
     return flat_dict
-
-def prepare_data(df: pd.DataFrame, lookback_window_size: int, features: list[str], RSI_PERIOD = 14):
-    """
-    Prepares the data by calculating necessary features and normalizing them.
-    Uses stockstats for RSI and MACD.
-    """
-
-    # Calculate mid prices for indicators
-    df['mid_close'] = (df['close_bid'] + df['close_ask']) / 2
-    df['mid_open'] = (df['open_bid'] + df['open_ask']) / 2
-    df['mid_high'] = (df['high_bid'] + df['high_ask']) / 2
-    df['mid_low'] = (df['low_bid'] + df['low_ask']) / 2
-
-    # 1. Log returns
-    df['log_ret_bid'] = np.log(df['close_bid'] / df['close_bid'].shift(1)).fillna(0)
-    df['log_ret_ask'] = np.log(df['close_ask'] / df['close_ask'].shift(1)).fillna(0)
-
-    # 2. Normalized Spread
-    df['spread'] = df['close_ask'] - df['close_bid']
-    df['norm_spread'] = df['spread'] / df['mid_close']
-
-    # 3. Normalized Volume
-    # Ensure volume exists and handle potential division by zero or all-zero window
-    if 'volume' in df.columns:
-        vol_min = df['volume'].rolling(window=lookback_window_size, min_periods=1).min()
-        vol_max = df['volume'].rolling(window=lookback_window_size, min_periods=1).max()
-        denominator = vol_max - vol_min
-        df['norm_volume'] = np.where(denominator == 0, 0.5, (df['volume'] - vol_min) / denominator)
-        df['norm_volume'] = df['norm_volume'].fillna(0.5)
-    else:
-        df['norm_volume'] = 0.5  # Default if no volume data
-
-    # 4. Technical Indicators using stockstats
-    # stockstats requires lowercase column names: open, high, low, close, volume
-    stock_df_input = pd.DataFrame(index=df.index)
-    stock_df_input['open'] = df['mid_open']
-    stock_df_input['high'] = df['mid_high']
-    stock_df_input['low'] = df['mid_low']
-    stock_df_input['close'] = df['mid_close']
-    if 'volume' in df.columns:
-        stock_df_input['volume'] = df['volume']
-    else:  # stockstats might need a volume column, even if it's just zeros or ones
-        stock_df_input['volume'] = np.zeros(len(df))
-
-    stock_sdataframe = StockDataFrame.retype(stock_df_input)
-
-    # RSI
-    rsi_col_name = f'rsi_{RSI_PERIOD}'
-    df['rsi'] = stock_sdataframe[rsi_col_name]
-
-    # MACD
-    # stockstats calculates 'macd' (MACD line), 'macds' (signal line), 'macdh' (histogram = macd - macds)
-    # We need MACD difference (histogram)
-    df['macd_diff'] = stock_sdataframe['macdh']  # macdh is macd - macds
-
-    # Normalize indicators (MinMaxScaler like approach over the entire dataset for simplicity here)
-    # For a proper setup, fit scalers ONLY on training data and transform train/test.
-    for col in ['rsi', 'macd_diff']:
-        min_val = df[col].min()
-        max_val = df[col].max()
-        if max_val > min_val:
-            df[f'norm_{col}'] = (df[col] - min_val) / (max_val - min_val)
-        else:
-            df[f'norm_{col}'] = 0.5
-        df[f'norm_{col}'] = df[f'norm_{col}'].fillna(0.5)  # Fill NaNs from indicator calculation period
-
-    df = df[features + ['close_bid', 'close_ask']]
-    df = df.fillna(0)
-
-    if len(df) < lookback_window_size:
-        raise ValueError("DataFrame length is less than lookback_window_size after processing.")
-
-    return df
-
-def filter_df(df: pd.DataFrame):
-    """
-    Removes rows containing NaNs or Infinities.
-    """
-    return df[~df.isin([np.nan, np.inf, -np.inf]).any(axis=1)]

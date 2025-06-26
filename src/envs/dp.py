@@ -213,9 +213,7 @@ def get_optimal_action(table: DPTable, t: int, current_exposure: float) -> float
     """
     if t >= table.n_timesteps:
         raise ValueError("t is out of bounds.")
-    exposure_idx = get_bin_idx(current_exposure, table.n_exposures)
-    action_idx = table.policy_table[t, exposure_idx]
-    return get_bin_val(action_idx, table.n_actions) # type: ignore
+    return interp(table.policy_table[t], current_exposure, table.n_exposures)
 
 def get_optimal_action_fn(table: DPTable, env: ForexEnv) -> Callable[[...], float]:
     """
