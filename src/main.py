@@ -26,10 +26,36 @@ from src.models.dummy_models import DummyModel
 from src.models.train_eval import run_model
 from src.scripts import find_first_valid_row, contains_nan_or_inf
 
+import atexit
+import subprocess
+import time
+
 TRANSACTION_COST_PCT = 5 / 100_000
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 DP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+def launch_tensorboard(log_dir: Path):
+    """Launches Tensorboard in a background process and registers its termination."""
+    command = ["tensorboard", "--logdir", str(log_dir)]
+    print(f"Starting TensorBoard for log directory: {log_dir}")
+    try:
+        tb_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        logging.info("TensorBoard should become available at http://localhost:6006/")
+    except FileNotFoundError:
+        logging.warning("\nERROR: 'tensorboard' command not found.")
+        logging.warning("Please ensure TensorFlow is installed correctly and 'tensorboard' is in your system's PATH.\n")
+        return
+
+    def cleanup():
+        print("Terminating TensorBoard process...")
+        tb_process.terminate()
+        tb_process.wait() # Wait for the process to actually exit
+        print("TensorBoard process terminated.")
+
+    atexit.register(cleanup)
+
 
 
 class SuboptimalityDataGenerator(Sequence):
@@ -190,6 +216,7 @@ def train_model(forex_data: ForexData):
     model_checkpoint = ModelCheckpoint(str(model_path), monitor='val_loss', save_best_only=True, mode='min')
 
     log_dir = model_dir / "logs" / datetime.now().strftime("%Y%m%d-%H%M%S")
+    launch_tensorboard(log_dir)
     tensorboard_callback = TensorBoard(log_dir=log_dir, histogram_freq=1)
 
     logging.info("Training model...")
