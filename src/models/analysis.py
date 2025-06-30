@@ -64,7 +64,6 @@ def analyse_individual_run(results_file: Path, model_name: str):
     dtypes = {col: 'float32' for col in all_columns}
     dtypes["step"] = 'int32'
     dtypes["done"] = 'boolean'
-    dtypes["info.market_data.date_gmt"] = 'float64'
     df = pd.read_csv(results_file, dtype=dtypes)
 
     # Analyze results
@@ -87,21 +86,21 @@ def analyse_individual_run(results_file: Path, model_name: str):
 
     # Extract arrays that will be used
     np_columns = drop_and_return_numpy(df,[
-        'info.market_data.close_bid', 'info.market_data.close_ask',
-        'info.agent_data.pre_action_equity',
-        'info.agent_data.equity_open', 'info.agent_data.equity_high',
-        'info.agent_data.equity_low', 'info.agent_data.equity_close',
-        'info.agent_data.target_exposure', 'info.market_data.date_gmt',
+        'info.market_data.open_bid',
+        'info.market_data.open_ask',
+        'info.agent_data.eot_equity',
+        'info.market_data.time_ns',
+        'action',
         'reward'
     ])
-    close_bid, close_ask, pre_action_equity, equity_open, equity_high, equity_low, equity_close, actions, dates, rewards = np_columns
+    open_bid, open_ask, eot_equity, dates, actions, rewards = np_columns
     rewards = np.nan_to_num(rewards, nan=0.0)
     del df # df is no longer necessary
 
     # Plot market data
     plt.figure(figsize=(12, 6))
-    plt.plot(close_bid, label='Close Bid Prices')
-    plt.plot(close_ask, label='Close Ask Prices')
+    plt.plot(open_bid, label='Open Bid Prices')
+    plt.plot(open_ask, label='Open Ask Prices')
     plt.title(f"Close Prices for {model_name}")
     plt.xlabel('Time Step')
     plt.ylabel('Price')
@@ -109,12 +108,9 @@ def analyse_individual_run(results_file: Path, model_name: str):
     plt.savefig(output_dir / f"market_data.png")
     plt.close()
 
-    # Plot equity OHLC
+    # Plot equity
     plt.figure(figsize=(12, 6))
-    plt.plot(equity_open, label='Equity Open', color='blue')
-    plt.plot(equity_high, label='Equity High', color='green')
-    plt.plot(equity_low, label='Equity Low', color='red')
-    plt.plot(equity_close, label='Equity Close', color='orange')
+    plt.plot(eot_equity, label='End of timeframe Equity', color='blue')
     plt.title(f"Equity OHLC for {model_name}")
     plt.xlabel('Time Step')
     plt.ylabel('Price')
@@ -123,7 +119,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
     plt.close()
 
     # Calculate sharpe ratio on the close prices of equity.
-    equity_returns = np.diff(equity_close) / equity_close[:-1]
+    equity_returns = np.diff(eot_equity) / eot_equity[:-1]
     mean_return = np.mean(equity_returns)
     std_return = np.std(equity_returns, ddof=1)
     if std_return > 0:
@@ -142,8 +138,8 @@ def analyse_individual_run(results_file: Path, model_name: str):
         sharpe_ratio = sharpe_ratio * np.sqrt(N)
 
     # Vectorized drawdown calculation
-    cummax_equity = np.maximum.accumulate(equity_close)
-    drawdown = equity_close - cummax_equity
+    cummax_equity = np.maximum.accumulate(eot_equity)
+    drawdown = eot_equity - cummax_equity
     max_drawdown = np.min(drawdown)
     plt.figure(figsize=(12, 6))
     plt.plot(drawdown, label='Drawdown', color='purple')
@@ -223,7 +219,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
         # Calculate returns and durations for each trade
         # A trade's return is equity at the end of the period minus equity at the start
         # Get the total number of data points.
-        num_data_points = len(equity_open)
+        num_data_points = len(eot_equity)
 
         # Initialize the array to hold the calculated returns for each trade.
         trade_returns = np.zeros(len(trade_starts), dtype=np.float32)
@@ -241,7 +237,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
             ends_normal = trade_ends[normal_trades_mask]
 
             # For these trades, return is calculated using the open equity of the bar AFTER the trade closes.
-            trade_returns[normal_trades_mask] = pre_action_equity[ends_normal] - pre_action_equity[starts_normal]
+            trade_returns[normal_trades_mask] = eot_equity[ends_normal] - eot_equity[starts_normal]
 
         # --- Handle the Special Case (trade open at the very end) ---
         
@@ -252,7 +248,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
 
             # For this final trade, we "mark-to-market" using the CLOSE equity of the final bar.
             # This provides the most accurate final Profit & Loss snapshot.
-            trade_returns[final_candle_mask] = equity_close[last_valid_index] - pre_action_equity[starts_special]
+            trade_returns[final_candle_mask] = eot_equity[last_valid_index] - eot_equity[starts_special]
 
         ######### END TRADE RETURNS #############
 
@@ -269,7 +265,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
         total_trades_returns = np.sum(trade_returns)
         average_trade_return = np.mean(trade_returns)
         # Calculate percentage return based on the equity at the start of each trade
-        average_trade_return_pct = np.mean(trade_returns / equity_open[trade_starts])
+        average_trade_return_pct = np.mean(trade_returns / eot_equity[trade_starts])
         average_trade_duration_hours = np.mean(trade_durations)
         total_winning_rate = np.sum(winning_trades) / num_trades if num_trades > 0 else 0
 
@@ -291,7 +287,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
     # ##################################################################
 
     # average spread of close_bid and close_ask and open_bid and open_ask
-    spread = close_ask - close_bid
+    spread = open_ask - open_bid
     average_spread = np.mean(spread)
 
     if total_trades > 0:
@@ -301,7 +297,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
         # 1. Get the equity value at the moment the trade decision was made.
         # This is the equity from the previous timestep. Handle edge case for a trade at t=0.
         decision_indices = np.maximum(0, trade_starts - 1)
-        equity_for_sizing = equity_open[decision_indices]
+        equity_for_sizing = eot_equity[decision_indices]
 
         # 2. Get the allocation rate for each trade from the 'actions' array.
         allocation_rates = np.abs(actions[trade_starts])
@@ -312,8 +308,8 @@ def analyse_individual_run(results_file: Path, model_name: str):
         # 4. Determine the price at which the position was opened to convert money to position size.
         # Longs are opened at the 'ask', shorts at the 'bid'.
         prices_at_open = np.where(actions[trade_starts] > 0,
-                                  close_ask[trade_starts],
-                                  close_bid[trade_starts])
+                                  open_ask[trade_starts],
+                                  open_bid[trade_starts])
 
         # Prevent division by zero if prices can be zero (highly unlikely in forex data).
         prices_at_open[prices_at_open == 0] = 1
@@ -325,18 +321,16 @@ def analyse_individual_run(results_file: Path, model_name: str):
         estimated_total_spread_cost = np.sum(position_sizes * average_spread)
     else:
         estimated_total_spread_cost = 0.0
-    
-    # total equity change
-    equity_change = equity_close[-1] - equity_open[0]
-    equity_change_pct = (equity_change / equity_open[0]) * 100 if equity_open[0] != 0 else 0.0
 
+    # total equity change
+    equity_change = eot_equity[-1] - eot_equity[0]
+    equity_change_pct = (equity_change / eot_equity[0]) * 100 if eot_equity[0] != 0 else 0.0
 
     # rewards
     total_rewards = np.sum(rewards)
     average_rewards = np.mean(rewards) if len(rewards) > 0 else 0.0
     average_positive_rewards = np.mean(rewards[rewards > 0]) if np.any(rewards > 0) else 0.0
     average_negative_rewards = np.mean(rewards[rewards < 0]) if np.any(rewards < 0) else 0.0
-    
 
     # Prepare results
     info = {

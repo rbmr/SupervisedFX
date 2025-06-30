@@ -24,6 +24,33 @@ import requests
 K = TypeVar("K")
 V = TypeVar("V")
 
+def contains_nan_or_inf(arr: np.ndarray) -> bool:
+    """
+    Returns true if any element of the array is NaN or Inf, else returns false.
+    arr can be any shape.
+    """
+    return np.isnan(arr).any() or np.isinf(arr).any()
+
+def find_first_valid_row(arr: np.ndarray) -> int:
+    """
+    Returns the index of the first row without a NaN or an Inf.
+    """
+    assert arr.ndim == 2
+    for i in range(arr.shape[0]):
+        if not contains_nan_or_inf(arr[i]):
+            return i
+    return -1
+
+def find_first_invalid_row(arr: np.ndarray) -> int:
+    """
+    Returns the index of the first row that contains a NaN or an Inf.
+    """
+    assert arr.ndim == 2
+    for i in range(arr.shape[0]):
+        if contains_nan_or_inf(arr[i]):
+            return i
+    return -1
+
 def safe_literal_eval(s: Optional[str]):
     if s is None:
         return None
@@ -293,7 +320,7 @@ def round_datetime(date_time: datetime, interval: int) -> datetime:
 def exact_divide(a: int, b: int) -> int:
     """
     Performs an exact division of `a` by `b`, returning an integer.
-    Raises a `ValueError`, if `a` is not divisible by `b`.
+    Raises a `ValueError` if `a` is not divisible by `b`.
     """
     if a % b == 0:
         return a // b
@@ -305,6 +332,22 @@ def render_horz_bar(height: float) -> str:
     remainder = height - full_blocks
     partial_block = " ▏▎▍▌▋▊▉"[int(remainder * 8)] # 0/8 - 7/8
     return "█" * full_blocks + partial_block
+
+def parse_args(args_string: str | None) -> tuple:
+    """
+    Parses function arguments.
+    None -> ()
+    "" -> ()
+    "1" -> (1,)
+    "(1,2,3)" -> ((1,2,3),)
+    "1,2,3" -> (1,2,3)
+    """
+    if args_string is None:
+        return ()
+    args_string = args_string.strip()
+    if args_string == "":
+        return ()
+    return ast.literal_eval(f"({args_string},)")
 
 def circ_slice(arr, i, j):
     """Perform circular (wraparound) slicing on a NumPy array."""
@@ -327,40 +370,6 @@ def split_df(df: pd.DataFrame, ratio: float):
     df1 = df.iloc[:split_index].reset_index(drop=True)
     df2 = df.iloc[split_index:].reset_index(drop=True)
     return df1, df2
-
-def contains_nan_or_inf(df: pd.DataFrame):
-    """
-    Returns True if any numeric column contains NaNs or infinities.
-    """
-    numeric_df = df.select_dtypes(include=[np.number])
-    assert len(numeric_df.columns) > 0, "cannot check for nans or infinities in non-numeric dataframes"
-    return numeric_df.isna().values.any() or np.isinf(numeric_df.values).any()
-
-def first_row_without_nan_or_inf(df: pd.DataFrame) -> int:
-    """
-    Returns the index of the first row where all numeric columns are finite.
-    Returns -1 if no such row exists.
-    """
-    numeric_df = df.select_dtypes(include=[np.number])
-    assert len(numeric_df.columns) > 0, "cannot check for nans or infinities in non-numeric dataframes"
-    for i in range(len(df)):
-        row = numeric_df.iloc[i].values
-        if not (np.isnan(row).any() or np.isinf(row).any()):
-            return i
-    return -1
-
-def first_row_with_nan_or_inf(df: pd.DataFrame) -> int:
-    """
-    Returns the index of the first row where not all numeric columns are finite.
-    Returns -1 if no such row exists.
-    """
-    numeric_df = df.select_dtypes(include=[np.number])
-    assert len(numeric_df.columns) > 0, "cannot check for nans or infinities in non-numeric dataframes"
-    for i in range(len(df)):
-        row = numeric_df.iloc[i].values
-        if np.isnan(row).any() or np.isinf(row).any():
-            return i
-    return -1
 
 def set_seed(seed_value: int):
     """

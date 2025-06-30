@@ -8,18 +8,18 @@ at each state (timestep, exposure_level).
 import hashlib
 import json
 import logging
-import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Self
+from typing import Self
 
 import numpy as np
+import tensorflow as tf
 from numpy.typing import NDArray
 from tqdm import trange
 
-from src.constants import MarketDataCol, DP_CACHE_DIR, AgentDataCol
+from src.constants import DP_CACHE_DIR
 from src.envs.forex_env import ForexEnv
-from src.envs.trade import calculate_equity, execute_trade, reverse_equity
+from src.envs.trade import execute_trade_1equity
 
 DATA_HASH_LENGTH = 16
 
@@ -39,11 +39,7 @@ class DPTable:
         """
         Saves this DPTable to a .npz file.
         """
-        # Validate input
-        if path.suffix != '.npz':
-            raise ValueError("File must be a .npz file.")
-
-        # Setup metadata
+        assert path.suffix == ".npz", "File must be a .npz file."
         metadata = json.dumps({
             "transaction_cost_pct": self.transaction_cost_pct,
             "n_actions": self.n_actions,
@@ -51,34 +47,20 @@ class DPTable:
             "n_timesteps": self.n_timesteps,
             "data_hash": self.data_hash,
         }).encode("utf-8")
-
-        # Save DPTable
-        np.savez(path,
-                 value=self.value_table,
-                 policy=self.policy_table,
-                 q_min=self.q_min_table,
-                 metadata=metadata)
+        np.savez(path, value=self.value_table, policy=self.policy_table,
+                 q_min=self.q_min_table, metadata=metadata)
 
     @classmethod
     def load(cls, path: Path) -> Self:
         """
         Loads this DPTable from a .npz file.
         """
-        # Validate input
-        if path.suffix != '.npz':
-            raise ValueError("File must be a .npz file.")
-
-        # Load data
+        assert path.exists(), f"File {path} does not exist."
+        assert path.suffix == ".npz", "File must be a .npz file."
         data = np.load(path)
         metadata = json.loads(data["metadata"].item())
-
-        # Return DPTable
-        return cls(
-            value_table=data["value"],
-            policy_table=data["policy"],
-            q_min_table=data["q_min"],
-            **metadata
-        )
+        return cls(value_table=data["value"], policy_table=data["policy"],
+                   q_min_table=data["q_min"], **metadata)
 
 def get_bins(n: int) -> np.ndarray:
     """
@@ -98,20 +80,24 @@ def get_bin_val(i: int, n: int) -> float:
     """
     return i / (n - 1.0) * 2.0 - 1.0
 
-def interp(vs: np.ndarray, x: float, n: int):
+@tf.function
+def interp(vs: tf.Tensor, x: tf.Tensor, n: int) -> tf.Tensor:
     """
-    Calculates a bi-linear interpolation of a row from the value table using an exposure x.
+    Calculates a bi-linear interpolation of rows from a value table using a batch of exposures.
     """
-    x = np.clip(x, -1.0, 1.0) # Could exit -1.0, to 1.0 because of floating point inaccuracies.
-    pos = (x + 1) * 0.5 * (n - 1)
-    i0 = math.floor(pos)
-    i1 = math.ceil(pos)
-    if i0 == i1: # shortcut and prevent div by zero
-        return vs[i0]
-    x0 = get_bin_val(i0, n)
-    x1 = get_bin_val(i1, n)
-    a = (x - x0) / (x1 - x0)
-    return (1 - a) * vs[i0] + a * vs[i1]
+    x = tf.clip_by_value(x, -1.0, 1.0)
+    pos = (x + 1.0) * 0.5 * (tf.cast(n, tf.float32) - 1.0)
+    i0_f = tf.floor(pos)
+    i1_f = tf.math.ceil(pos)
+    i0 = tf.cast(i0_f, tf.int32)
+    i1 = tf.cast(i1_f, tf.int32)
+    x0 = tf.cast(i0, tf.float32) / (tf.cast(n, tf.float32) - 1.0) * 2.0 - 1.0
+    x1 = tf.cast(i1, tf.float32) / (tf.cast(n, tf.float32) - 1.0) * 2.0 - 1.0
+    a = tf.math.divide_no_nan((x - x0), (x1 - x0))
+    v0 = tf.gather(vs, i0, batch_dims=1)
+    v1 = tf.gather(vs, i1, batch_dims=1)
+    return (1.0 - a) * v0 + a * v1
+
 
 def compute_dp_table(market_data: np.ndarray,
                      transaction_cost_pct: float = 0.0,
@@ -125,21 +111,20 @@ def compute_dp_table(market_data: np.ndarray,
     - q_min_table[t, e] the worst one-step continuation log-equity among all actions at (t,e).
     Where the equity ratio is defined as the ratio between the current equity and the equity at the end of the timestep.
     """
-    # Validate input
-    if not 1 <= n_actions <= 256:
-        raise ValueError(f"n_actions must be in [1, 256], was {n_actions}")
-    if not 1 <= n_exposures <= 256:
-        raise ValueError(f"n_exposures must be in [1, 256], was {n_actions}")
-    if not 0 <= transaction_cost_pct <= 1:
-        raise ValueError(f"transaction_cost_pct must be in [0, 1], was {transaction_cost_pct}")
-
-    # Setup variables
+    # Setup
+    assert 1 <= n_actions <= 256, f"n_actions must be in [1, 256], was {n_actions}"
+    assert 1 <= n_exposures <= 256, f"n_exposures must be in [1, 256], was {n_actions}"
+    assert 0 <= transaction_cost_pct <= 1, f"transaction_cost_pct must be in [0, 1], was {transaction_cost_pct}"
     exposures = get_bins(n_exposures)
     actions = get_bins(n_actions)
     n_timesteps = market_data.shape[0]
     data_hash = data_hash if data_hash is not None else get_data_hash(market_data)
-
     logging.info(f"Generating {get_dp_table_name(data_hash, transaction_cost_pct, n_actions, n_exposures)}")
+
+    # Setup tensors
+    market_data = tf.constant(market_data, dtype=tf.float32)
+    exposures = tf.constant(exposures.reshape(1, -1), dtype=tf.float32) # (1, n_exposures)
+    actions = tf.constant(actions.reshape(-1, 1), dtype=tf.float32) # (n_actions, 1)
 
     # Initialize tables
     value_table = np.empty((n_timesteps, n_exposures), dtype=np.float64)
@@ -154,47 +139,34 @@ def compute_dp_table(market_data: np.ndarray,
     # Perform backward in to fill the tables
     for t in trange(n_timesteps - 2, -1, -1):  # Skip terminal
 
-        # Get prices
-        curr_bid = market_data[t, MarketDataCol.open_bid]
-        curr_ask = market_data[t, MarketDataCol.open_ask]
-        next_bid = market_data[t + 1, MarketDataCol.open_bid]
-        next_ask = market_data[t + 1, MarketDataCol.open_ask]
+        # We want to compute the Q-value for every possible (action, exposure) pair.
+        # Shape: (n_actions, n_exposures)
+        curr_exposure_grid = tf.tile(exposures, [n_actions, 1])
+        target_exposure_grid = tf.tile(actions, [1, n_exposures])
 
-        for i, curr_exposure in enumerate(exposures):
+        # Reshape for batch operations
+        # Shape: (n_actions * n_exposures, 1)
+        current_exposure = tf.reshape(curr_exposure_grid, [-1, 1])
+        target_exposure = tf.reshape(target_exposure_grid, [-1, 1])
+        indices_batch = tf.ones_like(current_exposure, dtype=tf.int32) * t
 
-            # Get cash, and shares just BEFORE executing the trade.
-            curr_cash, curr_shares = reverse_equity(curr_bid, curr_ask, 1, curr_exposure)  # type: ignore
+        # Simulate one step for all pairs
+        next_equity, next_exposure = execute_trade_1equity(indices_batch, current_exposure, target_exposure, market_data, transaction_cost_pct)
 
-            # Set defaults
-            best_val = -np.inf
-            worst_val = np.inf
-            best_j = 0
+        # Interpolate V(t+1) for all resulting exposures
+        v_next_slice = tf.constant(value_table[t+1].reshape(1, -1), dtype=tf.float32)
+        v_next_slice_batch = tf.tile(v_next_slice, [tf.shape(next_exposure)[0], 1])
+        v_next = interp(v_next_slice_batch, next_exposure, n_exposures)
 
-            # Try all possible actions
-            for j, target_exposure in enumerate(actions):
+        # Calculate Q-values for all (action, exposure) pairs.
+        reward = tf.math.log(tf.maximum(next_equity, 1e-9))
+        q_values = reward + v_next
+        q_values_grid = tf.reshape(q_values, [n_actions, n_exposures]) # Shape: (n_actions, n_exposures)
 
-                # Get cash, and shares just AFTER executing the trade using target exposure.
-                next_cash, next_shares = execute_trade(target_exposure, curr_bid, curr_ask, # type: ignore
-                                                       curr_cash, curr_shares, transaction_cost_pct)
-
-                # Get equity just BEFORE executing the next trade.
-                next_equity = calculate_equity(next_bid, next_ask, next_cash, next_shares) # type: ignore
-                next_exposure = (next_equity - next_cash) / next_equity
-
-                # next_equity is equity ratio, since curr_equity was 1.
-                val = np.log(next_equity) + interp(value_table[t+1], next_exposure, n_exposures)
-
-                # Compare actions
-                if val > best_val:
-                    best_val = val
-                    best_j = j
-                if val < worst_val:
-                    worst_val = val
-
-            # Store results
-            value_table[t, i] = best_val
-            policy_table[t, i] = best_j
-            q_min_table[t, i] = worst_val
+        # Find optimal values and policies for this timestep
+        value_table[t, :] = tf.reduce_max(q_values_grid, axis=0).numpy()
+        policy_table[t, :] = tf.argmax(q_values_grid, axis=0, output_type=tf.int32).numpy()
+        q_min_table[t, :] = tf.reduce_min(q_values_grid, axis=0).numpy()
 
     return DPTable(
         value_table=value_table,
@@ -213,21 +185,10 @@ def get_optimal_action(table: DPTable, t: int, current_exposure: float) -> float
     """
     if t >= table.n_timesteps:
         raise ValueError("t is out of bounds.")
-    return interp(table.policy_table[t], current_exposure, table.n_exposures)
-
-def get_optimal_action_fn(table: DPTable, env: ForexEnv) -> Callable[[...], float]:
-    """
-    Given a DPTable and a ForexEnv, creates a function that retrieves the optimal action
-    by retrieving the state from the env and reading the table.
-    """
-    assert table.n_timesteps == env.data_len
-    assert env.n_actions == 0 or table.n_actions == env.n_actions
-    def predict(*_) -> float:
-        current_cash = env.agent_data[env.n_steps, AgentDataCol.cash]
-        current_equity = env.agent_data[env.n_steps + 1, AgentDataCol.pre_action_equity]
-        current_exposure = (current_equity - current_cash) / current_equity
-        return get_optimal_action(table, env.n_steps + 1, current_exposure)
-    return predict
+    policy_row = tf.constant(table.policy_table[t].reshape(1, -1), dtype=tf.float32)
+    exposure = tf.constant([[current_exposure]], dtype=tf.float32)
+    optimal_action_idx = round(interp(policy_row, exposure, table.n_exposures).numpy()[0,0])
+    return get_bin_val(optimal_action_idx, table.n_actions)
 
 def get_dp_table_from_env(env: ForexEnv, cache_dir: Path | None = None, n_exposures: int = 15) -> DPTable:
     return get_dp_table(

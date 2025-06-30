@@ -61,26 +61,9 @@ class StepwiseFeatureEngineer:
 
         return res
 
-#function to calculate historic lookback of another function
-def calculate_historic_lookback(data: np.ndarray, index: int, lookback: int, func: Callable[[np.ndarray, int], np.ndarray]) -> NDArray[np.float32]:
-    """
-    Calculate the historic lookback of a feature.
-    """
-    if index < lookback:
-        return np.zeros(lookback * func(data, 0).shape[0], dtype=np.float32)
-    
-    # Calculate the feature for the current index
-    current_feature = func(data, index)
-    
-    # Calculate the feature for the previous indices
-    historic_features = np.array([func(data, i) for i in range(index - lookback, index)])
-    
-    # Combine current and historic features
-    return np.concatenate((historic_features.flatten(), current_feature))
-
 def calculate_current_exposure(data: np.ndarray, index: int) -> NDArray[np.float32]:
     """Calculates the current exposure as a value between -1 and 1."""
-    equity = data[index, AgentDataCol.equity_close]
+    equity = data[index, AgentDataCol.eot_equity]
     cash = data[index, AgentDataCol.cash]
     if equity <= 0:
         exposure = 0.0
@@ -88,25 +71,6 @@ def calculate_current_exposure(data: np.ndarray, index: int) -> NDArray[np.float
         exposure = (equity - cash) / equity
     return np.array([exposure,], dtype=np.float32)
 
-def get_current_exposure(data: np.ndarray, index) -> NDArray[np.float32]:
-    """
-    Calculate the cash to shares ratio.
-    """
-    exposure = data[index, AgentDataCol.target_exposure]
-    return np.array([exposure,], dtype=np.float32)
-
-def duration_of_current_trade(data: np.ndarray, index, scaling_factor = 24) -> NDArray[np.float32]:
-    curr = data[index, AgentDataCol.target_exposure]
-    length = 1
-    index -= 1
-
-    while index >= 0 and data[index, AgentDataCol.target_exposure] == curr:
-        length += 1
-        index -= 1
-
-    length = min(length / scaling_factor, 1.0)
-
-    return np.array([length,], dtype=np.float32)
     
         
 

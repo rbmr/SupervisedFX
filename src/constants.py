@@ -7,7 +7,7 @@ COMMON_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = COMMON_DIR.parent
 DATA_DIR = PROJECT_DIR / "data"
 DP_CACHE_DIR = DATA_DIR / "dp_cache"
-MODEL_DIR = DATA_DIR / "models"
+MODELS_DIR = DATA_DIR / "models"
 
 SEED = 42
 
@@ -23,14 +23,8 @@ class MarketDataCol(ColumnCollection):
     Market Data Columns
     """
     open_bid = 0
-    high_bid = 1
-    low_bid = 2
-    close_bid = 3
-    open_ask = 4
-    high_ask = 5
-    low_ask = 6
-    close_ask = 7
-    volume = 8
+    open_ask = 1
+    time_ns = 2
 
 class AgentDataCol(ColumnCollection):
     """
@@ -38,11 +32,7 @@ class AgentDataCol(ColumnCollection):
     """
     cash = 0
     shares = 1
-    equity_open = 2
-    equity_high = 3
-    equity_low = 4
-    equity_close = 5
-    target_exposure = 6
-    pre_action_equity = 7
+    eot_equity = 2 # equity at the end of the timeframe, right before the next action is taken.
+
 
 DEVICE = "cuda" if is_cuda_available() else "cpu"

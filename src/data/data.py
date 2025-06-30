@@ -174,7 +174,7 @@ class Timeframe(Enum):
     MN1 = "M" # Monthly
 
     def to_pandas_freq(self) -> str:
-        """Returns the pandas frequency string for this timeframe."""
+        """Returns the Pandas frequency string for this timeframe."""
         return self.value
 
     def as_minutes(self) -> int:
@@ -194,11 +194,9 @@ class Timeframe(Enum):
         elif self == Timeframe.D1:
             return 1440
         elif self == Timeframe.W1:
-            return 10080
-        elif self == Timeframe.MN1: # Added missing return for MN1
-            # Assuming 30 days for a month for simplicity in minutes calculation
-            # This might need adjustment based on actual month lengths if critical
-            return 30 * 1440
+            return 10_080
+        elif self == Timeframe.MN1:
+            return 30 * 1440 # Assumes 30 days in a month
         else:
             raise ValueError(f"Unhandled timeframe: {self}")
 

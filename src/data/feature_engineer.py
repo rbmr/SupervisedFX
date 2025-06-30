@@ -5,17 +5,17 @@ from typing import Callable, List
 import numpy as np
 import pandas as pd
 
-from src.scripts import df_to_np_dict, safe_literal_eval, shift
+from src.scripts import df_to_np_dict, shift, parse_args
 
 
 class FeatureEngineer:
     """
     Class to efficiently extract features from a dataframe-like object.
-    Feature methods must:
-    - only ADD or READ columns, no columns are modified.
-    - return numpy arrays.
-    - not access the future (each index i of the resulting array may only be determined using indices 0...i of other columns).
-    - have a proper reason for padding and filling of values.
+    - feature methods must only ADD or READ columns, no columns are modified.
+    - feature methods must return numpy arrays.
+    - feature methods must not access the future (each index i of the resulting array may only be determined using indices 0...i).
+    - feature methods must have a proper reason for padding and filling of values.
+    - get_all must return a numpy array where the first dimension is the same length as the input data.
     """
 
     def __init__(self, data: dict[str, np.ndarray] | pd.DataFrame):
@@ -46,10 +46,7 @@ class FeatureEngineer:
         func_name, args_str = match.groups()
         assert func_name not in ['get', 'get_all', '__init__'], f"{func_name} is protected."
         assert hasattr(self, func_name), f"{func_name} isn't recognized."
-        args = safe_literal_eval(args_str)
-        args = args if args is not None else tuple()
-        args = args if isinstance(args, tuple) else (args,)
-        res = getattr(self, func_name)(*args)
+        res = getattr(self, func_name)(*parse_args(args_str))
         assert isinstance(res, np.ndarray), f"Invalid result type: expected {np.ndarray}, was {type(res)}"
         assert res.ndim == 1, f"Invalid result ndim: expected 1, was {res.ndim}"
         self._data[column] = res
@@ -58,7 +55,8 @@ class FeatureEngineer:
     def get_all(self, columns: list[str]) -> np.ndarray:
         """
         Gets (or computes) a list of columns from the internal data.
-        Returns a single numpy array of shape (n_samples, n_features).
+        Returns a single numpy array of shape (len(data), len(columns)).
+        Columns are returned in proper order.
         """
         if not columns:
             return np.empty((self._len, 0), dtype=np.float64)
@@ -68,6 +66,11 @@ class FeatureEngineer:
     # ####################################### #
     # # Time Indicators                     # #
     # ####################################### #
+
+    def time_ns(self) -> np.ndarray:
+        date_gmt = self.get('date_gmt')
+        assert date_gmt.dtype == 'datetime64[ns]', f"date_gmt must be of type datetime64[ns], but was {date_gmt.dtype}"
+        return date_gmt.astype(np.int64)
 
     def lin_24h(self) -> np.ndarray:
         """Computes the time of the day as a float in [0, 1)"""

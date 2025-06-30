@@ -1,111 +1,274 @@
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Optional, Union
 
 import numpy as np
-import pandas as pd
 import tensorflow as tf
 from keras.callbacks import EarlyStopping, ModelCheckpoint
-from keras.layers import Dense, InputLayer
-from keras.models import Sequential, load_model
+from keras.layers import Dense, Input
+from keras.models import Model, load_model
 from keras.optimizers import Adam
 from keras.utils import Sequence
 from sklearn.model_selection import train_test_split
-from sklearn.utils import shuffle
+from keras.callbacks import TensorBoard
+from tqdm.keras import TqdmCallback
 
-# Assuming your project structure allows these imports
-# If running as a standalone script, you might need to adjust sys.path
-from src.constants import MODEL_DIR, DP_CACHE_DIR, AgentDataCol
+from src.constants import MODELS_DIR, DP_CACHE_DIR, MarketDataCol
 from src.data.data import ForexCandleData, Timeframe
 from src.data.feature_engineer import FeatureEngineer
-from src.data.stepwise_feature_engineer import StepwiseFeatureEngineer
-from src.envs.dp import DPTable, get_dp_table, get_optimal_action
-from src.envs.forex_env import ForexEnv
+from src.data.stepwise_feature_engineer import StepwiseFeatureEngineer, calculate_current_exposure
+from src.envs.dp import DPTable, get_dp_table, interp
+from src.envs.forex_env import ForexEnv, ActionConfig, EnvConfig, EnvObs, DataConfig
+from src.envs.trade import execute_trade_1equity
 from src.models.analysis import analyse_individual_run
 from src.models.dummy_models import DummyModel
 from src.models.train_eval import run_model
+from src.scripts import find_first_valid_row, contains_nan_or_inf
 
-# --- Configuration ---
 TRANSACTION_COST_PCT = 5 / 100_000
-MODEL_DIR.mkdir(parents=True, exist_ok=True)
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
 DP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-# --- Custom Keras Data Generator ---
-class OptimalPolicyGenerator(Sequence):
-    """
-    Generates data for Keras on-the-fly. For each epoch, it re-samples
-    random exposures and creates a new shuffled (X, y) dataset.
-    """
-
-    def __init__(self, market_features: np.ndarray, dp_table: DPTable, batch_size: int, global_indices: np.ndarray):
+class SuboptimalityDataGenerator(Sequence):
+    def __init__(self, features: np.ndarray, batch_size: int, global_indices: np.ndarray):
         super().__init__()
-        self.market_features = market_features
-        self.dp_table = dp_table
+        assert batch_size > 0, "batch_size must be positive"
+        self.features = features
         self.batch_size = batch_size
-        self.global_indices = global_indices  # Original indices in the full DP table
-        self.n_samples = self.market_features.shape[0]
+        self.n_samples = self.features.shape[0]
+        self.global_indices = global_indices
         self.X = None
-        self.y = None
+        self.Y = None
         self.on_epoch_end()
 
     def __len__(self) -> int:
-        return int(np.floor(self.n_samples / self.batch_size))
+        return self.n_samples // self.batch_size
 
-    def __getitem__(self, index: int) -> tuple[np.ndarray, np.ndarray]:
+    def __getitem__(self, index: int) -> tuple[dict[str, np.ndarray], None]:
         start_idx = index * self.batch_size
         end_idx = (index + 1) * self.batch_size
-        return self.X[start_idx:end_idx], self.y[start_idx:end_idx]
+        return self.X[start_idx:end_idx], self.Y[start_idx:end_idx]
 
     def on_epoch_end(self):
-        """Generate a new (X, y) dataset at the end of each epoch."""
-        logging.info(f"{self.__class__.__name__} ({self.n_samples} samples): Regenerating data for new epoch...")
-        random_exposures = np.random.uniform(-1.0, 1.0, self.n_samples)
-        y_optimal_actions = np.array([
-            get_optimal_action(self.dp_table, self.global_indices[t], random_exposures[t])
-            for t in range(self.n_samples)
-        ]).reshape(-1, 1)
-        X_full_features = np.column_stack((self.market_features, random_exposures))
-        self.X, self.y = shuffle(X_full_features, y_optimal_actions)
+        p = np.random.permutation(self.n_samples)
+        shuffled_features = self.features[p]
+        shuffled_global_indices = self.global_indices[p]
+        random_exposures = np.random.uniform(-1.0, 1.0, self.n_samples).reshape(-1, 1)
+        self.X = np.column_stack((shuffled_features, random_exposures))
+        self.Y = np.column_stack((shuffled_global_indices, random_exposures))
 
-
-# --- Model Wrapper for Evaluation ---
-class SupervisedModel(DummyModel):
+def to_percentiles(tensor: tf.Tensor) -> tf.Tensor:
     """
-    Wraps the trained Keras model to make it compatible with the evaluation pipeline.
+    Converts each element in a tensor to its percentile rank (0.0 to 1.0).
     """
-
-    def __init__(self, env: ForexEnv, model_path: Path):
-        self.model = load_model(str(model_path))
-        self.env = env
-        super().__init__(pred_fn=self._predict_action)
-
-    def _predict_action(self, obs: np.ndarray) -> float:
-        """Constructs the full feature vector and predicts the target exposure."""
-        # The observation from the env should only contain market features.
-        # We calculate the current agent exposure here.
-        if self.env.n_steps == 0:
-            current_exposure = 0.0
-        else:
-            pre_action_equity = self.env.agent_data[self.env.n_steps, AgentDataCol.pre_action_equity]
-            cash = self.env.agent_data[self.env.n_steps - 1, AgentDataCol.cash]
-            current_exposure = (pre_action_equity - cash) / pre_action_equity if pre_action_equity != 0 else 0.0
-
-        model_input = np.append(obs, current_exposure).reshape(1, -1)
-        prediction = self.model.predict(model_input, verbose=0)
-        return float(prediction.item())
+    flat_tensor = tf.reshape(tensor, [-1])
+    sorted_unique_values = tf.sort(tf.unique(flat_tensor).y)
+    ranks = tf.searchsorted(sorted_unique_values, flat_tensor, side='left')
+    percentiles_flat = tf.cast(ranks, tf.float32) / tf.cast(tf.shape(sorted_unique_values)[0], tf.float32)
+    return tf.reshape(percentiles_flat, tf.shape(tensor))
 
 
-# --- Main Pipeline Functions ---
-def prepare_data() -> tuple[np.ndarray, np.ndarray, ForexEnv, ForexEnv, DPTable]:
-    """Handles all data loading, feature engineering, and splitting."""
-    logging.info("Step 1 & 2: Fetching data and computing features...")
-    fcd = ForexCandleData.load("dukascopy", "EURUSD", Timeframe.H1, datetime(2020, 1, 1), datetime(2024, 12, 31))
+def dummy_loss(*_) -> float:
+    return 0.0
 
-    fe = FeatureEngineer(fcd.df)
-    features = (
-        "sin_24h", "cos_24h", "cos_7d", "sin_7d",
+def create_suboptimality_loss(dp_table: DPTable, market_data: np.ndarray, transaction_cost_pct: float):
+    value = tf.constant(dp_table.value_table, dtype=tf.float32)
+    q_min = tf.constant(dp_table.q_min_table, dtype=tf.float32)
+    market_data = tf.constant(market_data, dtype=tf.float32)
+    n_exposures = dp_table.n_exposures
+    raw_importance = value - q_min
+    percentile_importance = to_percentiles(raw_importance)
+
+    def suboptimality_loss(y_true: tf.Tensor, y_pred: tf.Tensor):
+        """The actual loss function, implementing percentile normalization."""
+        global_indices = tf.cast(y_true[:, 0:1], dtype=tf.int32)
+        current_exposures = y_true[:, 1:2]
+
+        # This is the Q-value of the action the agent actually took
+        next_equity, next_exposure = execute_trade_1equity(
+            indices=global_indices,
+            current_exposures=current_exposures,
+            target_exposures=y_pred,
+            market_data=market_data,
+            transaction_cost_pct=transaction_cost_pct,
+        )
+        v_next_slices = tf.gather(value, tf.reshape(global_indices, [-1]) + 1)
+        v_next = interp(v_next_slices, next_exposure, n_exposures)
+        reward = tf.math.log(tf.maximum(next_equity, 1e-9))
+        q_predicted = reward + v_next
+
+        # Get V_optimal, Q_min, and importance_percentile for the current state
+        v_current_slices = tf.gather(value, tf.reshape(global_indices, [-1]))
+        v_optimal = interp(v_current_slices, current_exposures, n_exposures)
+
+        q_min_slices = tf.gather(q_min, tf.reshape(global_indices, [-1]))
+        q_min_current = interp(q_min_slices, current_exposures, n_exposures)
+
+        percentile_importance_slices = tf.gather(percentile_importance, tf.reshape(global_indices, [-1]))
+        importance_percentile = interp(percentile_importance_slices, current_exposures, n_exposures)
+
+        # Calculate normalized loss
+        raw_importance_current = v_optimal - q_min_current
+        goodness = tf.math.divide_no_nan(q_predicted - q_min_current, raw_importance_current)
+        goodness_clipped = tf.clip_by_value(goodness, 0.0, 1.0) # Clip for numerical stability
+
+        reward = goodness_clipped * importance_percentile
+        loss = 1.0 - reward
+
+        return tf.reduce_mean(loss)
+
+    return suboptimality_loss
+
+class ForexData:
+
+    __slots__ = ("train_data", "eval_data", "train_features", "eval_features", "feature_names")
+
+    def __init__(self, fcd: ForexCandleData, feature_names: list[str], split: float):
+
+        logging.info("Computing features...")
+        fe = FeatureEngineer(fcd.df)
+        data = fe.get_all(MarketDataCol.all_names())
+        features = fe.get_all(feature_names)
+
+        logging.info("Cropping initial NaNs...")
+        crop_idx = max(find_first_valid_row(data), find_first_valid_row(features))
+        data = data[crop_idx:]
+        features = features[crop_idx:]
+        assert len(data) == len(features)
+        assert data.ndim == 2 and features.ndim == 2
+        assert not contains_nan_or_inf(data)
+        assert not contains_nan_or_inf(features)
+
+        logging.info("Splitting the data and features...")
+        split_idx = int(len(data) * split)
+        self.train_data = data[:split_idx]
+        self.eval_data = data[split_idx:]
+        self.train_features = features[:split_idx]
+        self.eval_features = features[split_idx:]
+        self.feature_names = feature_names
+
+
+
+def train_model(forex_data: ForexData):
+
+    data = forex_data.train_data
+    N = data.shape[0] - 1
+    features = forex_data.train_features[:N]
+
+    logging.info("Setting up directories...")
+    model_name = "supervised_fx_suboptimality"
+    model_dir = MODELS_DIR / model_name
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    logging.info("Splitting training data for validation...")
+    train_features, val_features, train_indices, val_indices = train_test_split(
+        features, np.arange(N), test_size=0.2, random_state=42, shuffle=True
+    )
+
+    logging.info("Setting up model...")
+    train_generator = SuboptimalityDataGenerator(train_features, 1024, train_indices)
+    validation_generator = SuboptimalityDataGenerator(val_features, 1024, val_indices)
+
+    input_dim = train_generator.X.shape[1]
+    features_input = Input(shape=(input_dim,), name="features_input")
+    x = Dense(48, activation='relu')(features_input)
+    x = Dense(48, activation='relu')(x)
+    predicted_exposure = Dense(1, activation='tanh', name="output_exposure")(x)
+
+    model = Model(inputs=features_input, outputs=predicted_exposure)
+    model.summary()
+
+    dp_table = get_dp_table(data, TRANSACTION_COST_PCT, 15, 15, DP_CACHE_DIR)
+    loss_fn = create_suboptimality_loss(dp_table, data, TRANSACTION_COST_PCT)
+
+    model.compile(optimizer=Adam(learning_rate=3e-4), loss=loss_fn)
+
+    model_path = model_dir / f"model.keras"
+    model_checkpoint = ModelCheckpoint(str(model_path), monitor='val_loss', save_best_only=True, mode='min')
+
+    log_dir = model_dir / "logs" / datetime.now().strftime("%Y%m%d-%H%M%S")
+    tensorboard_callback = TensorBoard(log_dir=log_dir, histogram_freq=1)
+
+    logging.info("Training model...")
+    model.fit(
+        train_generator,
+        validation_data=validation_generator,
+        epochs=5_000,
+        callbacks=[model_checkpoint, tensorboard_callback, TqdmCallback(verbose=0)],
+        verbose=0
+    )
+    logging.info(f"Training finished. Best model saved to {model_path}")
+
+class SupervisedModelWrapper(DummyModel):
+    def __init__(self, model_path: Path):
+        super().__init__()
+        assert model_path.exists()
+        assert model_path.suffix == ".keras"
+        custom_objects = {"suboptimality_loss": dummy_loss}
+        self.model = load_model(model_path, custom_objects=custom_objects, compile=False)
+
+    def predict(self, obs: Union[np.ndarray, dict[str, np.ndarray]], *args, **kwargs) -> tuple[np.ndarray, None]:
+        obs_tensor = tf.convert_to_tensor(np.atleast_2d(obs), dtype=tf.float32)
+        prediction_tensor = self.model(obs_tensor, training=False)
+        return prediction_tensor.numpy(), None
+
+def evaluate_model(forex_data: ForexData, model_path: Optional[Path] = None):
+
+    if model_path is None:
+        model_path = max((p for p in MODELS_DIR.rglob("*.keras")), key=lambda x: x.stat().st_mtime)
+    assert model_path.exists()
+    model_dir = model_path.resolve().parent
+
+    logging.info(f"Evaluating: {model_path}")
+
+    logging.info("Setting up environments...")
+    sfe = StepwiseFeatureEngineer()
+    sfe.add(["current_exposure"], calculate_current_exposure)
+
+    action_config = ActionConfig(n=0, low=-1.0, high=1.0)
+    env_config = EnvConfig(transaction_cost_pct=TRANSACTION_COST_PCT)
+    train_obs = EnvObs(features_data=forex_data.train_features,
+                       feature_names=forex_data.feature_names,
+                       sfe=sfe,
+                       name="obs_vector",
+                       window=1)
+    eval_obs = EnvObs(features_data=forex_data.eval_features,
+                      feature_names=forex_data.feature_names,
+                      sfe=sfe,
+                      name="obs_vector",
+                      window=1)
+    train_data_config = DataConfig(forex_data.train_data, [train_obs])
+    eval_data_config = DataConfig(forex_data.eval_data, [eval_obs])
+    train_env = ForexEnv(action_config, env_config, train_data_config)
+    eval_env = ForexEnv(action_config, env_config, eval_data_config)
+
+    logging.info("Loading model")
+    model = SupervisedModelWrapper(model_path)
+
+    logging.info("Running evaluation on the full training dataset...")
+    train_run_path = model_dir / "final_train_run.csv"
+    run_model(model, train_env, train_run_path)
+    analyse_individual_run(train_run_path, "train")
+    logging.info(f"Training set evaluation complete. Results in {train_run_path.parent}")
+
+    logging.info("Running evaluation on the full evaluation dataset...")
+    eval_run_path = model_dir / "final_eval_run.csv"
+    run_model(model, eval_env, eval_run_path)
+    analyse_individual_run(train_run_path, "eval")
+    logging.info(f"Evaluation set evaluation complete. Results in {eval_run_path.parent}")
+
+
+if __name__ == "__main__":
+
+    fcd = ForexCandleData.load("dukascopy", "EURUSD", Timeframe.H1, datetime(2020, 1, 1, 22), datetime(2024, 12, 31, 21))
+    feature_names = [
+        "sin_24h",
+        "cos_24h",
+        "cos_7d",
+        "sin_7d",
         "as_ratio_of_other_column('parabolic_sar(0.02, 0.2)', 'close_bid')",
         "as_ratio_of_other_column('ema(24)', 'close_bid')",
         "as_ratio_of_other_column('ema(72)', 'close_bid')",
@@ -117,94 +280,7 @@ def prepare_data() -> tuple[np.ndarray, np.ndarray, ForexEnv, ForexEnv, DPTable]
         "as_ratio_of_other_column('bb_upper(20, 2.0)', 'close_bid')",
         "as_ratio_of_other_column('bb_lower(20, 2.0)', 'close_bid')",
         "as_z_score(\"as_ratio_of_other_column('close_ask', 'close_bid')\", 50)"
-    )
-
-    logging.info("Step 3: Cropping initial NaNs...")
-    # For evaluation, we need environments that only use market features, not stepwise features.
-    sfe_empty = StepwiseFeatureEngineer(feature_configs=[])  # No stepwise features
-
-    full_train_env, full_eval_env = ForexEnv.create_split_envs(
-        split_pcts=[0.7, 0.3],
-        forex_candle_data=fcd,
-        market_feature_engineer=fe,
-        agent_feature_engineer=sfe_empty,
-        n_actions=0,
-        transaction_cost_pct=TRANSACTION_COST_PCT
-    )
-
-    logging.info("Step 4: Computing DP table on full dataset...")
-    full_market_data_df = pd.concat([full_train_env.market_data, full_eval_env.market_data], ignore_index=True)
-    dp_table = get_dp_table(full_market_data_df.to_numpy(), TRANSACTION_COST_PCT, 15, 30, DP_CACHE_DIR)
-
-    logging.info("Step 5 & 6: Splitting training data for validation...")
-    full_train_features = full_train_env.observations[0].features_data
-    full_train_indices = np.arange(len(full_train_features))
-
-    train_features, val_features, train_indices, val_indices = train_test_split(
-        full_train_features, full_train_indices, test_size=0.2, random_state=42, shuffle=True
-    )
-
-    return train_features, val_features, train_indices, val_indices, full_train_env, full_eval_env, dp_table
-
-
-def create_and_train(train_features, val_features, train_indices, val_indices, dp_table) -> Path:
-    """Step 7: Creates and trains the model using data generators."""
-    logging.info("\n--- Step 7: Starting Supervised Model Training ---")
-
-    train_generator = OptimalPolicyGenerator(train_features, dp_table, 256, train_indices)
-    validation_generator = OptimalPolicyGenerator(val_features, dp_table, 256, val_indices)
-
-    input_dim = train_generator.X.shape[1]
-    model = Sequential([
-        InputLayer(input_shape=(input_dim,), name="input_layer"),
-        Dense(32, activation='sigmoid', name="hidden_layer_1"),
-        Dense(32, activation='sigmoid', name="hidden_layer_2"),
-        Dense(1, activation='tanh', name="output_exposure")
-    ])
-    model.summary()
-    model.compile(optimizer=Adam(learning_rate=3e-4), loss='mean_squared_error')
-
-    early_stopping = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True, mode='min')
-    model_name = f"supervised_fx_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    model_path = MODEL_DIR / f"{model_name}.keras"
-    model_checkpoint = ModelCheckpoint(str(model_path), monitor='val_loss', save_best_only=True, mode='min')
-
-    model.fit(
-        train_generator,
-        validation_data=validation_generator,
-        epochs=500,
-        callbacks=[early_stopping, model_checkpoint],
-        verbose=1
-    )
-    logging.info(f"Training finished. Best model saved to {model_path}")
-    return model_path, model_name
-
-
-def evaluate_final_model(model_path: Path, model_name: str, full_train_env: ForexEnv, full_eval_env: ForexEnv):
-    """Step 8 & 9: Evaluates the best model on the full train and eval sets."""
-    logging.info(f"\n--- Step 8 & 9: Final Evaluation for Model: {model_name} ---")
-
-    # --- Run on Full Training Set ---
-    logging.info("Running evaluation on the full (70%) training dataset (chronological)...")
-    train_run_path = MODEL_DIR / model_name / "final_train_run.csv"
-    train_run_path.parent.mkdir(exist_ok=True)
-
-    train_model_wrapper = SupervisedModel(env=full_train_env, model_path=model_path)
-    run_model(train_model_wrapper, full_train_env, train_run_path, full_train_env.episode_len, True)
-    analyse_individual_run(train_run_path, f"{model_name}-TrainSet")
-    logging.info(f"Training set evaluation complete. Results in {train_run_path.parent}")
-
-    # --- Run on Full Evaluation Set ---
-    logging.info("Running evaluation on the full (30%) evaluation dataset (chronological)...")
-    eval_run_path = MODEL_DIR / model_name / "final_eval_run.csv"
-
-    eval_model_wrapper = SupervisedModel(env=full_eval_env, model_path=model_path)
-    run_model(eval_model_wrapper, full_eval_env, eval_run_path, full_eval_env.episode_len, True)
-    analyse_individual_run(eval_run_path, f"{model_name}-EvalSet")
-    logging.info(f"Evaluation set evaluation complete. Results in {eval_run_path.parent}")
-
-if __name__ == "__main__":
-    # Execute the full pipeline
-    train_feats, val_feats, train_idx, val_idx, train_env, eval_env, dp_tbl = prepare_data()
-    best_model_path, trained_model_name = create_and_train(train_feats, val_feats, train_idx, val_idx, dp_tbl)
-    evaluate_final_model(best_model_path, trained_model_name, train_env, eval_env)
+    ]
+    fd = ForexData(fcd, feature_names, 0.7)
+    train_model(fd)
+    evaluate_model(fd)
