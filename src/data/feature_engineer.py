@@ -55,7 +55,7 @@ class FeatureEngineer:
     def get_all(self, columns: list[str]) -> np.ndarray:
         """
         Gets (or computes) a list of columns from the internal data.
-        Returns a single numpy array of shape (len(data), len(columns)).
+        Returns a single numpy array of shape (len(data), len(columns) * window).
         Columns are returned in proper order.
         """
         if not columns:
@@ -66,6 +66,9 @@ class FeatureEngineer:
     # ####################################### #
     # # Time Indicators                     # #
     # ####################################### #
+
+    def shift(self, column: str, lookback: int = 1) -> np.ndarray:
+        return shift(self.get(column), lookback)
 
     def time_ns(self) -> np.ndarray:
         date_gmt = self.get('date_gmt')
@@ -484,71 +487,3 @@ class FeatureEngineer:
         col_data = self.get(column)
         other_col_data = self.get(other_column)
         return np.sign(col_data - other_col_data)
-
-    # ############################################### #
-    # # Data Structure Manipulation Methods         # #
-    # ############################################### #
-
-    def apply_to_column(self, fn: Callable[[np.ndarray], np.ndarray], column: str,
-                        new_column_name: str | None = None) -> 'FeatureEngineer':
-        """
-        Applies a function to a column's data.
-        Note: This method modifies the internal data and is not called via `get`.
-
-        Args:
-            fn (Callable): A function that takes a numpy array and returns one.
-            column (str): The name of the column to apply the function to.
-            new_column_name (str, optional): If provided, stores the result in a new column.
-                                             Otherwise, overwrites the existing column.
-
-        Returns:
-            FeatureEngineer: self for method chaining.
-        """
-        target_name = new_column_name if new_column_name else column
-        self._data[target_name] = fn(self.get(column))
-        return self
-
-    def remove_columns(self, columns: List[str]) -> 'FeatureEngineer':
-        """
-        Removes specified columns from the internal data.
-        Note: This method modifies the internal data and is not called via `get`.
-        """
-        for col in columns:
-            self._data.pop(col, None)
-        return self
-
-    def remove_ohlcv(self) -> 'FeatureEngineer':
-        """Removes standard OHLCV and date columns."""
-        ohlcv_columns = ['open_bid', 'high_bid', 'low_bid', 'close_bid', 'volume_bid',
-                         'open_ask', 'high_ask', 'low_ask', 'close_ask', 'volume_ask',
-                         'volume', 'date_gmt']
-        self.remove_columns(ohlcv_columns)
-        return self
-
-    def history_lookback(self, lookback_window_size: int, columns: List[str] = None, not_columns: List[str] = None,
-                         step: int = 1) -> 'FeatureEngineer':
-        """
-        Creates shifted (lagged) versions of columns.
-        Note: This method modifies the internal data and is not called via `get`.
-        """
-        if lookback_window_size == 0:
-            return self
-        if columns is None:
-            columns = list(self._data.keys())
-        if not_columns is None:
-            not_columns = []
-
-        for col in columns:
-            if col in not_columns:
-                continue
-            original_data = self.get(col)
-            for i in range(1, lookback_window_size + 1, step):
-                self._data[f'{col}_shift_{i}'] = shift(original_data, i)
-        return self
-
-    def copy_column(self, source_column: str, target_column: str) -> 'FeatureEngineer':
-        """Copies a column."""
-        if source_column not in self._data:
-            raise KeyError(f"Source column '{source_column}' not found.")
-        self._data[target_column] = self._data[source_column].copy()
-        return self
