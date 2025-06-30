@@ -55,10 +55,10 @@ class SuboptimalityDataGenerator(Sequence):
     def on_epoch_end(self):
         p = np.random.permutation(self.n_samples)
         shuffled_features = self.features[p]
-        shuffled_global_indices = self.global_indices[p]
+        next_indices = self.global_indices[p] + 1 # We are executing the actions at the start of the next timestep
         random_exposures = np.random.uniform(-1.0, 1.0, self.n_samples).reshape(-1, 1)
         self.X = np.column_stack((shuffled_features, random_exposures))
-        self.Y = np.column_stack((shuffled_global_indices, random_exposures))
+        self.Y = np.column_stack((next_indices, random_exposures))
 
 def to_percentiles(tensor: tf.Tensor) -> tf.Tensor:
     """
@@ -84,30 +84,30 @@ def create_suboptimality_loss(dp_table: DPTable, market_data: np.ndarray, transa
 
     def suboptimality_loss(y_true: tf.Tensor, y_pred: tf.Tensor):
         """The actual loss function, implementing percentile normalization."""
-        global_indices = tf.cast(y_true[:, 0:1], dtype=tf.int32)
+        current_indices = tf.cast(y_true[:, 0:1], dtype=tf.int32)
         current_exposures = y_true[:, 1:2]
 
         # This is the Q-value of the action the agent actually took
         next_equity, next_exposure = execute_trade_1equity(
-            indices=global_indices,
+            indices=current_indices,
             current_exposures=current_exposures,
             target_exposures=y_pred,
             market_data=market_data,
             transaction_cost_pct=transaction_cost_pct,
         )
-        v_next_slices = tf.gather(value, tf.reshape(global_indices, [-1]) + 1)
+        v_next_slices = tf.gather(value, tf.reshape(current_indices + 1, [-1]))
         v_next = interp(v_next_slices, next_exposure, n_exposures)
         reward = tf.math.log(tf.maximum(next_equity, 1e-9))
         q_predicted = reward + v_next
 
         # Get V_optimal, Q_min, and importance_percentile for the current state
-        v_current_slices = tf.gather(value, tf.reshape(global_indices, [-1]))
+        v_current_slices = tf.gather(value, tf.reshape(current_indices, [-1]))
         v_optimal = interp(v_current_slices, current_exposures, n_exposures)
 
-        q_min_slices = tf.gather(q_min, tf.reshape(global_indices, [-1]))
+        q_min_slices = tf.gather(q_min, tf.reshape(current_indices, [-1]))
         q_min_current = interp(q_min_slices, current_exposures, n_exposures)
 
-        percentile_importance_slices = tf.gather(percentile_importance, tf.reshape(global_indices, [-1]))
+        percentile_importance_slices = tf.gather(percentile_importance, tf.reshape(current_indices, [-1]))
         importance_percentile = interp(percentile_importance_slices, current_exposures, n_exposures)
 
         # Calculate normalized loss
@@ -155,7 +155,7 @@ class ForexData:
 def train_model(forex_data: ForexData):
 
     data = forex_data.train_data
-    N = data.shape[0] - 1
+    N = data.shape[0] - 2
     features = forex_data.train_features[:N]
 
     logging.info("Setting up directories...")
@@ -249,15 +249,15 @@ def evaluate_model(forex_data: ForexData, model_path: Optional[Path] = None):
     model = SupervisedModelWrapper(model_path)
 
     logging.info("Running evaluation on the full training dataset...")
-    train_run_path = model_dir / "final_train_run.csv"
+    train_run_path = model_dir / "train" / "data.csv"
     run_model(model, train_env, train_run_path)
     analyse_individual_run(train_run_path, "train")
     logging.info(f"Training set evaluation complete. Results in {train_run_path.parent}")
 
     logging.info("Running evaluation on the full evaluation dataset...")
-    eval_run_path = model_dir / "final_eval_run.csv"
+    eval_run_path = model_dir / "eval" / "data.csv"
     run_model(model, eval_env, eval_run_path)
-    analyse_individual_run(train_run_path, "eval")
+    analyse_individual_run(eval_run_path, "eval")
     logging.info(f"Evaluation set evaluation complete. Results in {eval_run_path.parent}")
 
 
