@@ -27,10 +27,7 @@ def extract_imports(file_path: Path) -> list[str]:
             elif isinstance(node, ast.ImportFrom):
                 module_prefix = node.module or ''
                 for alias in node.names:
-                    if alias.name == '*':
-                        imports.append(f"{module_prefix}.*")
-                    else:
-                        imports.append(f"{module_prefix}.{alias.name}")
+                    imports.append(f"{module_prefix}.{alias.name}")
         return imports
     except (SyntaxError, UnicodeDecodeError) as e:
         print(f"Could not parse {file_path}: {e}")
@@ -109,7 +106,7 @@ def analyze_and_print_project_dependencies(project_dir: Path):
     Analyzes project dependencies, prints internal imports for each file,
     and lists any circular dependencies found.
     """
-    excluded_dirs = {".venv", "__pycache__", ".git", "node_modules", ".pytest_cache", "build", "dist"}
+    excluded_dirs = {".venv", "__pycache__", ".git", ".pytest_cache", "build", "dist"}
 
     print(f"Analyzing project at: {project_dir}\n")
 
