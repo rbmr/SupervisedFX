@@ -151,7 +151,6 @@ def interpolate(x: NDArray, xp: NDArray, fp: NDArray) -> NDArray:
     return np.interp(x.flatten(), xp, fp).reshape(x.shape)
 
 def calculate_shares_to_trade(prev_exposure, target_exposure, prev_cash, prev_shares, ref_bid, ref_ask, commission_pct):
-    """"""
     val_price = np.where(target_exposure >= 0, ref_bid, ref_ask)  # \tilde{P}_t'^*
     cost = np.where(target_exposure >= prev_exposure, (1 + commission_pct) * ref_ask, (1 - commission_pct) * ref_bid)  # \tilde{\varphi}_t
     tmp = val_price * (1 - target_exposure)  # \tilde{P}_t'^*(1-a_t)
