@@ -55,7 +55,7 @@ class FeatureEngineer:
     def get_all(self, columns: list[str]) -> np.ndarray:
         """
         Gets (or computes) a list of columns from the internal data.
-        Returns a single numpy array of shape (len(data), len(columns) * window).
+        Returns a single numpy array of shape (len(data), len(columns)).
         Columns are returned in proper order.
         """
         if not columns:
