@@ -200,8 +200,9 @@ def train_model(forex_data: ForexData):
 
     input_dim = train_generator.X.shape[1]
     features_input = Input(shape=(input_dim,), name="features_input")
-    x = Dense(48, activation='relu')(features_input)
-    x = Dense(48, activation='relu')(x)
+    x = Dense(48, activation='sigmoid')(features_input)
+    x = Dense(48, activation='sigmoid')(x)
+    x = Dense(48, activation='sigmoid')(x)
     predicted_exposure = Dense(1, activation='tanh', name="output_exposure")(x)
 
     model = Model(inputs=features_input, outputs=predicted_exposure)
@@ -215,6 +216,8 @@ def train_model(forex_data: ForexData):
     model_path = model_dir / f"model.keras"
     model_checkpoint = ModelCheckpoint(str(model_path), monitor='val_loss', save_best_only=True, mode='min')
 
+    early_stopping = EarlyStopping(monitor="val_loss", patience=512, restore_best_weights=True, mode="min")
+
     log_dir = model_dir / "logs" / datetime.now().strftime("%Y%m%d-%H%M%S")
     launch_tensorboard(log_dir)
     tensorboard_callback = TensorBoard(log_dir=log_dir, histogram_freq=1)
@@ -223,8 +226,8 @@ def train_model(forex_data: ForexData):
     model.fit(
         train_generator,
         validation_data=validation_generator,
-        epochs=5_000,
-        callbacks=[model_checkpoint, tensorboard_callback, TqdmCallback(verbose=0)],
+        epochs=8192,
+        callbacks=[model_checkpoint, tensorboard_callback, TqdmCallback(verbose=0), early_stopping],
         verbose=0
     )
     logging.info(f"Training finished. Best model saved to {model_path}")
@@ -287,15 +290,9 @@ def evaluate_model(forex_data: ForexData, model_path: Optional[Path] = None):
     analyse_individual_run(eval_run_path, "eval")
     logging.info(f"Evaluation set evaluation complete. Results in {eval_run_path.parent}")
 
-
-if __name__ == "__main__":
-
-    fcd = ForexCandleData.load("dukascopy", "EURUSD", Timeframe.H1, datetime(2020, 1, 1, 22), datetime(2024, 12, 31, 21))
-    feature_names = [
-        "sin_24h",
-        "cos_24h",
-        "cos_7d",
-        "sin_7d",
+def get_features() -> list[str]:
+    time_features = ["sin_24h", "cos_24h", "cos_7d", "sin_7d"]
+    technical_analysis = [
         "as_ratio_of_other_column('parabolic_sar(0.02, 0.2)', 'close_bid')",
         "as_ratio_of_other_column('ema(24)', 'close_bid')",
         "as_ratio_of_other_column('ema(72)', 'close_bid')",
@@ -308,6 +305,16 @@ if __name__ == "__main__":
         "as_ratio_of_other_column('bb_lower(20, 2.0)', 'close_bid')",
         "as_z_score(\"as_ratio_of_other_column('close_ask', 'close_bid')\", 50)"
     ]
-    fd = ForexData(fcd, feature_names, 0.7)
+    ta_lookback = [
+        f"shift({feature!r}, {i})"
+        for i in range(1,3)
+        for feature in technical_analysis
+    ]
+    return [*time_features, *technical_analysis, *ta_lookback]
+
+if __name__ == "__main__":
+
+    fcd = ForexCandleData.load("dukascopy", "EURUSD", Timeframe.H1, datetime(2020, 1, 1, 22), datetime(2024, 12, 31, 21))
+    fd = ForexData(fcd, get_features(), 0.7)
     train_model(fd)
     evaluate_model(fd)
