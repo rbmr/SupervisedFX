@@ -38,18 +38,22 @@ def discretize(p, tick_size):
   return np.round(p / tick_size) * tick_size
 
 def ask(t):
-  """Calculates the ask price at a given time."""
-  return discretize(price(t) + spread(t) * 0.5, tick_size)
+  return price(t) + spread(t) * 0.5
 
 def bid(t):
-  """Calculates the bid price at a given time."""
-  return discretize(price(t) - spread(t) * 0.5, tick_size)
+  return price(t) - spread(t) * 0.5
 
-t_bid = ticks()
-p_bid = bid(t_bid)
+def tickify(fn):
+  """Calculates the ask price at a given time."""
+  t = ticks()
+  p = discretize(fn(t), tick_size)
+  if len(t) == 0:
+    return t, p
+  mask = np.concatenate(([True],p[:-1] != p[1:]))
+  return t[mask], p[mask]
 
-t_ask = ticks()
-p_ask = ask(t_ask)
+t_bid, p_bid = tickify(bid)
+t_ask, p_ask = tickify(ask)
 
 t = np.linspace(t_start, t_end, 256)
 p = price(t)
