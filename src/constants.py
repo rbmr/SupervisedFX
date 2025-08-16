@@ -6,6 +6,7 @@ from torch.cuda import is_available as is_cuda_available
 COMMON_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = COMMON_DIR.parent
 DATA_DIR = PROJECT_DIR / "data"
+DATA_REPORTS_DIR = DATA_DIR / "reports"
 DP_CACHE_DIR = DATA_DIR / "dp_cache"
 MODELS_DIR = DATA_DIR / "models"
 

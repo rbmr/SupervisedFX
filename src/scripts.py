@@ -10,7 +10,7 @@ import signal
 import tempfile
 import time
 from asyncio import FIRST_EXCEPTION
-from concurrent.futures import ProcessPoolExecutor, wait
+from concurrent.futures import ProcessPoolExecutor, wait, ThreadPoolExecutor
 from datetime import datetime, timedelta
 from functools import partial
 from multiprocessing import get_context
@@ -192,28 +192,33 @@ def clean_numpy(obj):
         return float(obj)
     return obj
 
-def fetch(session, url, retries: int = 16, raise_on_fail: bool = True) -> bytes | None:
+def fetch_worker(url: str, retries: int = 16, raise_on_fail: bool = True) -> bytes | None:
+    """A thread-safe worker to fetch a single URL with retries."""
     delay = 1
     for _ in range(retries):
         try:
-            response = session.get(url)
-            response.raise_for_status()
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()  # Raises HTTPError for bad responses (4xx or 5xx)
             return response.content
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             print(f"Error fetching {url}: {e}")
             time.sleep(delay)
-            delay *= 2
+            delay *= 2 # Exponential backoff
     if not raise_on_fail:
         print(f"Failed to fetch {url} after {retries} retries")
         return None
     raise RuntimeError(f"Failed to fetch {url} after {retries} retries")
 
-def fetch_all(urls: list[str], raise_on_fail: bool = True) -> list:
-    results = []
-    with requests.Session() as session:
-        for url in urls:
-            result = fetch(session, url, raise_on_fail)
-            results.append(result)
+def fetch_all(urls: list[str], raise_on_fail: bool = True, max_workers=4) -> list:
+    """Fetches a list of URLs in parallel using a thread pool.
+
+    Returns a list of 'bytes' objects (the content) or None for failed
+    requests if raise_on_fail is False. The results are in the same
+    order as the input URLs.
+    """
+    worker = partial(fetch_worker, raise_on_fail=raise_on_fail)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(worker, urls))
     return results
 
 def raise_value_error(msg):
