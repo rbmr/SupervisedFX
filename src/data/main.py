@@ -52,13 +52,9 @@ def fetch_data(source: str, instrument: str, timeframe: Timeframe, start_date: d
             print(f"[{target_day}] Found cached TICK data.")
 
         # 4. Downsample tick data and save the result
-        if not tick_data.df.empty:
-            print(f"[{target_day}] Downsampling TICK data to {timeframe.name}...")
-            candle_data = tick_data.downsample(timeframe)
-            if not candle_data.df.empty:
-                candle_data.save(target_day)
-        else:
-            print(f"[{target_day}] No tick data available to generate {timeframe.name} data.")
+        print(f"[{target_day}] Downsampling TICK data to {timeframe.name}...")
+        candle_data = tick_data.downsample(timeframe)
+        candle_data.save(target_day)
 
 def get_data(source: str, instrument: str, timeframe: Timeframe, start_date: date, end_date: date) -> CandleData:
     """Main method to fetch and then retrieve CandleData."""

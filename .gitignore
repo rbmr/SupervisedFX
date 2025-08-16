@@ -175,4 +175,5 @@ cython_debug/
 
 
 # Custom
-/data/*/*/TICK/*
+/data/*/*/TICK/
+/data/reports/

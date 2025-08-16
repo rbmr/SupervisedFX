@@ -31,7 +31,7 @@ def analyze_and_save_report(data: CandleData):
     # --- 2. Perform Gap Analysis ---
     granularity_minutes = data.timeframe.minutes
     df['time_diff'] = df.index.to_series().diff().dt.total_seconds() / 60.0
-    df['time_diff'].fillna(0, inplace=True)
+    df.fillna({'time_diff': granularity_minutes}, inplace=True)
 
     # Define tolerances for expected gaps
     std_dev_tolerance = 0.1 * granularity_minutes # 10% tolerance for standard gaps
