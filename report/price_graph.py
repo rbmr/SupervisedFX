@@ -106,7 +106,7 @@ def create_label_and_point(t, p, ha, va, subscript = None, superscript = None):
     p_text += p_pad
   elif va == 'top':
     p_text -= p_pad
-  plt.text(t_text, p_text, label, ha=ha, va=va, zorder=102, fontsize=24,
+  plt.text(t_text, p_text, label, ha=ha, va=va, zorder=102, fontsize=16,
            bbox=dict(facecolor='white', alpha=1.0, edgecolor='gray', boxstyle='round,pad=0.3', linewidth=0.5))
 
 def timeframe_label(t):
