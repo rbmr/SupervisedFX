@@ -16,17 +16,16 @@ T = TypeVar('T', bound='PriceData')
 class Columns(IntEnum):
     """Enum superclass for all column name Enums"""
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        cls.names = tuple(col.name.lower() for col in cls)
+
     @staticmethod
     def _generate_next_value_(name, start, count, last_values):
         """Causes auto() to count from 0."""
         return count
 
-    @cached_property
-    def names(self):
-        """Returns the lowercase names of the columns in proper order."""
-        return tuple(col.name.lower() for col in self)
-
-class CandleCols(Columns):
+class Candle(Columns):
     """Enum defining all CandleData columns and their order."""
 
     OPEN_BID = auto()
@@ -142,7 +141,8 @@ class PriceData(ABC):
 
         Follows the order specified by ._get_required_columns()
         """
-        return self.df[self._get_required_columns()].to_numpy(dtype=np.float64, copy=True)
+        columns = list(self._get_required_columns())
+        return self.df[columns].to_numpy(dtype=np.float64, copy=True)
 
     @abstractmethod
     def downsample(self, timeframe: Timeframe) -> Self:
@@ -152,7 +152,7 @@ class CandleData(PriceData):
     """Standardized and validated DataFrame wrapper for candle data."""
 
     def _get_required_columns(self) -> tuple[str, ...]:
-        return CandleCols.names
+        return Candle.names
 
     def __post_init__(self):
         if self.timeframe == Timeframe.TICK:
