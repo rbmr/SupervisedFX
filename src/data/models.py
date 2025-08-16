@@ -1,15 +1,46 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date
-from enum import Enum
+from enum import Enum, IntEnum, auto
+from functools import cached_property
 from pathlib import Path
 from typing import Optional, Self, TypeVar, Type
 
+import numpy as np
 import pandas as pd
 
 from src.constants import DATA_DIR
 
 T = TypeVar('T', bound='PriceData')
+
+class Columns(IntEnum):
+    """Enum superclass for all column name Enums"""
+
+    @staticmethod
+    def _generate_next_value_(name, start, count, last_values):
+        """Causes auto() to count from 0."""
+        return count
+
+    @cached_property
+    def names(self):
+        """Returns the lowercase names of the columns in proper order."""
+        return tuple(col.name.lower() for col in self)
+
+class CandleCols(Columns):
+    """Enum defining all CandleData columns and their order."""
+
+    OPEN_BID = auto()
+    OPEN_ASK = auto()
+    HIGH_BID = auto()
+    HIGH_ASK = auto()
+    LOW_BID = auto()
+    LOW_ASK = auto()
+    CLOSE_BID = auto()
+    CLOSE_ASK = auto()
+    EXEC_BID = auto()
+    EXEC_ASK = auto()
+    VOLUME = auto()
+
 
 class Timeframe(Enum):
     """Enum for different trading timeframes."""
@@ -57,18 +88,14 @@ class PriceData(ABC):
         missing_cols = required_cols - actual_cols
         if missing_cols:
             raise ValueError(f"{type(self).__name__} DataFrame is missing required columns: {missing_cols}")
-        for col in self._get_numeric_columns():
-            self.df[col] = pd.to_numeric(self.df[col])
         extra_cols = actual_cols - required_cols
         if extra_cols:
             self.df.drop(extra_cols, axis=1, inplace=True)
+        for col in self.df.columns:
+            self.df[col] = pd.to_numeric(self.df[col])
 
     @abstractmethod
     def _get_required_columns(self) -> tuple[str, ...]:
-        pass
-
-    @abstractmethod
-    def _get_numeric_columns(self) -> tuple[str, ...]:
         pass
 
     @staticmethod
@@ -110,6 +137,13 @@ class PriceData(ABC):
         combined_df = pd.concat(daily_dfs).sort_index()
         return cls(source=source, instrument=instrument, timeframe=timeframe, df=combined_df)
 
+    def to_array(self) -> np.ndarray:
+        """Gets a numpy array from the internal dataframe.
+
+        Follows the order specified by ._get_required_columns()
+        """
+        return self.df[self._get_required_columns()].to_numpy(dtype=np.float64, copy=True)
+
     @abstractmethod
     def downsample(self, timeframe: Timeframe) -> Self:
         pass
@@ -118,10 +152,7 @@ class CandleData(PriceData):
     """Standardized and validated DataFrame wrapper for candle data."""
 
     def _get_required_columns(self) -> tuple[str, ...]:
-        return 'open_bid', 'high_bid', 'low_bid', 'close_bid', 'exec_bid', 'open_ask', 'high_ask', 'low_ask', 'close_ask', 'exec_ask', 'volume'
-
-    def _get_numeric_columns(self) -> tuple[str, ...]:
-        return self._get_required_columns()
+        return CandleCols.names
 
     def __post_init__(self):
         if self.timeframe == Timeframe.TICK:
@@ -151,9 +182,6 @@ class TickData(PriceData):
 
     def _get_required_columns(self) -> tuple[str, ...]:
         return 'bid', 'ask', 'bid_vol', 'ask_vol'
-
-    def _get_numeric_columns(self) -> tuple[str, ...]:
-        return self._get_required_columns()
 
     def __post_init__(self):
         if self.timeframe != Timeframe.TICK:
