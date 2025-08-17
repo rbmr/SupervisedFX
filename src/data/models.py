@@ -8,6 +8,7 @@ from typing import Optional, Self, TypeVar, Type
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from src.constants import DATA_DIR
 
@@ -98,43 +99,79 @@ class PriceData(ABC):
         pass
 
     @staticmethod
-    def get_path(source: str, instrument: str, timeframe: Timeframe, d: date) -> Path:
-        date_str = d.strftime("%Y%m%d")
+    def get_path(source: str, instrument: str, timeframe: Timeframe, start_date: date, end_date: date | None = None) -> Path:
+        if end_date is None:
+            end_date = start_date
+        if start_date == end_date:
+            date_str = start_date.strftime("%Y%m%d")
+        else:
+            start_date_str = start_date.strftime("%Y%m%d")
+            end_date_str = end_date.strftime("%Y%m%d")
+            date_str = f"{start_date_str}-{end_date_str}"
         return DATA_DIR / source.upper() / instrument.upper() / timeframe.pathname / f"{date_str}.parquet"
 
-    def save(self, d: date) -> None:
-        """Saves the DataFrame for a single specified day to a parquet file."""
-        if not (self.df.index.date == d).all():
-            raise ValueError(f"Cannot save, DataFrame contains data from dates other than {d}")
-        path = self.get_path(self.source, self.instrument, self.timeframe, d)
+    def _save(self) -> None:
+        """Saves this DataFrame to a parquet file."""
+        start_date = self.df.index.min().date()
+        end_date = self.df.index.max().date()
+        path = self.get_path(self.source, self.instrument, self.timeframe, start_date, end_date)
         path.parent.mkdir(parents=True, exist_ok=True)
         self.df.to_parquet(path)
         print(f"Saved {self.instrument} {self.timeframe.name} data to {path}")
 
+    def save_day(self, d: date) -> None:
+        """Saves the DataFrame for a single specified day to a parquet file."""
+        if not (self.df.index.date == d).all():
+            raise ValueError(f"Cannot save, DataFrame contains data from dates other than {d}")
+        self._save()
+
     @classmethod
-    def load(cls: Type[T], source: str, instrument: str, timeframe: Timeframe, d: date) -> Optional[T]:
-        """Loads the DataFrame for a single specified day from a parquet file."""
-        path = cls.get_path(source, instrument, timeframe, d)
+    def _load(cls: Type[T], source: str, instrument: str, timeframe: Timeframe, start_date: date, end_date: date | None = None) -> Optional[T]:
+        """Directly loads a DataFrame from a parquet file if it exists, otherwise returns None."""
+        path = cls.get_path(source, instrument, timeframe, start_date, end_date)
         if not path.exists():
             return None
         df = pd.read_parquet(path)
         return cls(source=source, instrument=instrument, timeframe=timeframe, df=df)
 
     @classmethod
-    def load_range(cls: Type[T], source: str, instrument: str, timeframe: Timeframe, start_date: date, end_date: date) -> T:
+    def load_day(cls: Type[T], source: str, instrument: str, timeframe: Timeframe, d: date) -> Optional[T]:
+        """Loads the DataFrame for a single specified day from a parquet file."""
+        return cls._load(source, instrument, timeframe, d)
+
+    @classmethod
+    def load_range(cls: Type[T], source: str, instrument: str, timeframe: Timeframe, start_date: date, end_date: date, pbar: bool = False, use_cache: bool = True) -> T:
         """Loads and concatenates all the available data into a single dataframe."""
+
+        # Use cache for the date range if intended.
+        if use_cache:
+            price_data = cls._load(source, instrument, timeframe, start_date, end_date)
+            if price_data is not None:
+                return price_data
+
+        # Fetch day-by-day.
         days = pd.date_range(start_date, end_date, freq='D')
         daily_dfs = []
-        for d in days:
-            daily_data = cls.load(source, instrument, timeframe, d.date())
+        iterator = tqdm(days, desc=f"Loading {instrument} {timeframe.name} daily files") if pbar else days
+        for d in iterator:
+            daily_data = cls.load_day(source, instrument, timeframe, d.date())
             if daily_data is not None and not daily_data.df.empty:
                 daily_dfs.append(daily_data.df)
+
+        # Combine day-by-day dataframes
         if not daily_dfs:
             empty_index = pd.DatetimeIndex([], name='time', tz='utc')
             empty_df = pd.DataFrame(index=empty_index, columns=list(cls._get_required_columns()))
             return cls(source=source, instrument=instrument, timeframe=timeframe, df=empty_df)
         combined_df = pd.concat(daily_dfs).sort_index()
-        return cls(source=source, instrument=instrument, timeframe=timeframe, df=combined_df)
+
+        # Create price_data object.
+        price_data = cls(source=source, instrument=instrument, timeframe=timeframe, df=combined_df)
+
+        # Save date_range to cache if intended.
+        if use_cache:
+            price_data._save()
+        return price_data
 
     def to_array(self) -> np.ndarray:
         """Gets a numpy array from the internal dataframe.

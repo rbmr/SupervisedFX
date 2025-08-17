@@ -36,7 +36,7 @@ def fetch_data(source: str, instrument: str, timeframe: Timeframe, start_date: d
         print(f"[{target_day}] No cached {timeframe.name} data found.")
 
         # 2. Check for tick data to downsample from
-        tick_data = TickData.load(source, instrument, Timeframe.TICK, target_day)
+        tick_data = TickData.load_day(source, instrument, Timeframe.TICK, target_day)
 
         # 3. If no tick data, download it
         if tick_data is None:
@@ -44,7 +44,7 @@ def fetch_data(source: str, instrument: str, timeframe: Timeframe, start_date: d
             downloader = DOWNLOADERS[source]
             try:
                 tick_data = downloader.fetch_day(instrument, target_day)
-                tick_data.save(target_day)
+                tick_data.save_day(target_day)
             except Exception as e:
                 print(f"[{target_day}] ERROR: Could not fetch or process data for this day. Skipping. Reason: {e}")
                 continue
@@ -54,7 +54,7 @@ def fetch_data(source: str, instrument: str, timeframe: Timeframe, start_date: d
         # 4. Downsample tick data and save the result
         print(f"[{target_day}] Downsampling TICK data to {timeframe.name}...")
         candle_data = tick_data.downsample(timeframe)
-        candle_data.save(target_day)
+        candle_data.save_day(target_day)
 
 def get_data(source: str, instrument: str, timeframe: Timeframe, start_date: date, end_date: date) -> CandleData:
     """Main method to fetch and then retrieve CandleData."""

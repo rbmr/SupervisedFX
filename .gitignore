@@ -177,3 +177,4 @@ cython_debug/
 # Custom
 /data/*/*/TICK/
 /data/reports/
+/data/*/*/*/*-*.parquet

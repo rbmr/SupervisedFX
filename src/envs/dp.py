@@ -10,7 +10,6 @@ from numpy._typing import NDArray
 from tqdm import trange
 
 from src.constants import DP_CACHE_DIR
-from src.data.main import get_data
 from src.data.models import CandleData, Candle, Timeframe
 from src.envs.trade import calculate_shares_to_trade, execute_trade, interpolate
 
@@ -169,12 +168,13 @@ class DPTable:
         )
 
 if __name__ == "__main__":
-    candle_data = get_data(
+    candle_data = CandleData.load_range(
         "DUKASCOPY",
         "EURUSD",
         Timeframe.M30,
         date(2020,1,1),
-        date(2025,1,1)
+        date(2025,1,1),
+        pbar=True
     )
     dp_table = DPTable.get(candle_data, 0.0)
     print(dp_table.value_table[:5, :])
