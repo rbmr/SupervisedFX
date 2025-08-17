@@ -53,7 +53,7 @@ class DukascopyDownloader:
     def fetch_day(cls, instrument: str, d: date) -> TickData:
         """Fetches all available tick data for a given instrument and a single day.
 
-        Returns a standardized TickData object.
+        Returns a TickData object.
         """
         print(f"[{d.strftime('%Y-%m-%d')}] Fetching Dukascopy data for {instrument}...")
 
@@ -72,12 +72,12 @@ class DukascopyDownloader:
 
         if not hourly_dfs:
             print(f"[{d.strftime('%Y-%m-%d')}] No data found for {instrument}.")
-            return TickData(cls.SOURCE, instrument, Timeframe.TICK, pd.DataFrame(columns=['time', 'bid', 'ask', 'bid_vol', 'ask_vol']))
+            day_df = pd.DataFrame(columns=['time', 'bid', 'ask', 'bid_vol', 'ask_vol'])
+        else:
+            day_df = pd.concat(hourly_dfs, ignore_index=True).sort_values(by="time").reset_index(drop=True)
+            print(f"[{d.strftime('%Y-%m-%d')}] Fetched {len(day_df)} ticks.")
 
-        day_df = pd.concat(hourly_dfs, ignore_index=True).sort_values(by="time").reset_index(drop=True)
-        print(f"[{d.strftime('%Y-%m-%d')}] Fetched {len(day_df)} ticks.")
-
-        return TickData(cls.SOURCE, instrument, Timeframe.TICK, day_df)
+        return TickData(cls.SOURCE, instrument, Timeframe.TICK, day_df, d, d)
 
 DOWNLOADERS = {
     DukascopyDownloader.SOURCE: DukascopyDownloader,

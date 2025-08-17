@@ -168,7 +168,7 @@ class DPTable:
         )
 
 if __name__ == "__main__":
-    candle_data = CandleData.load_range(
+    candle_data = CandleData.load(
         "DUKASCOPY",
         "EURUSD",
         Timeframe.M30,

@@ -12,7 +12,7 @@ def analyze_and_save_report(data: CandleData):
 
     This function serves as the main entry point for the analysis module.
     """
-    df = data.df
+    df = data.df.copy()
     if df.empty:
         print("Analysis skipped: The provided DataFrame is empty.")
         return

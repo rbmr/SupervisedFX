@@ -29,14 +29,14 @@ def fetch_data(source: str, instrument: str, timeframe: Timeframe, start_date: d
         target_day = d.date()
 
         # 1. Check if target data already exists
-        if CandleData.get_path(source, instrument, timeframe, target_day).exists():
+        if CandleData.get_path(source, instrument, timeframe, target_day, target_day).exists():
             print(f"[{target_day}] Found cached {timeframe.name} data.")
             continue
 
         print(f"[{target_day}] No cached {timeframe.name} data found.")
 
         # 2. Check for tick data to downsample from
-        tick_data = TickData.load_day(source, instrument, Timeframe.TICK, target_day)
+        tick_data = TickData.load(source, instrument, Timeframe.TICK, target_day, target_day)
 
         # 3. If no tick data, download it
         if tick_data is None:
@@ -54,12 +54,12 @@ def fetch_data(source: str, instrument: str, timeframe: Timeframe, start_date: d
         # 4. Downsample tick data and save the result
         print(f"[{target_day}] Downsampling TICK data to {timeframe.name}...")
         candle_data = tick_data.downsample(timeframe)
-        candle_data.save_day(target_day)
+        candle_data.save()
 
 def get_data(source: str, instrument: str, timeframe: Timeframe, start_date: date, end_date: date) -> CandleData:
     """Main method to fetch and then retrieve CandleData."""
     fetch_data(source, instrument, timeframe, start_date, end_date)
-    return CandleData.load_range(source, instrument, timeframe, start_date, end_date)
+    return CandleData.load(source, instrument, timeframe, start_date, end_date)
 
 def main_cli():
     """Main Command Line Interface to run the data processing."""
@@ -104,8 +104,11 @@ def main_cli():
 
     except (ValueError, KeyError) as e:
         print(f"\nError: Invalid input. {e}")
+        raise e
     except Exception as e:
         print(f"\nAn unexpected error occurred: {e}")
+        raise e
+
 
 
 if __name__ == '__main__':

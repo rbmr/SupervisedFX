@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum, IntEnum, auto
-from functools import cached_property
 from pathlib import Path
 from typing import Optional, Self, TypeVar, Type
 
@@ -45,15 +44,15 @@ class Candle(Columns):
 class Timeframe(Enum):
     """Enum for different trading timeframes."""
     TICK = (None, None, "TICK")
-    M1 = ("1Min", 1.0, "1M")
-    M5 = ("5Min", 5.0, "5M")
-    M15 = ("15Min", 15.0, "15M")
-    M30 = ("30Min", 30.0, "30M")
-    H1 = ("H", 60.0, "1H")
-    H4 = ("4H", 240.0, "4H")
-    D1 = ("D", 1440.0, "1D")
+    M1 = ("1Min", 1, "1M")
+    M5 = ("5Min", 5, "5M")
+    M15 = ("15Min", 15, "15M")
+    M30 = ("30Min", 30, "30M")
+    H1 = ("H", 60, "1H")
+    H4 = ("4H", 240, "4H")
+    D1 = ("D", 1440, "1D")
 
-    def __init__(self, pandas_freq: Optional[str], minutes: Optional[float], pathname: str):
+    def __init__(self, pandas_freq: Optional[str], minutes: Optional[int], pathname: str):
         self.pandas_freq = pandas_freq
         self.minutes = minutes
         self.pathname = pathname
@@ -61,13 +60,17 @@ class Timeframe(Enum):
 @dataclass(frozen=True)
 class PriceData(ABC):
     """ABC for standardized and validated price data."""
+
     source: str
     instrument: str
     timeframe: Timeframe
     df: pd.DataFrame
+    start_date: date
+    end_date: date
 
     def __post_init__(self):
-        """Standardizes the DataFrame after initialization."""
+        """Standardize and validates the DataFrame after initialization."""
+
         # Ensure 'time' index
         if self.df.index.name != 'time':
             if 'time' not in self.df.columns:
@@ -82,6 +85,9 @@ class PriceData(ABC):
         elif self.df.index.tz.zone != 'UTC':
             self.df.index = self.df.index.tz_convert('utc')
 
+        # Sort based on index
+        self.df.sort_index(inplace=True)
+
         # Verify and standardize columns
         required_cols = set(self._get_required_columns())
         actual_cols = set(self.df.columns)
@@ -94,14 +100,28 @@ class PriceData(ABC):
         for col in self.df.columns:
             self.df[col] = pd.to_numeric(self.df[col])
 
+        # Verify timeframe duration
+        if self.timeframe.minutes is not None and not self.df.empty:
+            time_diffs: pd.Series = self.df.index.to_series().diff(periods=1)
+            time_diffs.dropna(inplace=True)
+            time_diffs_s = time_diffs.dt.total_seconds().round(decimals=0)
+            timeframe_s: float = self.timeframe.minutes * 60.0
+            remainders = time_diffs_s % timeframe_s
+            if not np.all(np.isclose(remainders, 0)):
+                raise ValueError(f"Wrong timeframe specified for {type(self).__name__}.")
+
+        # Verify start and end date
+        if not self.df.empty and self.df.index[0].date() < self.start_date:
+            raise ValueError(f"DataFrame contains data before start_date {self.start_date}")
+        if not self.df.empty and self.df.index[-1].date() > self.end_date:
+            raise ValueError(f"DataFrame contains data after end_date {self.start_date}")
+
     @abstractmethod
     def _get_required_columns(self) -> tuple[str, ...]:
         pass
 
     @staticmethod
-    def get_path(source: str, instrument: str, timeframe: Timeframe, start_date: date, end_date: date | None = None) -> Path:
-        if end_date is None:
-            end_date = start_date
+    def get_path(source: str, instrument: str, timeframe: Timeframe, start_date: date, end_date: date) -> Path:
         if start_date == end_date:
             date_str = start_date.strftime("%Y%m%d")
         else:
@@ -110,67 +130,52 @@ class PriceData(ABC):
             date_str = f"{start_date_str}-{end_date_str}"
         return DATA_DIR / source.upper() / instrument.upper() / timeframe.pathname / f"{date_str}.parquet"
 
-    def _save(self) -> None:
-        """Saves this DataFrame to a parquet file."""
-        start_date = self.df.index.min().date()
-        end_date = self.df.index.max().date()
-        path = self.get_path(self.source, self.instrument, self.timeframe, start_date, end_date)
+    def save(self):
+        path = self.get_path(self.source, self.instrument, self.timeframe, self.start_date, self.end_date)
         path.parent.mkdir(parents=True, exist_ok=True)
         self.df.to_parquet(path)
         print(f"Saved {self.instrument} {self.timeframe.name} data to {path}")
 
-    def save_day(self, d: date) -> None:
-        """Saves the DataFrame for a single specified day to a parquet file."""
-        if not (self.df.index.date == d).all():
-            raise ValueError(f"Cannot save, DataFrame contains data from dates other than {d}")
-        self._save()
-
     @classmethod
-    def _load(cls: Type[T], source: str, instrument: str, timeframe: Timeframe, start_date: date, end_date: date | None = None) -> Optional[T]:
+    def _load(cls: Type[T], source: str, instrument: str, timeframe: Timeframe, start_date: date, end_date: date) -> Optional[T]:
         """Directly loads a DataFrame from a parquet file if it exists, otherwise returns None."""
         path = cls.get_path(source, instrument, timeframe, start_date, end_date)
         if not path.exists():
             return None
         df = pd.read_parquet(path)
-        return cls(source=source, instrument=instrument, timeframe=timeframe, df=df)
+        return cls(source, instrument, timeframe, df, start_date, end_date)
 
     @classmethod
-    def load_day(cls: Type[T], source: str, instrument: str, timeframe: Timeframe, d: date) -> Optional[T]:
-        """Loads the DataFrame for a single specified day from a parquet file."""
-        return cls._load(source, instrument, timeframe, d)
-
-    @classmethod
-    def load_range(cls: Type[T], source: str, instrument: str, timeframe: Timeframe, start_date: date, end_date: date, pbar: bool = False, use_cache: bool = True) -> T:
+    def load(cls: Type[T], source: str, instrument: str, timeframe: Timeframe, start_date: date, end_date: date, use_cache: bool = True) -> T:
         """Loads and concatenates all the available data into a single dataframe."""
 
-        # Use cache for the date range if intended.
+        # Use cache for the date range if available and intended.
         if use_cache:
             price_data = cls._load(source, instrument, timeframe, start_date, end_date)
             if price_data is not None:
                 return price_data
 
-        # Fetch day-by-day.
+        # Load data day-by-day.
         days = pd.date_range(start_date, end_date, freq='D')
         daily_dfs = []
-        iterator = tqdm(days, desc=f"Loading {instrument} {timeframe.name} daily files") if pbar else days
-        for d in iterator:
-            daily_data = cls.load_day(source, instrument, timeframe, d.date())
-            if daily_data is not None and not daily_data.df.empty:
+        for d in tqdm(days, desc=f"Loading {instrument} {timeframe.name} daily files"):
+            daily_data = cls._load(source, instrument, timeframe, d.date(), d.date())
+            if daily_data is None:
+                raise ValueError(f"Missing data for day {instrument} {timeframe.name} {d.date()}")
+            if not daily_data.df.empty:
                 daily_dfs.append(daily_data.df)
 
         # Combine day-by-day dataframes
         if not daily_dfs:
             empty_index = pd.DatetimeIndex([], name='time', tz='utc')
-            empty_df = pd.DataFrame(index=empty_index, columns=list(cls._get_required_columns()))
-            return cls(source=source, instrument=instrument, timeframe=timeframe, df=empty_df)
-        combined_df = pd.concat(daily_dfs).sort_index()
+            combined_df = pd.DataFrame(index=empty_index, columns=list(cls._get_required_columns()))
+        else:
+            combined_df = pd.concat(daily_dfs)
 
-        # Create price_data object.
-        price_data = cls(source=source, instrument=instrument, timeframe=timeframe, df=combined_df)
-
-        # Save date_range to cache if intended.
+        # Create, cache and return price_data.
+        price_data = cls(source, instrument, timeframe, combined_df, start_date, end_date)
         if use_cache:
-            price_data._save()
+            price_data.save()
         return price_data
 
     def to_array(self) -> np.ndarray:
@@ -212,7 +217,7 @@ class CandleData(PriceData):
         }
         resampled_df = self.df.resample(timeframe.pandas_freq).agg(agg_rules)
         resampled_df.dropna(how='all', inplace=True)
-        return CandleData(self.source, self.instrument, timeframe, resampled_df)
+        return CandleData(self.source, self.instrument, timeframe, resampled_df, self.start_date, self.end_date)
 
 class TickData(PriceData):
     """Standardized and validated DataFrame wrapper for tick data."""
@@ -263,4 +268,4 @@ class TickData(PriceData):
         combined_df.fillna({"exec_bid": combined_df['close_bid']}, inplace=True)
         combined_df.fillna({"exec_ask": combined_df['close_ask']}, inplace=True)
 
-        return CandleData(self.source, self.instrument, timeframe, combined_df)
+        return CandleData(self.source, self.instrument, timeframe, combined_df, self.start_date, self.end_date)
