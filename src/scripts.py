@@ -2,11 +2,13 @@
 This file contains some simple scripts that can be useful anywhere during the project.
 """
 import ast
+import atexit
 import functools
 import json
 import os
 import random
 import signal
+import subprocess
 import tempfile
 import time
 from asyncio import FIRST_EXCEPTION
@@ -17,12 +19,33 @@ from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, TypeVar, Optional
 
+import logging
 import numpy as np
 import pandas as pd
 import requests
 
 K = TypeVar("K")
 V = TypeVar("V")
+
+def launch_tensorboard(log_dir: Path):
+    """Launches Tensorboard in a background process and registers its termination."""
+    command = ["tensorboard", "--logdir", str(log_dir)]
+    print(f"Starting TensorBoard for log directory: {log_dir}")
+    try:
+        tb_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        logging.info("TensorBoard should become available at http://localhost:6006/")
+    except FileNotFoundError:
+        logging.warning("\nERROR: 'tensorboard' command not found.")
+        logging.warning("Please ensure TensorFlow is installed correctly and 'tensorboard' is in your system's PATH.\n")
+        return
+
+    def cleanup():
+        print("Terminating TensorBoard process...")
+        tb_process.terminate()
+        tb_process.wait() # Wait for the process to actually exit
+        print("TensorBoard process terminated.")
+
+    atexit.register(cleanup)
 
 def contains_nan_or_inf(arr: np.ndarray) -> bool:
     """

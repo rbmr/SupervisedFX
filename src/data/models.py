@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date
-from enum import Enum, IntEnum, auto
 from pathlib import Path
 from typing import Optional, Self, TypeVar, Type
 
@@ -9,53 +8,9 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from src.constants import DATA_DIR
+from src.constants import DATA_DIR, Timeframe, Price
 
 T = TypeVar('T', bound='PriceData')
-
-class Columns(IntEnum):
-    """Enum superclass for all column name Enums"""
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        cls.names = tuple(col.name.lower() for col in cls)
-
-    @staticmethod
-    def _generate_next_value_(name, start, count, last_values):
-        """Causes auto() to count from 0."""
-        return count
-
-class Candle(Columns):
-    """Enum defining all CandleData columns and their order."""
-
-    OPEN_BID = auto()
-    OPEN_ASK = auto()
-    HIGH_BID = auto()
-    HIGH_ASK = auto()
-    LOW_BID = auto()
-    LOW_ASK = auto()
-    CLOSE_BID = auto()
-    CLOSE_ASK = auto()
-    EXEC_BID = auto()
-    EXEC_ASK = auto()
-    VOLUME = auto()
-
-
-class Timeframe(Enum):
-    """Enum for different trading timeframes."""
-    TICK = (None, None, "TICK")
-    M1 = ("1Min", 1, "1M")
-    M5 = ("5Min", 5, "5M")
-    M15 = ("15Min", 15, "15M")
-    M30 = ("30Min", 30, "30M")
-    H1 = ("H", 60, "1H")
-    H4 = ("4H", 240, "4H")
-    D1 = ("D", 1440, "1D")
-
-    def __init__(self, pandas_freq: Optional[str], minutes: Optional[int], pathname: str):
-        self.pandas_freq = pandas_freq
-        self.minutes = minutes
-        self.pathname = pathname
 
 @dataclass(frozen=True)
 class PriceData(ABC):
@@ -194,7 +149,7 @@ class CandleData(PriceData):
     """Standardized and validated DataFrame wrapper for candle data."""
 
     def _get_required_columns(self) -> tuple[str, ...]:
-        return Candle.names
+        return Price.names
 
     def __post_init__(self):
         if self.timeframe == Timeframe.TICK:

@@ -9,9 +9,9 @@ import numpy as np
 from numpy._typing import NDArray
 from tqdm import trange
 
-from src.constants import DP_CACHE_DIR
-from src.data.models import CandleData, Candle, Timeframe
-from src.envs.trade import calculate_shares_to_trade, execute_trade, interpolate
+from src.constants import DP_CACHE_DIR, Price
+from src.data.models import CandleData, Timeframe
+from src.trade.trade import calculate_shares_to_trade, execute_trade, interpolate
 
 DATA_HASH_LENGTH = 8
 
@@ -19,7 +19,7 @@ DATA_HASH_LENGTH = 8
 class DPTable:
 
     value_table: NDArray[np.float64] # shape: (n_timesteps+1, n_exposures)
-    policy_table: NDArray[np.uint8] # shape: (n_timesteps+1, n_exposures)
+    policy_table: NDArray[np.uint8] # shape: (n_timesteps, n_exposures)
     n_actions: int
     n_exposures: int
     n_timesteps: int
@@ -70,7 +70,7 @@ class DPTable:
 
     @classmethod
     def get(cls,
-            candle_data: CandleData,
+            prices: np.ndarray,
             commission_pct: float = 0.0,
             n_actions: int = 15,
             n_exposures: int = 15
@@ -78,30 +78,27 @@ class DPTable:
         """
         Gets a DPTable, loading from cache if available, otherwise computing and saving it.
         """
-        prices = candle_data.to_array()
         data_hash = cls._calculate_data_hash(prices)
         cache_path = cls._get_cache_path(n_actions, n_exposures, commission_pct, data_hash)
         if cache_path.exists():
             print(f"✅ Found cached DPTable, loading from {cache_path}")
             return cls.load(cache_path)
         print(f"Cache not found. Computing DPTable for hash {data_hash}...")
-        dp_table = cls.compute(candle_data, commission_pct, n_actions, n_exposures, prices, data_hash)
+        dp_table = cls.compute(prices, commission_pct, n_actions, n_exposures, data_hash)
         print(f"💾 Saving newly computed DPTable to {cache_path}")
         dp_table.save(cache_path)
         return dp_table
 
     @classmethod
     def compute(cls,
-                candle_data: CandleData,
+                prices: np.ndarray,
                 commission_pct: float = 0.0,
                 n_actions: int = 15,
                 n_exposures: int = 15,
-                _prices: NDArray[np.float64] = None,
                 _data_hash: str = None
                 ) -> Self:
-        prices = _prices if _prices is not None else candle_data.to_array()
+        assert prices.shape[1] == len(Price)
         data_hash = _data_hash if _data_hash is not None else cls._calculate_data_hash(prices)
-
         n_timesteps = prices.shape[0]
         assert 0.0 <= commission_pct <= 1.0, f"commission_pct must be in [0.0, 1.0], was {commission_pct}."
         assert 1 <= n_actions <= 256, f"n_actions must be in [1, 256], was {n_actions}"
@@ -122,12 +119,12 @@ class DPTable:
         for t in trange(n_timesteps-1, -1, -1):
 
             # Retrieve relevant prices
-            prev_close_bid = prices[t-1, Candle.CLOSE_BID] if t > 0 else prices[0, Candle.OPEN_BID] # P_{t-1,c}^b
-            prev_close_ask = prices[t-1, Candle.CLOSE_ASK] if t > 0 else prices[0, Candle.OPEN_ASK] # P_{t-1,c}^a
-            exec_bid = prices[t, Candle.EXEC_BID] # P_t^b
-            exec_ask = prices[t, Candle.EXEC_ASK] # P_t^a
-            close_bid = prices[t, Candle.CLOSE_BID] # P_{t,c}^b
-            close_ask = prices[t, Candle.CLOSE_ASK] # P_{t,c}^a
+            prev_close_bid = prices[t-1, Price.CLOSE_BID] if t > 0 else prices[0, Price.OPEN_BID] # P_{t-1,c}^b
+            prev_close_ask = prices[t-1, Price.CLOSE_ASK] if t > 0 else prices[0, Price.OPEN_ASK] # P_{t-1,c}^a
+            exec_bid = prices[t, Price.EXEC_BID] # P_t^b
+            exec_ask = prices[t, Price.EXEC_ASK] # P_t^a
+            close_bid = prices[t, Price.CLOSE_BID] # P_{t,c}^b
+            close_ask = prices[t, Price.CLOSE_ASK] # P_{t,c}^a
 
             # Compute shares (cash is already known)
             prev_val_price = np.where(prev_exposure >= 0, prev_close_bid, prev_close_ask) # P_{t-1,c}^*
@@ -166,15 +163,3 @@ class DPTable:
             commission_pct=commission_pct,
             data_hash=data_hash,
         )
-
-if __name__ == "__main__":
-    candle_data = CandleData.load(
-        "DUKASCOPY",
-        "EURUSD",
-        Timeframe.M30,
-        date(2020,1,1),
-        date(2025,1,1),
-        pbar=True
-    )
-    dp_table = DPTable.get(candle_data, 0.0)
-    print(dp_table.value_table[:5, :])
