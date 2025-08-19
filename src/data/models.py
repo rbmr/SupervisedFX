@@ -153,7 +153,7 @@ class CandleData(PriceData):
 
     def __post_init__(self):
         if self.timeframe == Timeframe.TICK:
-            raise ValueError("CandleData cannot have a TICK timeframe.")
+            raise ValueError(f"{self.__class__.__name__} cannot have a TICK timeframe.")
         super().__post_init__()
 
     def downsample(self, timeframe: Timeframe) -> Self:
@@ -182,7 +182,7 @@ class TickData(PriceData):
 
     def __post_init__(self):
         if self.timeframe != Timeframe.TICK:
-            raise ValueError("TickData must have a TICK timeframe.")
+            raise ValueError(f"{self.__class__.__name__} must have a TICK timeframe.")
         super().__post_init__()
 
     def downsample(self, timeframe: Timeframe, delay: pd.Timedelta = pd.Timedelta("0s")) -> CandleData:
