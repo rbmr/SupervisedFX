@@ -235,14 +235,13 @@ def fetch_worker(url: str, retries: int = 16, raise_on_fail: bool = True) -> byt
 def fetch_all(urls: list[str], raise_on_fail: bool = True, max_workers=4) -> list:
     """Fetches a list of URLs in parallel using a thread pool.
 
-    Returns a list of 'bytes' objects (the content) or None for failed
+    Returns a list of 'bytes' objects or None for failed
     requests if raise_on_fail is False. The results are in the same
     order as the input URLs.
     """
     worker = partial(fetch_worker, raise_on_fail=raise_on_fail)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        results = list(executor.map(worker, urls))
-    return results
+        return list(executor.map(worker, urls))
 
 def raise_value_error(msg):
     raise ValueError(msg)
