@@ -32,6 +32,7 @@ class DPTable:
         Saves this DPTable to a .npz file.
         """
         assert path.suffix == ".npz", "File must be a .npz file."
+        path.parent.mkdir(parents=True, exist_ok=True)
         metadata = json.dumps({
             "commission_pct": self.commission_pct,
             "n_actions": self.n_actions,
@@ -115,7 +116,7 @@ class DPTable:
         v_table = np.zeros((n_timesteps+1, n_exposures), dtype=np.float64)
         pi_table = np.zeros((n_timesteps, n_exposures), dtype=np.int8)
 
-        for t in trange(n_timesteps-1, -1, -1, colour="green", desc="Computing DPTable"):
+        for t in trange(n_timesteps-1, -1, -1, colour="green", desc="Computing DPTable", leave=False):
 
             # Retrieve relevant prices
             decision_bid = prices[t-1, Price.CLOSE_BID] if t > 0 else prices[0, Price.OPEN_BID] # P_{t-1,c}^b

@@ -16,14 +16,11 @@ def run_and_analyze(model: CustomModel, env: TradeEnv):
     model_name = model.__class__.__name__
     dt_str = datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = RUNS_DIR / f"{dt_str} {model_name}"
-    run_dir.mkdir(parents=True, exist_ok=True)
     run_log = run_dir / "log.parquet"
     run(model, env, run_log)
     analyze_individual_run(run_log, model_name)
 
 def run(model: CustomModel, env: TradeEnv, path: Path | None = None):
-    if path is not None:
-        path.parent.mkdir(parents=True, exist_ok=True)
 
     done = False
     obs, _ = env.reset()
@@ -55,5 +52,6 @@ def run(model: CustomModel, env: TradeEnv, path: Path | None = None):
     final_df = pd.concat(all_dfs, axis=1)
 
     if path is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
         final_df.to_parquet(path, index=False)
     return final_df
