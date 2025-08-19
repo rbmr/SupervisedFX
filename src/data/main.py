@@ -1,10 +1,12 @@
 import logging
 from datetime import date, datetime
 import pandas as pd
+from tqdm import tqdm
 
 from src.data.analysis import analyze_and_save_report
 from src.data.models import CandleData, TickData, Timeframe
 from src.data.downloaders import DOWNLOADERS
+from src.debug.log_config import setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +22,7 @@ def fetch_data(source: str, instrument: str, timeframe: Timeframe, start_date: d
 
     Any newly generated/downloaded data is saved to disk for future use.
     """
-    logger.info(f"\nRequesting {instrument} {timeframe.name} data from {start_date} to {end_date}.")
+    logger.info(f"Requesting {instrument} {timeframe.name} data from {start_date} to {end_date}.")
 
     source = source.upper()
     if source not in DOWNLOADERS:
@@ -28,12 +30,11 @@ def fetch_data(source: str, instrument: str, timeframe: Timeframe, start_date: d
 
     days = pd.date_range(start_date, end_date, freq='D')
 
-    for d in days:
+    for d in tqdm(days, leave=False, desc="Fetching data", colour="magenta"):
         target_day = d.date()
 
         # 1. Check if target data already exists
         if CandleData.get_path(source, instrument, timeframe, target_day, target_day).exists():
-            logger.info(f"[{target_day}] Found cached {timeframe.name} data.")
             continue
 
         logger.info(f"[{target_day}] No cached {timeframe.name} data found.")
@@ -66,6 +67,8 @@ def get_data(source: str, instrument: str, timeframe: Timeframe, start_date: dat
 
 def main_cli():
     """Main Command Line Interface to run the data processing."""
+    setup_logging()
+
     print("=" * 30)
     print("Forex Data Processor")
     print("=" * 30)
