@@ -4,6 +4,7 @@ from datetime import date
 from pathlib import Path
 from typing import Optional, Self, TypeVar, Type
 
+import logging
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -11,6 +12,8 @@ from tqdm import tqdm
 from src.constants import DATA_DIR, Timeframe, Price
 
 T = TypeVar('T', bound='PriceData')
+
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class PriceData(ABC):
@@ -89,7 +92,7 @@ class PriceData(ABC):
         path = self.get_path(self.source, self.instrument, self.timeframe, self.start_date, self.end_date)
         path.parent.mkdir(parents=True, exist_ok=True)
         self.df.to_parquet(path)
-        print(f"Saved {self.instrument} {self.timeframe.name} data to {path}")
+        logging.info(f"Saved {self.instrument} {self.timeframe.name} data to {path}")
 
     @classmethod
     def _load(cls: Type[T], source: str, instrument: str, timeframe: Timeframe, start_date: date, end_date: date) -> Optional[T]:
@@ -140,6 +143,14 @@ class PriceData(ABC):
         """
         columns = list(self._get_required_columns())
         return self.df[columns].to_numpy(dtype=np.float64, copy=True)
+
+    def to_dataframe(self) -> pd.DataFrame:
+        """Gets a copy of the internal dataframe resetting the index."""
+
+        columns = list(self._get_required_columns())
+        df: pd.DataFrame = self.df[columns].copy()
+        df.reset_index(inplace=True)
+        return df
 
     @abstractmethod
     def downsample(self, timeframe: Timeframe) -> Self:

@@ -36,8 +36,10 @@ def state_price(cash: np.ndarray, shares: np.ndarray, bid: np.ndarray, ask: np.n
     pval = shares * val_price
     equity = pval + cash
     is_solvent = equity > 0  # non-bankrupt states
-    exposure = np.where(is_solvent, pval / equity, 0.0)
-    log_equity = np.where(is_solvent, np.log(equity), -np.inf)
+    exposure = np.zeros_like(equity)
+    exposure[is_solvent] = pval[is_solvent] / equity[is_solvent]
+    log_equity = np.full_like(equity, -np.inf)
+    log_equity[is_solvent] = np.log(equity[is_solvent])
     return pval, equity, exposure, log_equity
 
 @tf.function(jit_compile=True)
@@ -64,15 +66,12 @@ def norm_linspace_interp(x: np.ndarray, yp: np.ndarray) -> np.ndarray:
     x_norm = np.clip(x, -1.0, 1.0) * 0.5 + 0.5
     idx = x_norm * (n - 1)
 
-    # Find neighbours and weight
+    # Find neighbours and interpolate
     idx0 = idx.astype(np.intp)
     idx1 = np.minimum(idx0 + 1, n - 1)
     a = idx - idx0
-
-    # Interpolate keeping shape
-    original_shape = idx0.shape
-    y0 = yp[idx0.flatten()].reshape(original_shape)
-    y1 = yp[idx1.flatten()].reshape(original_shape)
+    y0 = yp[idx0]
+    y1 = yp[idx1]
     return y0 + a * (y1 - y0)
 
 @tf.function(jit_compile=True)
@@ -94,12 +93,18 @@ def tf_norm_linspace_interp(x: tf.Tensor, yp: tf.Tensor) -> tf.Tensor:
     idx0_int = tf.cast(idx0, dtype=tf.int32)
     idx1_int = tf.cast(idx1, dtype=tf.int32)
 
-    y0 = tf.gather(yp, idx0_int, axis=-1, batch_dims=tf.rank(idx0_int))
-    y1 = tf.gather(yp, idx1_int, axis=-1, batch_dims=tf.rank(idx1_int))
+    batch_dims0 = idx0_int.shape.rank
+    batch_dims1 = idx1_int.shape.rank
+    y0 = tf.gather(yp, idx0_int, axis=-1, batch_dims=batch_dims0)
+    y1 = tf.gather(yp, idx1_int, axis=-1, batch_dims=batch_dims1)
 
     return y0 + a * (y1 - y0)
 
-def trade(prev_exposure: np.ndarray, target_exposure: np.ndarray, prev_cash: np.ndarray, prev_shares: np.ndarray, decision_bid: np.ndarray, decision_ask: np.ndarray, exec_bid: np.ndarray, exec_ask: np.ndarray, close_bid: np.ndarray, close_ask: np.ndarray, commission_pct: np.ndarray):
+def trade(
+        prev_exposure: np.ndarray, target_exposure: np.ndarray, prev_cash: np.ndarray, prev_shares: np.ndarray,
+        decision_bid: np.ndarray, decision_ask: np.ndarray, exec_bid: np.ndarray, exec_ask: np.ndarray,
+        close_bid: np.ndarray, close_ask: np.ndarray, commission_pct: np.ndarray
+    ):
 
     order_size = action_to_order(prev_exposure, target_exposure, prev_cash, prev_shares, decision_bid, decision_ask, commission_pct)
     cash, shares = execute_trade(prev_cash, prev_shares, order_size, exec_bid, exec_ask, commission_pct)
