@@ -11,6 +11,7 @@ MODELS_DIR = DATA_DIR / "models"
 RUNS_DIR = DATA_DIR / "runs"
 
 SEED = 42
+COMMISSION_PCT = 5 / 100_000
 
 class Columns(IntEnum):
     """Enum superclass for all column name Enums"""
@@ -40,12 +41,14 @@ class Price(Columns):
     VOLUME = auto()
 
 class Account(Columns):
+    """Enum defining all Account columns and their order."""
 
     CASH = auto()
     SHARES = auto()
     CLOSE_EQUITY = auto()
     CLOSE_EXPOSURE = auto()
     CLOSE_PVAL = auto()
+    CLOSE_LEQUITY = auto()
 
 class Timeframe(Enum):
     """Enum for different trading timeframes."""

@@ -178,3 +178,6 @@ cython_debug/
 /data/*/*/TICK/
 /data/reports/
 /data/*/*/*/*-*.parquet
+/data/dp_cache/
+/data/runs/
+/data/models/

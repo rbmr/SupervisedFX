@@ -5,9 +5,8 @@ import numpy as np
 import pandas as pd
 from gymnasium import spaces
 
-from src.constants import Price, Account
-from src.trade.trade import execute_trade, calculate_shares_to_trade
-
+from src.constants import Price, Account, COMMISSION_PCT
+from src.trade.trade import trade
 
 class TradeEnv(gym.Env):
 
@@ -15,9 +14,10 @@ class TradeEnv(gym.Env):
                  prices: np.ndarray,
                  features: np.ndarray,
                  feature_names: list[str],
-                 commission_pct: float,
-                 initial_capital: float,
-                 n_actions: int
+                 commission_pct: float = COMMISSION_PCT,
+                 initial_capital: float = 1.0,
+                 n_actions: int = 0,
+                 t_start: int = 0
                  ):
         super(TradeEnv, self).__init__()
 
@@ -39,16 +39,18 @@ class TradeEnv(gym.Env):
         self.feature_names = feature_names
 
         # Step counter
-        self.t = 0 # the current step index
+        assert t_start >= 0, "t_start must be non-negative"
+        self.t_start = t_start
+        self.t = self.t_start # the current step index
         self.episode_len = len(self.prices) # the #steps in the episode
 
         # Dynamic state
         self.account = np.zeros(shape = (self.episode_len, len(Account)), dtype=np.float64)
-        self.account[0, Account.CASH] = self.initial_capital
-        self.account[0, Account.SHARES] = 0.0
-        self.account[0, Account.CLOSE_EQUITY] = self.initial_capital
-        self.account[0, Account.CLOSE_EXPOSURE] = 0.0
-        self.account[0, Account.CLOSE_PVAL] = 0.0
+        self.account[self.t, Account.CASH] = self.initial_capital
+        self.account[self.t, Account.SHARES] = 0.0
+        self.account[self.t, Account.CLOSE_EQUITY] = self.initial_capital
+        self.account[self.t, Account.CLOSE_EXPOSURE] = 0.0
+        self.account[self.t, Account.CLOSE_PVAL] = 0.0
         self.observation_space = spaces.Box(-np.inf, np.inf, shape=(self.features.shape[1] + 1,), dtype=np.float64)
 
         # Action space
@@ -62,7 +64,7 @@ class TradeEnv(gym.Env):
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
-        self.t = 0
+        self.t = self.t_start
         return self._get_obs(), { }
 
     def _get_obs(self):
@@ -73,40 +75,34 @@ class TradeEnv(gym.Env):
     def step(self, action):
         self.t += 1
 
-        # Action to order
+        # Retrieve relevant state and price information
         prev_cash = self.account[self.t-1, Account.CASH]
         prev_shares = self.account[self.t-1, Account.SHARES]
         prev_exposure = self.account[self.t-1, Account.CLOSE_EXPOSURE]
         decision_bid = self.prices[self.t-1, Price.CLOSE_BID]
         decision_ask = self.prices[self.t-1, Price.CLOSE_ASK]
-        shares_to_trade = calculate_shares_to_trade(prev_exposure, action, prev_cash, prev_shares, decision_bid, decision_ask, self.commission_pct)
-
-        # Execute order
         exec_bid = self.prices[self.t, Price.EXEC_BID]
         exec_ask = self.prices[self.t, Price.EXEC_ASK]
-        cash, shares = execute_trade(prev_cash, prev_shares, shares_to_trade, exec_bid, exec_ask, self.commission_pct)
-
-        # Determine equity and exposure
         close_bid = self.prices[self.t, Price.CLOSE_BID]
         close_ask = self.prices[self.t, Price.CLOSE_ASK]
-        val_price = np.where(shares >= 0, close_bid, close_ask)
-        pval = shares * val_price
-        equity = pval + cash
-        is_solvent = equity > 0
-        exposure = np.zeros_like(equity)
-        exposure[is_solvent] = pval[is_solvent] / equity[is_solvent]
 
-        # Determine reward
-        prev_equity = self.prices[self.t-1, Account.CLOSE_EQUITY]
-        reward = np.full_like(equity, -np.inf)
-        reward[is_solvent] = np.log(equity[is_solvent] / prev_equity)
+        # Trade
+        cash, shares, pval, equity, exposure, log_equity = trade(
+            prev_exposure, action, prev_cash, prev_shares,
+            decision_bid, decision_ask, exec_bid, exec_ask,
+            close_bid, close_ask, self.commission_pct
+        )
 
-        # Store account state
+        # Store updated account state
         self.account[self.t, Account.CASH] = cash
         self.account[self.t, Account.SHARES] = shares
         self.account[self.t, Account.CLOSE_EQUITY] = equity
         self.account[self.t, Account.CLOSE_EXPOSURE] = exposure
         self.account[self.t, Account.CLOSE_PVAL] = pval
+        self.account[self.t, Account.CLOSE_LEQUITY] = log_equity
+
+        # Determine reward
+        reward = log_equity - self.prices[self.t-1, Account.CLOSE_LEQUITY]
 
         # Determine done
         terminated = equity.item() <= 0
@@ -131,4 +127,4 @@ class TradeEnv(gym.Env):
 
             logging.info(f"Finished with equity {equity}")
 
-        return self._get_obs(), reward, terminated, truncated, info
+        return self._get_obs(), reward.item(), terminated, truncated, info

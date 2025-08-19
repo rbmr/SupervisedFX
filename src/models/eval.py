@@ -78,7 +78,8 @@ if __name__ == "__main__":
         feature_names = [],
         commission_pct = commission_pct,
         initial_capital = 1.0,
-        n_actions = 0
+        n_actions = 0,
+        t_start = 0
     )
 
     run_and_analyze(PerfectModel(env), env)
