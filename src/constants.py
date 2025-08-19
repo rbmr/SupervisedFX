@@ -57,8 +57,8 @@ class Timeframe(Enum):
     M5 = ("5Min", 5, "5M")
     M15 = ("15Min", 15, "15M")
     M30 = ("30Min", 30, "30M")
-    H1 = ("H", 60, "1H")
-    H4 = ("4H", 240, "4H")
+    H1 = ("h", 60, "1H")
+    H4 = ("4h", 240, "4H")
     D1 = ("D", 1440, "1D")
 
     def __init__(self, pandas_freq: Optional[str], minutes: Optional[int], pathname: str):
