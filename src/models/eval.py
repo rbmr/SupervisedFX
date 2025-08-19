@@ -1,16 +1,15 @@
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from src.constants import Timeframe, RUNS_DIR
-from src.data.models import CandleData
+from src.constants import RUNS_DIR
 from src.models.analysis import analyze_individual_run
-from src.models.models import CustomModel, PerfectModel, RandomModel
+from src.models.models import CustomModel
 from src.trade.env import TradeEnv
+
 
 def run_and_analyze(model: CustomModel, env: TradeEnv):
 
@@ -37,7 +36,7 @@ def run(model: CustomModel, env: TradeEnv, path: Path | None = None):
     }]
 
     total_steps = env.episode_len - env.t_start - 1
-    with tqdm(total=total_steps, desc="Running episode") as pbar:
+    with tqdm(total=total_steps, desc="Running model", leave=True) as pbar:
         while not done:
             action = model.predict(obs)
 
@@ -51,8 +50,6 @@ def run(model: CustomModel, env: TradeEnv, path: Path | None = None):
             })
 
             pbar.update(1)
-
-
     log_df = pd.DataFrame(episode_log)
     all_dfs = [log_df] + [df for df in info.values() if isinstance(df, pd.DataFrame)]
     final_df = pd.concat(all_dfs, axis=1)
@@ -60,27 +57,3 @@ def run(model: CustomModel, env: TradeEnv, path: Path | None = None):
     if path is not None:
         final_df.to_parquet(path, index=False)
     return final_df
-
-if __name__ == "__main__":
-
-    candle_data = CandleData.load(
-        "DUKASCOPY",
-        "EURUSD",
-        Timeframe.M30,
-        date(2020,1,1),
-        date(2025,1,1)
-    )
-    commission_pct = 0.0
-    prices = candle_data.to_array()
-    env = TradeEnv(
-        prices = prices,
-        features = np.empty((prices.shape[0], 0)),
-        feature_names = [],
-        commission_pct = commission_pct,
-        initial_capital = 1.0,
-        n_actions = 0,
-        t_start = 0
-    )
-
-    run_and_analyze(PerfectModel(env), env)
-    run_and_analyze(RandomModel(env), env)

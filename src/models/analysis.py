@@ -8,6 +8,7 @@ import pandas as pd
 
 from src.scripts import clean_numpy, write_atomic_json
 
+logger = logging.getLogger(__name__)
 
 def get_max_streak(seq, target_value):
     if len(seq) == 0:
@@ -61,7 +62,7 @@ def analyze_individual_run(results_file: Path, model_name: str):
     df = pd.read_parquet(results_file)
 
     # Analyze results
-    logging.info(f"Analyzing {results_file}")
+    logger.info(f"Analyzing {results_file}")
 
     # Ensure output_dir exists
     output_dir.mkdir(parents=True, exist_ok=True)

@@ -69,22 +69,22 @@ class FeatureEngineer:
         return shift(self.get(column), lookback)
 
     def time_ns(self) -> np.ndarray:
-        date_gmt = self.get('date_gmt')
-        assert date_gmt.dtype == 'datetime64[ns]', f"date_gmt must be of type datetime64[ns], but was {date_gmt.dtype}"
-        return date_gmt.astype(np.int64)
+        time = self.get('time')
+        assert time.dtype == 'datetime64[ns]', f"time must be of type datetime64[ns], but was {time.dtype}"
+        return time.astype(np.int64)
 
     def lin_24h(self) -> np.ndarray:
         """Computes the time of the day as a float in [0, 1)"""
-        date_gmt = self.get('date_gmt')
-        assert date_gmt.dtype == 'datetime64[ns]', f"date_gmt must be of type datetime64[ns], but was {date_gmt.dtype}"
-        ns_since_midnight = (date_gmt - date_gmt.astype('datetime64[D]')).astype(np.int64)
+        time = self.get('time')
+        assert time.dtype == 'datetime64[ns]', f"time must be of type datetime64[ns], but was {time.dtype}"
+        ns_since_midnight = (time - time.astype('datetime64[D]')).astype(np.int64)
         return ns_since_midnight / (24 * 3600 * 1_000_000_000)
 
     def lin_7d(self) -> np.ndarray:
         """Computes the time of the week as a float in [0, 1)"""
-        date_gmt = self.get('date_gmt')
-        assert date_gmt.dtype == 'datetime64[ns]', f"date_gmt must be of type datetime64[ns], but was {date_gmt.dtype}"
-        day_of_the_week = pd.Series(date_gmt).dt.dayofweek.to_numpy()
+        time = self.get('time')
+        assert time.dtype == 'datetime64[ns]', f"time must be of type datetime64[ns], but was {time.dtype}"
+        day_of_the_week = pd.Series(time).dt.dayofweek.to_numpy()
         precise_dotw = day_of_the_week + self.get("lin_24h")
         return precise_dotw / 7
 

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
@@ -12,6 +13,8 @@ from src.constants import DP_CACHE_DIR, Price, COMMISSION_PCT
 from src.trade.trade import trade, norm_linspace_interp
 
 DATA_HASH_LENGTH = 8
+
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class DPTable:
@@ -79,11 +82,11 @@ class DPTable:
         data_hash = cls._calculate_data_hash(prices)
         cache_path = cls._get_cache_path(n_actions, n_exposures, commission_pct, data_hash)
         if cache_path.exists():
-            print(f"✅ Found cached DPTable, loading from {cache_path}")
+            logger.info(f"✅ Found cached DPTable, loading from {cache_path}")
             return cls.load(cache_path)
-        print(f"Cache not found. Computing DPTable for hash {data_hash}...")
+        logger.info(f"Cache not found. Computing DPTable for hash {data_hash}...")
         dp_table = cls.compute(prices, commission_pct, n_actions, n_exposures, data_hash)
-        print(f"💾 Saving newly computed DPTable to {cache_path}")
+        logger.info(f"💾 Saving newly computed DPTable to {cache_path}")
         dp_table.save(cache_path)
         return dp_table
 
@@ -112,7 +115,7 @@ class DPTable:
         v_table = np.zeros((n_timesteps+1, n_exposures), dtype=np.float64)
         pi_table = np.zeros((n_timesteps, n_exposures), dtype=np.int8)
 
-        for t in trange(n_timesteps-1, -1, -1):
+        for t in trange(n_timesteps-1, -1, -1, colour="green", desc="Computing DPTable"):
 
             # Retrieve relevant prices
             decision_bid = prices[t-1, Price.CLOSE_BID] if t > 0 else prices[0, Price.OPEN_BID] # P_{t-1,c}^b

@@ -3,9 +3,12 @@ import lzma
 import struct
 from datetime import date, datetime, time
 
+import logging
 import pandas as pd
 from src.scripts import fetch_all
 from src.data.models import TickData, Timeframe
+
+logger = logging.getLogger(__name__)
 
 class DukascopyDownloader:
     """Handles fetching and processing of tick data from Dukascopy for a single day."""
@@ -53,7 +56,7 @@ class DukascopyDownloader:
 
         Returns a TickData object.
         """
-        print(f"[{d.strftime('%Y-%m-%d')}] Fetching Dukascopy data for {instrument}...")
+        logger.info(f"[{d.strftime('%Y-%m-%d')}] Fetching Dukascopy data for {instrument}...")
 
         hours_of_day = [datetime.combine(d, time(h)) for h in range(24)]
         urls = [cls._get_url(instrument, dt) for dt in hours_of_day]
@@ -69,11 +72,11 @@ class DukascopyDownloader:
             hourly_dfs.append(processed_df)
 
         if not hourly_dfs:
-            print(f"[{d.strftime('%Y-%m-%d')}] No data found for {instrument}.")
+            logger.warning(f"[{d.strftime('%Y-%m-%d')}] No data found for {instrument}.")
             day_df = pd.DataFrame(columns=['time', 'bid', 'ask', 'bid_vol', 'ask_vol'])
         else:
             day_df = pd.concat(hourly_dfs, ignore_index=True).sort_values(by="time").reset_index(drop=True)
-            print(f"[{d.strftime('%Y-%m-%d')}] Fetched {len(day_df)} ticks.")
+            logger.info(f"[{d.strftime('%Y-%m-%d')}] Fetched {len(day_df)} ticks.")
 
         return TickData(cls.SOURCE, instrument, Timeframe.TICK, day_df, d, d)
 

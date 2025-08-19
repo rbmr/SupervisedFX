@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -5,6 +6,9 @@ from pathlib import Path
 
 from src.data.models import CandleData
 from src.constants import DATA_REPORTS_DIR
+
+logger = logging.getLogger(__name__)
+
 
 def analyze_and_save_report(data: CandleData):
     """
@@ -14,7 +18,7 @@ def analyze_and_save_report(data: CandleData):
     """
     df = data.df.copy()
     if df.empty:
-        print("Analysis skipped: The provided DataFrame is empty.")
+        logger.warning("Analysis skipped: The provided DataFrame is empty.")
         return
 
     # --- 1. Define Output Path ---
@@ -26,7 +30,7 @@ def analyze_and_save_report(data: CandleData):
                   data.timeframe.pathname / report_name)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n📈 Starting analysis... Report will be saved to: {output_dir}")
+    logger.info(f"Analysis started: Report will be saved to {output_dir}")
 
     # --- 2. Perform Gap Analysis ---
     granularity_minutes = data.timeframe.minutes
@@ -55,7 +59,7 @@ def analyze_and_save_report(data: CandleData):
     _plot_price_with_gaps(output_dir, df, missing_rows, data.instrument, granularity_minutes)
     _plot_volume_distribution(output_dir, df, data.instrument, granularity_minutes)
 
-    print("✅ Analysis complete.")
+    logger.info("Analysis complete.")
 
 
 def _save_gap_report_text(output_dir: Path, instrument: str, granularity_minutes: float, missing_rows: pd.DataFrame):
@@ -76,7 +80,7 @@ def _save_gap_report_text(output_dir: Path, instrument: str, granularity_minutes
             f.write(f"\nTotal estimated missing candles from unusual gaps: {total_missing_candles:.2f}\n")
         else:
             f.write("No significant unexpected data gaps were found.\n")
-    print(f"📄 Gap analysis report saved to {report_path.name}")
+    logger.info(f"Gap analysis report saved to {report_path.name}")
 
 
 def _plot_price_with_gaps(output_dir: Path, df: pd.DataFrame, missing_rows: pd.DataFrame, instrument: str,
@@ -99,7 +103,7 @@ def _plot_price_with_gaps(output_dir: Path, df: pd.DataFrame, missing_rows: pd.D
     plot_path = output_dir / "price_with_gaps_plot.png"
     plt.savefig(plot_path)
     plt.close()
-    print(f"📊 Price plot saved to {plot_path.name}")
+    logger.info(f"Price plot saved to {plot_path.name}")
 
 
 def _plot_volume_distribution(output_dir: Path, df: pd.DataFrame, instrument: str, granularity_minutes: float):
@@ -120,4 +124,4 @@ def _plot_volume_distribution(output_dir: Path, df: pd.DataFrame, instrument: st
             plot_path = output_dir / "volume_distribution_plot.png"
             plt.savefig(plot_path)
             plt.close()
-            print(f"📊 Volume histogram saved to {plot_path.name}")
+            logger.info(f"Volume histogram saved to {plot_path.name}")

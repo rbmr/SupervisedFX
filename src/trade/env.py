@@ -8,6 +8,8 @@ from gymnasium import spaces
 from src.constants import Price, Account, COMMISSION_PCT
 from src.trade.trade import trade
 
+logger = logging.getLogger(__name__)
+
 class TradeEnv(gym.Env):
 
     def __init__(self,
@@ -51,6 +53,7 @@ class TradeEnv(gym.Env):
         self.account[self.t, Account.CLOSE_EQUITY] = self.initial_capital
         self.account[self.t, Account.CLOSE_EXPOSURE] = 0.0
         self.account[self.t, Account.CLOSE_PVAL] = 0.0
+        self.account[self.t, Account.CLOSE_LEQUITY] = 0.0
         self.observation_space = spaces.Box(-np.inf, np.inf, shape=(self.features.shape[1] + 1,), dtype=np.float64)
 
         # Action space
@@ -102,7 +105,7 @@ class TradeEnv(gym.Env):
         self.account[self.t, Account.CLOSE_LEQUITY] = log_equity
 
         # Determine reward
-        reward = log_equity - self.prices[self.t-1, Account.CLOSE_LEQUITY]
+        reward = log_equity - self.account[self.t-1, Account.CLOSE_LEQUITY]
 
         # Determine done
         terminated = equity.item() <= 0
@@ -112,10 +115,10 @@ class TradeEnv(gym.Env):
         info = {}
         if terminated or truncated:
             # Episode is ending, put relevant final info here
-            number_of_steps = self.t + 1
-            prices = self.prices[:number_of_steps]
-            account = self.account[:number_of_steps]
-            features = self.features[:number_of_steps]
+            end = self.t + 1
+            prices = self.prices[self.t_start:end]
+            account = self.account[self.t_start:end]
+            features = self.features[self.t_start:end]
 
             prices_df = pd.DataFrame(prices, columns=Price.names)
             account_df = pd.DataFrame(account, columns=Account.names)
@@ -125,6 +128,6 @@ class TradeEnv(gym.Env):
             info['account'] = account_df
             info['features'] = features_df
 
-            logging.info(f"Finished with equity {equity}")
+            logger.info(f"Finished with equity {equity}")
 
         return self._get_obs(), reward.item(), terminated, truncated, info
