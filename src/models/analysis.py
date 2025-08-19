@@ -1,4 +1,3 @@
-import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List
@@ -45,26 +44,21 @@ def drop_and_return_numpy(df: pd.DataFrame, cols: list[str]) -> list[np.ndarray]
         df.drop(columns=col, inplace=True)
     return arrays
 
-def analyse_individual_run(results_file: Path, model_name: str):
+def analyze_individual_run(results_file: Path, model_name: str):
     """
     Analyzes a data.csv file and outputs resulting files in the same directory.
     """
     if not results_file.is_file():
         raise FileNotFoundError(results_file)
-    if results_file.suffix != ".csv":
-        raise ValueError(f"results_file must have .csv extension, was {results_file.suffix}")
     output_dir = results_file.parent
     info_file = output_dir / "info.json"
+
     # Skip if the final info file already exists.
     if info_file.exists():
         return
 
     # Load results
-    all_columns = pd.read_csv(results_file, nrows=0).columns.tolist()
-    dtypes = {col: 'float32' for col in all_columns}
-    dtypes["step"] = 'int32'
-    dtypes["done"] = 'boolean'
-    df = pd.read_csv(results_file, dtype=dtypes)
+    df = pd.read_parquet(results_file)
 
     # Analyze results
     logging.info(f"Analyzing {results_file}")
@@ -86,16 +80,14 @@ def analyse_individual_run(results_file: Path, model_name: str):
 
     # Extract arrays that will be used
     np_columns = drop_and_return_numpy(df,[
-        'info.market_data.open_bid',
-        'info.market_data.open_ask',
-        'info.agent_data.eot_equity',
-        'info.market_data.time_ns',
+        'open_bid',
+        'open_ask',
+        'close_equity',
         'action',
         'reward'
     ])
-    open_bid, open_ask, eot_equity, dates, actions, rewards = np_columns
+    open_bid, open_ask, eot_equity, actions, rewards = np_columns
     rewards = np.nan_to_num(rewards, nan=0.0)
-    del df # df is no longer necessary
 
     # Plot market data
     plt.figure(figsize=(12, 6))
@@ -128,14 +120,14 @@ def analyse_individual_run(results_file: Path, model_name: str):
         sharpe_ratio = 0.0
 
     # Annualize sharpe ratio
-    min_date = dates.min()
-    max_date = dates.max()
-    date_range_ns = max_date - min_date
-    amount_years = date_range_ns / (365.25 * 24 * 60 * 60 * 1e9)
-
-    if amount_years > 0:
-        N = equity_returns.shape[0] / amount_years
-        sharpe_ratio = sharpe_ratio * np.sqrt(N)
+    # min_date = dates.min()
+    # max_date = dates.max()
+    # date_range_ns = max_date - min_date
+    # amount_years = date_range_ns / (365.25 * 24 * 60 * 60 * 1e9)
+    #
+    # if amount_years > 0:
+    #     N = equity_returns.shape[0] / amount_years
+    #     sharpe_ratio = sharpe_ratio * np.sqrt(N)
 
     # Vectorized drawdown calculation
     cummax_equity = np.maximum.accumulate(eot_equity)
@@ -252,7 +244,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
 
         ######### END TRADE RETURNS #############
 
-        trade_durations = (dates[trade_ends-1] - dates[trade_starts]) / (1e9 * 60 * 60) # in hours
+        # trade_durations = (dates[trade_ends-1] - dates[trade_starts]) / (1e9 * 60 * 60) # in hours
 
         winning_trades = trade_returns > 0
         losing_trades = trade_returns < 0
@@ -266,7 +258,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
         average_trade_return = np.mean(trade_returns)
         # Calculate percentage return based on the equity at the start of each trade
         average_trade_return_pct = np.mean(trade_returns / eot_equity[trade_starts])
-        average_trade_duration_hours = np.mean(trade_durations)
+        # average_trade_duration_hours = np.mean(trade_durations)
         total_winning_rate = np.sum(winning_trades) / num_trades if num_trades > 0 else 0
 
     else:
@@ -277,7 +269,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
         total_trades_returns = 0.0
         average_trade_return = 0.0
         average_trade_return_pct = 0.0
-        average_trade_duration_hours = 0.0
+        # average_trade_duration_hours = 0.0
         max_winning_streak = 0
         max_losing_streak = 0
         total_winning_rate = 0.0
@@ -345,7 +337,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
         "total_trades_returns": total_trades_returns,
         "average_trade_return": average_trade_return,
         "average_trade_return_pct": average_trade_return_pct,
-        "average_trade_duration_hours": average_trade_duration_hours,
+        # "average_trade_duration_hours": average_trade_duration_hours,
         "max_winning_streak": max_winning_streak,
         "max_losing_streak": max_losing_streak,
         "total_winning_rate": total_winning_rate,
@@ -378,7 +370,7 @@ def analyse_individual_run(results_file: Path, model_name: str):
         ('Total Trades Returns', info['total_trades_returns']),
         ('Average Trade Return', info['average_trade_return']),
         ('Average Trade Return (%)', info['average_trade_return_pct']),
-        ('Average Trade Duration (hours)', info['average_trade_duration_hours']),
+        # ('Average Trade Duration (hours)', info['average_trade_duration_hours']),
         ('Max Winning Streak', info['max_winning_streak']),
         ('Max Losing Streak', info['max_losing_streak']),
         ('Total Winning Rate (%)', info['total_winning_rate'] * 100),

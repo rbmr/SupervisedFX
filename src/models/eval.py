@@ -1,19 +1,29 @@
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from src.constants import Timeframe, RUNS_DIR
 from src.data.models import CandleData
+from src.models.analysis import analyze_individual_run
 from src.models.models import CustomModel, PerfectModel, RandomModel
 from src.trade.env import TradeEnv
 
+def run_and_analyze(model: CustomModel, env: TradeEnv):
+
+    model_name = model.__class__.__name__
+    dt_str = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_dir = RUNS_DIR / f"{dt_str} {model_name}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    run_log = run_dir / "log.parquet"
+    run(model, env, run_log)
+    analyze_individual_run(run_log, model_name)
+
 def run(model: CustomModel, env: TradeEnv, path: Path | None = None):
     if path is not None:
-        if path.suffix != ".csv":
-            raise ValueError(f"{path} is not a CSV file")
         path.parent.mkdir(parents=True, exist_ok=True)
 
     done = False
@@ -26,26 +36,29 @@ def run(model: CustomModel, env: TradeEnv, path: Path | None = None):
         "done": False,
     }]
 
-    while not done:
-        action = model.predict(obs)
+    total_steps = env.episode_len - env.t_start - 1
+    with tqdm(total=total_steps, desc="Running episode") as pbar:
+        while not done:
+            action = model.predict(obs)
 
-        # Take the action and see what happens
-        observation, reward, terminated, truncated, info = env.step(action)
-        done = terminated or truncated
+            observation, reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
+            episode_log.append({
+                "step": env.t,
+                "action": action.item(),
+                "reward": reward,
+                "done": done,
+            })
 
-        episode_log.append({
-            "step": env.t,
-            "action": action.item(),
-            "reward": reward,
-            "done": done,
-        })
+            pbar.update(1)
+
 
     log_df = pd.DataFrame(episode_log)
     all_dfs = [log_df] + [df for df in info.values() if isinstance(df, pd.DataFrame)]
     final_df = pd.concat(all_dfs, axis=1)
 
     if path is not None:
-        final_df.to_csv(path, index=False)
+        final_df.to_parquet(path, index=False)
     return final_df
 
 if __name__ == "__main__":
@@ -67,7 +80,6 @@ if __name__ == "__main__":
         initial_capital = 1.0,
         n_actions = 0
     )
-    perfect_model = PerfectModel(env)
-    run(perfect_model, env, RUNS_DIR / "perfect.csv")
-    random_model = RandomModel(env)
-    run(random_model, env, RUNS_DIR / "random.csv")
+
+    run_and_analyze(PerfectModel(env), env)
+    run_and_analyze(RandomModel(env), env)

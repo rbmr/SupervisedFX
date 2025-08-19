@@ -44,8 +44,6 @@ class DukascopyDownloader:
         divisor = 1000.0 if 'JPY' in symbol.upper() else 100000.0
         df['ask'] = df['ask'] / divisor
         df['bid'] = df['bid'] / divisor
-        df['ask_vol'] = df['ask_vol']
-        df['bid_vol'] = df['bid_vol']
 
         return df[['time', 'bid', 'ask', 'bid_vol', 'ask_vol']]
 
