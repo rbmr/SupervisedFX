@@ -34,7 +34,7 @@ def get_features() -> list[str]:
 
 if __name__ == "__main__":
 
-    # setup_logging()
+    setup_logging()
 
     candle_data = CandleData.load(
         "DUKASCOPY",
