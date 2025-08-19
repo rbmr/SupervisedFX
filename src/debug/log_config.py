@@ -23,27 +23,6 @@ class TqdmLoggingHandler(logging.StreamHandler):
         except:
             self.handleError(record)
 
-def _is_console_logging_handler(handler):
-    return (isinstance(handler, logging.StreamHandler) and handler.stream in {sys.stdout, sys.stderr})
-
-def _get_first_console_handler(handlers):
-    for handler in handlers:
-        if _is_console_logging_handler(handler):
-            return handler
-    return None
-
-def setup_tqdm_logging():
-    """Configures the root logger to log using tqdm."""
-    log = logging.getLogger()
-    console_handler = _get_first_console_handler(log.handlers)
-    if console_handler is None:
-        return
-    tqdm_handler = TqdmLoggingHandler()
-    tqdm_handler.setFormatter(console_handler.formatter)
-    tqdm_handler.setLevel(console_handler.level)
-    log.removeHandler(console_handler)
-    log.addHandler(tqdm_handler)
-
 def setup_logging():
     """Sets up the logging configuration for the entire application."""
     LOGGING_CONFIG = {
