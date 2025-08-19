@@ -201,7 +201,7 @@ class DPSLModel(CustomModel):
         window_train_indices = self.train_indices[train_start:train_end] - start_idx
 
         # Calculate the DP table for the current lookback window
-        self.dp_table = DPTable.get(
+        self.dp_table = DPTable.compute(
             prices=window_prices,
             commission_pct=self.env.commission_pct,
             n_actions=self.n_actions,
