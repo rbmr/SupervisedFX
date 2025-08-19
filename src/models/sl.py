@@ -238,7 +238,7 @@ class DPSLModel(CustomModel):
             train_generator,
             validation_data=val_generator,
             epochs=256, # should be high, we should stop because of early_stopping
-            callbacks=[early_stopping, TQDMProgressBar(desc="Training model")],
+            callbacks=[early_stopping, TQDMProgressBar(desc="Training model", colour="blue", leave=False)],
             verbose=0
         )
 

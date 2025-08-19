@@ -1,7 +1,4 @@
-import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-import pandas as pd
+from src.data.main import get_data
 
 from datetime import date
 
@@ -36,12 +33,12 @@ if __name__ == "__main__":
 
     setup_logging()
 
-    candle_data = CandleData.load(
+    candle_data = get_data(
         "DUKASCOPY",
         "EURUSD",
         Timeframe.H1,
-        date(2020,1,1),
-        date(2025,1,1)
+        date(2020, 1, 1),
+        date(2025, 1, 1)
     )
     prices = candle_data.to_array()
 
@@ -55,8 +52,6 @@ if __name__ == "__main__":
     )
     features = features[crop_idx:]
     prices = prices[crop_idx:]
-
-    print(pd.DataFrame(features, columns=feature_names).head())
 
     lookback = 16_384
 
