@@ -1,9 +1,10 @@
+print("Starting imports...")
+
 from src.data.main import get_data
 
 from datetime import date
 
 from src.constants import Timeframe
-from src.data.models import CandleData
 from src.features.feature_engineer import FeatureEngineer
 from src.models.eval import run_and_analyze
 from src.models.models import PerfectModel, RandomModel
@@ -11,6 +12,9 @@ from src.models.sl import DPSLModel
 from src.scripts import find_first_valid_row
 from src.trade.env import TradeEnv
 from src.debug.log_config import setup_logging
+
+print("Finished imports.")
+
 
 def get_features() -> list[str]:
     time_features = ["sin_24h", "cos_24h", "cos_7d", "sin_7d"]
