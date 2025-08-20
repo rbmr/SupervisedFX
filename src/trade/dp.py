@@ -114,7 +114,7 @@ class DPTable:
         prev_pval = prev_exposure # p_{t-1,c}
 
         v_table = np.zeros((n_timesteps+1, n_exposures), dtype=np.float64)
-        pi_table = np.zeros((n_timesteps, n_exposures), dtype=np.int8)
+        pi_table = np.zeros((n_timesteps, n_exposures), dtype=np.uint8)
 
         for t in trange(n_timesteps-1, -1, -1, colour="green", desc="Computing DPTable", leave=False):
 
