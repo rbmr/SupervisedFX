@@ -37,7 +37,7 @@ def run(model: CustomModel, env: TradeEnv, path: Path | None = None):
         while not done:
             action = model.predict(obs)
 
-            observation, reward, terminated, truncated, info = env.step(action)
+            obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             episode_log.append({
                 "step": env.t,
